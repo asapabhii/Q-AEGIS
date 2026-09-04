@@ -1,0 +1,24 @@
+# Code owners for Q-AEGIS Shield.
+#
+# Mirrors the required-reviewer rule in AGENTS.md and WORK_DIVISION.md: the three
+# highest-consequence modules require Udhav's review regardless of who authored
+# the change, and the frontend is Sukhmani's.
+#
+# NOTE ON ENFORCEMENT: this file only takes effect once "Require review from Code
+# Owners" is enabled in branch protection, AND every listed owner has write
+# access to the repository. An owner without write access is silently ignored by
+# GitHub rather than blocking the merge. As of the last check, UdhavFr has write
+# access but sukhideas is not yet a collaborator, so the frontend/ line below
+# would not enforce. See docs/decisions.md for the deferral rationale.
+
+# Crypto engine, SPEC.md 3.7 and 3.9, PRD FR-6 and FR-8.
+backend/app/crypto/    @UdhavFr
+
+# Policy engine, SPEC.md 3.6, PRD FR-5. Highest-consequence module in the system.
+backend/app/policy/    @UdhavFr
+
+# Tamper-evident audit log, SPEC.md 3.8, PRD FR-7.
+backend/app/audit/     @UdhavFr
+
+# Frontend, SPEC.md 3.13, PRD FR-12 through FR-16.
+frontend/              @sukhideas
