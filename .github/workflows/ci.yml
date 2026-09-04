@@ -1,0 +1,105 @@
+name: CI
+
+# The two job IDs below, `lint-test` and `build`, are the exact strings
+# configured as required status checks on the protected `main` branch. GitHub
+# derives a check's context from the job's display name, so adding a `name:`
+# key to either job (for example `name: Lint and test`) would change the
+# reported context and the branch protection rule would wait forever on a check
+# that no longer reports. Rename these only alongside the corresponding
+# `gh api repos/:owner/:repo/branches/main/protection` update.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Least privilege. Neither job writes to the repository, publishes a package,
+# or comments on a pull request.
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the previous run, so a stale run does
+# not hold a required check.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in step with backend/Dockerfile's base image. A mismatch means CI
+  # tests one interpreter and the shipped image runs another.
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Formatting and linting run before the tests, and each is its own step,
+      # so a failure names the tool that failed instead of surfacing as one
+      # opaque red job.
+      - name: Check formatting (black)
+        run: black --check .
+
+      - name: Lint (flake8)
+        run: flake8 .
+
+      # The 70% floor is a gate, not a report: --cov-fail-under makes the job
+      # fail below it. See AGENTS.md, coverage is enforced, not advisory.
+      - name: Test with coverage gate
+        run: pytest --cov=app --cov-fail-under=70
+
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build --tag q-aegis-backend:ci backend
+
+      # A build that produces an image which cannot serve a request is not a
+      # passing build. This starts the image and polls the real health endpoint,
+      # which also verifies the unprivileged user in the Dockerfile can bind
+      # and serve.
+      - name: Smoke-test the image
+        run: |
+          docker run --detach --name qaegis-ci \
+            --publish 127.0.0.1:8000:8000 q-aegis-backend:ci
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+                 http://127.0.0.1:8000/api/v1/health; then
+              echo "health endpoint responded after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::health endpoint did not respond within 30s"
+          docker logs qaegis-ci
+          exit 1
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs qaegis-ci || true
+
+      - name: Clean up
+        if: always()
+        run: docker rm --force qaegis-ci || true
