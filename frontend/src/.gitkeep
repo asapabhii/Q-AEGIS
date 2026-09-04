@@ -1,0 +1,9 @@
+# Placeholder so the SPEC.md Section 0 bootstrap structure survives in git,
+# which does not track empty directories.
+#
+# Replaced when the frontend is scaffolded (SPEC.md 3.13, PRD.md FR-12 to
+# FR-16, owner Sukhmani) via:
+#   cd frontend && npx create-next-app@latest . --typescript --tailwind --app
+#
+# TypeScript only, no plain .js files. Tailwind for styling. API calls
+# centralized in frontend/src/lib/api/, no inline fetch() in components.

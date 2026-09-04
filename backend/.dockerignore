@@ -1,0 +1,25 @@
+# Keep the build context small and keep secrets and local state out of it.
+
+.env
+.env.*
+!.env.example
+
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+
+# Tests, lint config, and dev dependencies are not part of the runtime image.
+tests/
+requirements-dev.txt
+.flake8
+
+.git/
+.gitignore
+Dockerfile
+.dockerignore
