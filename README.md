@@ -36,7 +36,7 @@ Full environment setup detail: `SPEC.md` Section 8.
 
 ## Current phase
 
-See `SPEC.md` Section 7 for the full build order. Current phase: contextual risk engine, policy engine, and replacing the crypto-selector stub with real trust-score-driven selection.
+See `SPEC.md` Section 7 for the full build order. Current phase: Phase 1, repository scaffolding, the classifier stub, the core audit log functions, and initial CI.
 
 ## Contributing
 

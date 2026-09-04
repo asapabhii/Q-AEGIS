@@ -1,0 +1,50 @@
+[tool.black]
+line-length = 88
+target-version = ["py313"]
+extend-exclude = '''
+/(
+    venv
+  | \.venv
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Puts the backend directory on sys.path so `import app` resolves without
+# installing the package or setting PYTHONPATH in every environment.
+pythonpath = ["."]
+addopts = "-q --strict-markers --strict-config"
+# Warnings are errors, so a deprecation in our own code surfaces at the commit
+# that introduces it rather than at the version bump that removes the feature.
+# Exemptions below are for warnings raised inside third-party code that we
+# cannot fix from here. Keep each one narrow and explain it, an over-broad
+# ignore defeats the point of the "error" default. Re-check these on any
+# dependency bump; they should be removable, not permanent.
+filterwarnings = [
+    "error",
+    # starlette 1.6.0's test client imports the deprecated
+    # `anyio.abc.BlockingPortal` alias at module import time. Triggered by
+    # starlette itself, not by app code.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    "venv/*",
+    ".venv/*",
+    "tests/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# 70% floor per AGENTS.md and SPEC.md Section 4. Enforced in CI via
+# --cov-fail-under=70 as well, so the gate applies even if this file is
+# bypassed by a direct pytest invocation with different arguments.
+fail_under = 70
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

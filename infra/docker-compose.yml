@@ -1,0 +1,164 @@
+# Local development stack for Q-AEGIS Shield: Postgres, Redis, Neo4j.
+#
+# Run from this directory, with no extra flags:
+#
+#     docker compose up -d
+#     docker compose ps
+#     docker compose down
+#
+# Copy ../.env.example to ../.env and fill in local values first.
+#
+# Credentials reach the containers via each service's `env_file: ../.env`
+# rather than through `${VAR}` interpolation in this file. That distinction
+# matters in practice: interpolation is resolved by the compose CLI against the
+# .env in ITS OWN directory, so an interpolating compose file here would need
+# `--env-file ../.env` on every single invocation, and forgetting it on a
+# read-only command like `docker compose ps` fails with a confusing "required
+# variable is missing" error. `env_file` is resolved relative to this file, so
+# it works from any working directory and on every subcommand.
+#
+# Ports are hardcoded to loopback rather than parameterized, for the same
+# reason: a `${PORT}` here would reintroduce the interpolation dependency.
+# Edit them directly if one collides with something already running.
+#
+# Tradeoff accepted for local development: `env_file` hands each container the
+# entire .env, so the Postgres container can also read the Redis and Neo4j
+# passwords. Least privilege would give each service only its own credential
+# via a per-service env file. That is acceptable here because all three are
+# throwaway local values on a single developer machine, and no deployment is in
+# scope this phase (PRD.md NG4). Split them per service before this file is
+# adapted for anything shared or remote.
+#
+# That same behavior has one sharp edge worth knowing about: the neo4j image
+# maps every NEO4J_-prefixed variable to a server config setting and strict-
+# validates it, so an unrelated NEO4J_URI or NEO4J_USER in .env reaches this
+# container and crash-loops it with "Unrecognized setting". Application-side
+# Neo4j values are therefore QAEGIS_-prefixed in .env. See the warning in
+# .env.example before adding anything under the NEO4J_ prefix.
+#
+# ---------------------------------------------------------------------------
+# OUTSTANDING, and deliberately not papered over: AGENTS.md requires TLS in
+# transit for every service, including these local ones. These three services
+# currently speak plaintext on the loopback interface. Closing that gap needs a
+# certificate authority and per-service key material, and keys must never be
+# committed (AGENTS.md), so it requires a generation step and a documented
+# local trust process rather than a change to this file alone. Treat this as a
+# known open item, not as a satisfied requirement.
+#
+# Partial mitigation in place: every port below is published to 127.0.0.1 only,
+# so no service is reachable from the local network even though the traffic is
+# unencrypted. This reduces exposure; it does not satisfy the requirement.
+# ---------------------------------------------------------------------------
+#
+# The backend itself is not a service here yet. It connects to none of these
+# stores at Phase 1, and adding it would imply a wiring that does not exist.
+# It joins this file in the pull request that first opens a connection.
+
+name: q-aegis-shield
+
+services:
+  postgres:
+    # Relational store for the twelve core tables in SPEC.md Section 5.
+    # Plain postgres, not the pgvector image: the vector store choice is still
+    # open (SPEC.md 2.4) and nothing needs embeddings until SPEC.md 3.12.
+    image: postgres:17-alpine
+    container_name: qaegis-postgres
+    restart: unless-stopped
+    # Supplies POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD. The image refuses
+    # to initialize without a password, so a missing value fails loudly here
+    # rather than starting an unauthenticated database.
+    env_file:
+      - ../.env
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    # Event bus, SPEC.md 3.1. Redis Streams is the starting choice per
+    # SPEC.md 2.3, with Kafka held back until a concrete scale need appears.
+    image: redis:7-alpine
+    container_name: qaegis-redis
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    # Wrapped in `sh -c` so REDIS_PASSWORD is expanded inside the container
+    # from env_file, instead of by the compose CLI. `$$` escapes the dollar so
+    # compose passes it through untouched.
+    #
+    # The `:?` guard is a shell parameter expansion, not a compose feature: if
+    # REDIS_PASSWORD is empty or unset the container exits with that message.
+    # Without it, `--requirepass ""` would start Redis with authentication
+    # silently disabled, which is the dangerous failure, not a loud one.
+    #
+    # appendonly so an event stream survives a restart; an in-memory-only bus
+    # would lose events on every container bounce and make local behavior
+    # diverge from the durability the event bus is meant to provide.
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server
+        --requirepass "$${REDIS_PASSWORD:?REDIS_PASSWORD is not set in .env}"
+        --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  neo4j:
+    # Knowledge graph, SPEC.md 3.11. Kept separate from the relational schema
+    # on purpose: multi-hop relationship queries at depth are a poor fit for
+    # SQL joins.
+    image: neo4j:5-community
+    container_name: qaegis-neo4j
+    restart: unless-stopped
+    # Supplies NEO4J_AUTH (as "neo4j/<password>") and QAEGIS_NEO4J_PASSWORD.
+    # Both live in .env because this image reads NEO4J_AUTH directly, so no
+    # interpolation is needed to assemble it here.
+    env_file:
+      - ../.env
+    environment:
+      # Modest heap and page cache. The default sizing assumes a dedicated
+      # host and will contend with Postgres and the application on a laptop.
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    healthcheck:
+      # Runs a real query rather than checking that the port is open, because
+      # Neo4j accepts connections before it finishes opening the database.
+      #
+      # Reads QAEGIS_NEO4J_PASSWORD, not NEO4J_PASSWORD: this image treats the
+      # NEO4J_ prefix as its server-configuration namespace and warns about
+      # keys it does not recognize.
+      test:
+        - CMD-SHELL
+        - cypher-shell -u neo4j -p "$${QAEGIS_NEO4J_PASSWORD}" "RETURN 1" || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  postgres-data:
+  redis-data:
+  neo4j-data:
+  neo4j-logs:

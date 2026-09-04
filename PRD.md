@@ -156,7 +156,7 @@ A Data Owner or Security Admin can generate an exportable (PDF and CSV) summary 
 
 ## 11. Release phases
 
-Maps directly to `SPEC.md` Section 9's build order. Phase 1 to 2 (already complete): repo scaffolding, FR-1's stub, FR-7's core log functions, initial CI. Phase 3 (current): FR-2, FR-5, and real trust-score-driven FR-6 (replacing the current stub). Phase 4: FR-8, FR-11, FR-10. Phase 5: full FR-3 orchestration, FR-9. Phase 6: full evaluation against Section 8's success metrics.
+Maps directly to `SPEC.md` Section 7's build order. Phase 1 (current): repo scaffolding, FR-1's stub, FR-7's core log functions, initial CI. Phase 2: crypto-selector stub, CI hardening with coverage gate and branch protection. Phase 3: FR-2, FR-5, and real trust-score-driven FR-6 (replacing the stub). Phase 4: FR-8, FR-11, FR-10. Phase 5: full FR-3 orchestration, FR-9. Phase 6: full evaluation against Section 8's success metrics.
 
 ## 12. Requirements traceability
 
