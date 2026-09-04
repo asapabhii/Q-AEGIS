@@ -1,0 +1,22 @@
+[flake8]
+# Match black's line length rather than the 79-column default, otherwise
+# black-formatted code fails lint and the two tools fight each other.
+max-line-length = 88
+
+# E203 (whitespace before ':') and W503 (line break before binary operator) are
+# both emitted by flake8 on code that black formats correctly. Black's output is
+# the reference, so these two are disabled rather than worked around.
+extend-ignore = E203, W503
+
+exclude =
+    .git,
+    __pycache__,
+    venv,
+    .venv,
+    .pytest_cache,
+    build,
+    dist
+
+# Assertions are the point of a test file.
+per-file-ignores =
+    tests/*: S101
