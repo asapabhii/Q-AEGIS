@@ -6,6 +6,10 @@ This file is read automatically by every agent working in this repository (Antig
 
 Q-AEGIS Shield: a platform that classifies data sensitivity, continuously scores risk from five independent AI agents, combines them into one continuous Trust Score, gates that score through a deterministic policy layer capable of overriding the AI outright, then selects AES-256, hybrid (X25519MLKEM768), or full post-quantum encryption accordingly. Every decision anywhere in that chain writes to a tamper-evident, append-only audit log.
 
+## Git and version control
+
+Never run `git commit`, `git push`, `git merge`, or `gh pr merge` autonomously. Always stop and present the exact command(s) for a human to review and run themselves, with a short explanation of what each does. This applies to every session, regardless of who is driving.
+
 ## Repository layout
 
 ```
@@ -16,7 +20,7 @@ infra/           # docker-compose, deployment config
 docs/            # architecture-diagram.svg, er-diagram.svg, decisions.md
 ```
 
-Each `backend/app/` subpackage corresponds to exactly one numbered module in `SPEC.md` Section 5. Do not merge modules together for convenience, the separation is structural, not cosmetic.
+Each `backend/app/` subpackage corresponds to exactly one numbered module in `SPEC.md` Section 3. Do not merge modules together for convenience, the separation is structural, not cosmetic.
 
 ## Build, test, and run
 
@@ -41,9 +45,9 @@ Read this before starting work on any module. If you are an agent acting on beha
 
 | Module (SPEC.md section) | Owner |
 |---|---|
-| Repo/CI/CD, integration, Trust Engine (5.5), multi-agent orchestration (5.4) | Abhinav |
-| Policy engine (5.6), crypto engine (5.7), audit log (5.8), crypto-shredding (5.9), migration scheduler (5.10) | Udhav |
-| Classifier (5.2), frontend (5.13), documentation, test authorship across all modules | Sukhmani |
+| Repo/CI/CD, integration, Trust Engine (3.5), multi-agent orchestration (3.4) | Abhinav |
+| Policy engine (3.6), crypto engine (3.7), audit log (3.8), crypto-shredding (3.9), migration scheduler (3.10) | Udhav |
+| Classifier (3.2), frontend (3.13), documentation, test authorship across all modules | Sukhmani |
 
 Full detail: `WORK_DIVISION.md`.
 
@@ -55,7 +59,7 @@ Frontend: TypeScript only, no plain `.js` files. Tailwind for styling. Centraliz
 
 ## Testing requirements
 
-70% coverage floor on new code, enforced in CI, not a suggestion. The policy engine (5.6) requires one test per rule type and per condition operator, not a single happy-path test. The audit log (5.8) requires explicit tampered-entry and odd-count-of-leaves test cases, not just a clean-chain verification test. Any PR touching a module without a corresponding test update should be treated as incomplete.
+70% coverage floor on new code, enforced in CI, not a suggestion. The policy engine (3.6) requires one test per rule type and per condition operator, not a single happy-path test. The audit log (3.8) requires explicit tampered-entry and odd-count-of-leaves test cases, not just a clean-chain verification test. Any PR touching a module without a corresponding test update should be treated as incomplete.
 
 ## Security rules, apply to every task, no exceptions
 
@@ -66,11 +70,11 @@ Frontend: TypeScript only, no plain `.js` files. Tailwind for styling. Centraliz
 - `audit_log` is append-only. Never write UPDATE or DELETE against it, in application code or migrations, this is additionally enforced by a database trigger, do not work around it.
 - Anything in `backend/app/crypto/` must state plainly, in every docstring, that liboqs is not independently audited. Do not claim audited-grade or FIPS-certified guarantees the library doesn't back up.
 - A stub is labeled a stub in its code, its docstring, and its tests. Never let placeholder logic pass as finished work.
-- Confidence-based defaults resolve toward more protection, never less, in both the classifier (5.2) and the Trust Engine (5.5).
+- Confidence-based defaults resolve toward more protection, never less, in both the classifier (3.2) and the Trust Engine (3.5).
 
 ## Encryption reference, do not guess these values
 
-Full parameter tables and rationale: `SPEC.md` Section 13. Summary for quick reference:
+Full parameter tables and rationale: `SPEC.md` Section 6. Summary for quick reference:
 
 - **AES-256**: AES-256-GCM, classical baseline.
 - **Hybrid**: `X25519MLKEM768` exactly, the named group already deployed in TLS 1.3 by Chrome, Edge, and Cloudflare. Do not invent a different pairing.
@@ -83,8 +87,8 @@ Not building this phase: plugin marketplace, incident-cost simulator, live third
 
 ## Decisions intentionally left open
 
-Three tool choices are not pre-decided, and should not be defaulted to silently: Cedar vs OPA (5.6), Redis Streams vs Kafka (5.1), pgvector vs Qdrant (5.12). Evaluation criteria for each: `SPEC.md` Section 11. Whoever makes the call logs it, with reasoning, to `docs/decisions.md`.
+Three tool choices are not pre-decided, and should not be defaulted to silently: Cedar vs OPA (3.6), Redis Streams vs Kafka (3.1), pgvector vs Qdrant (3.12). Evaluation criteria for each: `SPEC.md` Section 2. Whoever makes the call logs it, with reasoning, to `docs/decisions.md`.
 
 ## Commit and PR conventions
 
-Commit messages reference the SPEC.md section number being implemented, for example `feat(5.6): add rule evaluation for policy engine`. PRs touching `backend/app/crypto/`, `backend/app/policy/`, or `backend/app/audit/` require review from Udhav regardless of who authored them, these three modules carry the highest consequence for a mistake.
+Commit messages reference the SPEC.md section number being implemented, for example `feat(3.6): add rule evaluation for policy engine`. PRs touching `backend/app/crypto/`, `backend/app/policy/`, or `backend/app/audit/` require review from Udhav regardless of who authored them, these three modules carry the highest consequence for a mistake.

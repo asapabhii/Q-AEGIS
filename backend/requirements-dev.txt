@@ -1,0 +1,19 @@
+# Development and CI dependencies. Installed on top of requirements.txt.
+#
+# Kept separate so the runtime Docker image does not ship a test runner, a
+# formatter, and a linter.
+
+-r requirements.txt
+
+pytest==9.1.1
+pytest-cov==7.1.0
+black==26.5.1
+flake8==7.3.0
+
+# Required by fastapi.testclient for the API tests.
+#
+# httpx2, not httpx. Starlette 1.6 emits a StarletteDeprecationWarning when its
+# test client is used with httpx 0.x, and pyproject.toml turns warnings into
+# errors, so the older package fails the suite at import time rather than
+# quietly working for now.
+httpx2==2.12.0
