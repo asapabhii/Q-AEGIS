@@ -1,0 +1,15 @@
+# Normalize line endings to LF in the repository.
+# Development happens on Windows and macOS, CI runs on Linux, and `black --check`
+# plus shell scripts in the Docker build are sensitive to CRLF. Storing LF keeps
+# a local checkout and a CI checkout byte-identical.
+* text=auto eol=lf
+
+# Binary assets, never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.woff binary
+*.woff2 binary
