@@ -6,7 +6,7 @@ Routers are collected here rather than registered ad hoc in
 
 from fastapi import APIRouter
 
-from app.api.routes import classify, health
+from app.api.routes import classify, documents, health
 
 #: Version prefix for the whole API. Present from the first endpoint so that a
 #: future breaking change can ship as ``/v2`` instead of requiring every client
@@ -15,4 +15,5 @@ API_V1_PREFIX = "/api/v1"
 
 api_router = APIRouter(prefix=API_V1_PREFIX)
 api_router.include_router(health.router)
+api_router.include_router(documents.router)
 api_router.include_router(classify.router)
