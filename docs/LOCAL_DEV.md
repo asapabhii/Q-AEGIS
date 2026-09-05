@@ -289,9 +289,9 @@ project using TypeScript and Tailwind CSS in `frontend/`. It includes:
 - A Vitest unit test suite (`frontend/src/lib/api/client.test.ts`) validating API
   client request construction, header injection, and error formatting.
 - A `frontend` job in `.github/workflows/ci.yml` running `npm ci`, `npm run lint`,
-  `npm test`, and `npm run build` on every push and PR. (Note: this job is not yet
-  wired as a required branch protection check; Abhinav is adding it separately once
-  runs are established).
+  `npm test`, and `npm run build` on pull requests targeting `main` and pushes to
+  `main`. (Note: this job is not yet wired as a required branch protection check;
+  Abhinav is adding it separately once runs are established).
 
 ### Development commands
 
@@ -314,9 +314,11 @@ The frontend reads a single environment variable:
     to IPv6 (`::1`) first while local services and containers publish on IPv4 only.
     This leads to connection hangs rather than clean, fast connections. Always use
     explicit `127.0.0.1`.
-  - To override for custom configurations, set `NEXT_PUBLIC_API_URL` in your local
-    `.env` file or shell. Remember that `.env` is gitignored and must never be
-    committed (`AGENTS.md`).
+  - To override for custom configurations, set `NEXT_PUBLIC_API_URL` in
+    `frontend/.env.local` or your shell. Next.js only reads environment files
+    from `frontend/`, so the root `.env` used by Docker Compose and the backend
+    will not be picked up. `frontend/.env.local` is gitignored by `frontend/.gitignore`
+    (`.env*`) and must never be committed (`AGENTS.md`).
 
 Constraints from `AGENTS.md`: TypeScript only, no plain `.js` files; Tailwind for
 styling; every API call goes through `frontend/src/lib/api/`, no inline `fetch()`

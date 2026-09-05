@@ -26,8 +26,8 @@ The frontend reads one environment variable:
 
 - `NEXT_PUBLIC_API_URL`: The base URL of the backend API.
   - **Default**: `http://127.0.0.1:8000`
-  - **Note on `127.0.0.1` vs `localhost`**: Always use `127.0.0.1`. On Windows, `localhost` resolves to IPv6 (`::1`) first while local services and containers bind on IPv4, resulting in timeouts or connection hangs rather than clean, fast connections.
-  - **Security**: Do not commit real endpoints, credentials, or keys. Local overrides belong in your gitignored `.env` file (see `docs/LOCAL_DEV.md`).
+  - **Why `127.0.0.1` rather than `localhost`**: Always use `127.0.0.1`. On Windows, `localhost` resolves to IPv6 (`::1`) first while local services and containers bind on IPv4, resulting in timeouts or connection hangs rather than clean, fast connections.
+  - **Security & Overrides**: Do not commit real endpoints, credentials, or keys. Local overrides belong in `frontend/.env.local` (covered by `frontend/.gitignore` via `.env*`), as Next.js only reads environment files from `frontend/` and ignores the root `.env` (see `docs/LOCAL_DEV.md`).
 
 ## Architecture Constraints (AGENTS.md)
 
