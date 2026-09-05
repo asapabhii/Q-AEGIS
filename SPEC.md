@@ -41,9 +41,13 @@ Side modules feeding the Trust Score computation: Knowledge Graph (attack-path r
 
 AutoGen is in maintenance mode as of 2026; Microsoft's own documentation redirects new users to Microsoft Agent Framework. LangGraph is the current production-appropriate choice: explicit state graph, durable execution, built-in checkpointing, and native human-in-the-loop support, all four of which this system genuinely needs (checkpointing so a single agent timeout doesn't corrupt an assessment, human-in-the-loop for the manual override workflow specifically). CrewAI is faster to prototype with but does not offer the same checkpointing guarantees an auditable pipeline requires. Build Sections 5.4 and 5.5 on LangGraph.
 
-### 2.2 Policy engine: Cedar vs OPA, decided at implementation time
+### 2.2 Policy engine: decided, OPA with Rego
 
-OPA's commercial backer Styra had its core team acquired by Apple in August 2025; OPA itself remains CNCF-governed and actively used, but its commercial tooling ecosystem is less settled than it was. Independent benchmarking has found OPA's Rego language error-prone and non-deterministic in practice, versus AWS Cedar being deterministic by design with formal validation. Since this system explicitly requires a deterministic policy gate (PRD.md FR-5), Cedar is the better-aligned default, but this decision should be made by whoever implements Section 5.6, against real constraints encountered (ecosystem maturity, AWS tooling dependency, team familiarity), not defaulted to silently. Log the actual decision to `docs/decisions.md`.
+**Decided 2026-09-05: OPA, evaluated in-process from a WebAssembly bundle. Full reasoning in `docs/decisions.md`; read that entry before starting 3.6.** The paragraph below is the original framing, kept because the decision went against it and the reasons why are worth having side by side.
+
+Original framing: OPA's commercial backer Styra had its core team acquired by Apple in August 2025; OPA itself remains CNCF-governed and actively used, but its commercial tooling ecosystem is less settled than it was. Independent benchmarking has found OPA's Rego language error-prone and non-deterministic in practice, versus AWS Cedar being deterministic by design with formal validation. Since this system explicitly requires a deterministic policy gate (PRD.md FR-5), Cedar is the better-aligned default, but this decision should be made by whoever implements Section 3.6, against real constraints encountered (ecosystem maturity, AWS tooling dependency, team familiarity), not defaulted to silently.
+
+Three corrections that came out of making the call, recorded here so this paragraph is not read at face value. The "independent benchmarking" is a Teleport engineering blog post, and Teleport ships Cedar-adjacent tooling, so it is not a neutral source; several of its Cedar results were predicted rather than measured. Cedar's proven determinism property is order-independence, which this system does not use, because `policy_rules.priority` requires priority-ordered first match. And Cedar is an authorization engine answering Allow or Deny about a principal and a resource, which is a different question from the one FR-5 asks.
 
 ### 2.3 Event bus: Redis Streams vs Kafka, decided at implementation time
 
@@ -75,7 +79,14 @@ Implements PRD FR-3. Five agents (security, compliance, contextual, quantum-read
 Implements PRD FR-4. The consensus function combining the five agent outputs must be explicit, documented, and versioned, either a weighted average with published weights or a small explainable aggregator, never an opaque model call producing a number with no traceable reasoning. `trust_scores` is append-only; every row references the exact `agent_outputs` rows that produced it. If this function is ever replaced by a learned model, it inherits the same fail-safe defaulting rule as 3.2: ambiguity resolves toward less trust, never more.
 
 ### 3.6 Policy Engine
-Implements PRD FR-5. Tool decision per Section 2.2. `policy_decisions.rule_id` is nullable, "no rule fired, AI recommendation stood" is the common case and must be modeled as such, not worked around with a placeholder rule. Testing requirement: one test per rule type and per condition operator (see `AGENTS.md`), this module sits directly between an AI recommendation and a real security decision.
+Implements PRD FR-5. Engine is OPA with Rego per Section 2.2. `policy_decisions.rule_id` is nullable, "no rule fired, AI recommendation stood" is the common case and must be modeled as such, not worked around with a placeholder rule. Testing requirement: one test per rule type and per condition operator (see `AGENTS.md`), this module sits directly between an AI recommendation and a real security decision.
+
+Four constraints the 2.2 decision commits this module to:
+
+- **Rules are data, not policy source.** `policy_rules.condition_expr` holds a serialised condition tree from FR-13's rule builder. One fixed, reviewed Rego module interprets those trees, passed in as input alongside the active rule set. Never generate Rego text from a stored rule, that is code generation from user input inside the security gate.
+- **Evaluation is in-process.** Compile the Rego module to a WebAssembly bundle and evaluate it in the FastAPI process. No OPA sidecar and no network call, because the decision and its `audit_log` entry commit in one Postgres transaction and nothing in that transaction should depend on a socket.
+- **Determinism is enforced by the build, not by review.** Ship a capabilities file listing only the built-ins the interpreter needs, and run `opa check --capabilities` in CI. A policy referencing anything outside it fails to compile. Note that `opa eval` does not honour capabilities for parsing, so the gate has to be `opa check`, and note that compiling to WebAssembly does not remove the network built-ins by itself, since availability depends on what the host runtime implements. The capabilities file is the control.
+- **Priority-ordered first match.** `policy_rules.priority` is ascending, unique among active rules, and the first matching rule wins and is the single value written to `policy_decisions.rule_id`. Evaluating all matches and merging them is not equivalent and is not what FR-5 asks for.
 
 ### 3.7 Crypto-Agile Protection Engine
 Implements PRD FR-6. Three profiles:
@@ -146,7 +157,7 @@ Status markers below describe what is actually merged to `main`, not what was pl
 
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
 2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening, branch protection, and the data model are complete; the crypto-selector stub is not started.
-3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. Still blocked on the Cedar vs OPA decision (2.2), which must be logged before 3.6 starts.
+3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked.
 4. Crypto-shredding (3.9), agentic RAG (3.12), knowledge graph (3.11).
 5. Full LangGraph multi-agent orchestration (3.4), migration scheduler with real baseline benchmark (3.10).
 6. Full evaluation against PRD Section 8's success metrics.
