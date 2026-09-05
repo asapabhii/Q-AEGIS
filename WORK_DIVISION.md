@@ -16,7 +16,7 @@ Ownership by module. Reference: `SPEC.md` for what each module does, `PRD.md` fo
 - Multi-agent orchestration (LangGraph), `SPEC.md` 3.4, PRD FR-3.
 - Knowledge graph, `SPEC.md` 3.11, PRD FR-10.
 - Agentic RAG, `SPEC.md` 3.12, PRD FR-11.
-- Coordinates the three open tool decisions in `SPEC.md` Section 2 and ensures each is logged to `docs/decisions.md` once made.
+- Coordinates the two remaining open tool decisions in `SPEC.md` Section 2, the event bus (2.3) and the vector store (2.4), and ensures each is logged to `docs/decisions.md` once made. The policy engine decision (2.2) is closed.
 - Final review and merge authority on all pull requests.
 
 ## Udhav
