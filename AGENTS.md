@@ -91,7 +91,9 @@ Not building this phase: plugin marketplace, incident-cost simulator, live third
 
 ## Decisions intentionally left open
 
-Three tool choices are not pre-decided, and should not be defaulted to silently: Cedar vs OPA (3.6), Redis Streams vs Kafka (3.1), pgvector vs Qdrant (3.12). Evaluation criteria for each: `SPEC.md` Section 2. Whoever makes the call logs it, with reasoning, to `docs/decisions.md`.
+Two tool choices are still open, and should not be defaulted to silently: Redis Streams vs Kafka (3.1), pgvector vs Qdrant (3.12). Evaluation criteria for each: `SPEC.md` Section 2. Whoever makes the call logs it, with reasoning, to `docs/decisions.md`.
+
+The policy engine choice is closed: OPA with Rego, evaluated in-process from a WebAssembly bundle. See `SPEC.md` 2.2 and 3.6 and the `docs/decisions.md` entry before writing anything in `backend/app/policy/`. Do not reopen it in passing, and do not write Cedar into that package.
 
 ## Commit and PR conventions
 
