@@ -93,4 +93,16 @@ class AuditLog(Base):
     merkle_root_at_time: Mapped[str] = mapped_column(
         CHAR(HASH_HEX_LENGTH), nullable=False
     )
+    # The O(log n) Merkle state as of this row, as [[size, hash], ...].
+    #
+    # Carried on the row so appending needs one indexed read of the current tail
+    # rather than every prior entry in the chain. Without it, computing this
+    # row's merkle_root_at_time means rehashing every payload before it, which
+    # costs O(n) per append and O(n^2) over a chain's life, on the one write path
+    # every decision in the system goes through.
+    #
+    # Derived data, like merkle_root_at_time beside it, and trusted no more than
+    # that column is: verification recomputes the root from the payloads
+    # (app.db.repositories.audit.current_root) and never reads either value back.
+    frontier: Mapped[list[Any]] = jsonb_column()
     created_at: Mapped[datetime] = created_timestamp(index=True)

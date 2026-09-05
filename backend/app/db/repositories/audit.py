@@ -7,6 +7,13 @@ in, and how a new entry attaches to it.
 
 There is no update and no delete function, and none may be added. The table
 rejects both at the database level.
+
+Reading and appending deliberately take different routes to a root.
+:func:`append_entry` carries the O(log n) Merkle frontier forward from the tail
+row, so a write reads one entry rather than the whole chain. :func:`current_root`
+and :func:`load_chain` rehash every stored payload instead, because a verifier
+must not have to trust state this system wrote. The write path is fast, the read
+path is independent, and a test asserts they agree.
 """
 
 import hashlib
@@ -15,9 +22,17 @@ from typing import Any, Mapping, Sequence
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
-from app.audit.merkle import build, canonicalize
+from app.audit.merkle import (
+    EMPTY_FRONTIER,
+    build,
+    canonicalize,
+    extend_frontier,
+    frontier_from_json,
+    frontier_to_json,
+    root_of,
+)
 from app.db.models import AuditLog
 
 #: Lock key for the chain holding events with no document.
@@ -195,8 +210,16 @@ def append_entry(
     session.execute(select(func.pg_advisory_xact_lock(lock_id)))
 
     stored_payload = normalize_payload(payload)
-    chain = load_chain(session, document_id)
-    prev_hash = chain[-1].payload_hash if chain else None
+    canonical = canonicalize(stored_payload)
+    tail = _chain_tail(session, document_id)
+
+    if tail is None:
+        prev_hash, frontier = None, EMPTY_FRONTIER
+    else:
+        prev_hash = tail.payload_hash
+        frontier = frontier_from_json(tail.frontier)
+
+    extended = extend_frontier(frontier, canonical)
 
     entry = AuditLog(
         document_id=document_id,
@@ -205,9 +228,8 @@ def append_entry(
         payload=stored_payload,
         payload_hash=hash_payload(stored_payload),
         prev_hash=prev_hash,
-        merkle_root_at_time=build(
-            _leaf_entries(chain) + [canonicalize(stored_payload)]
-        ).root,
+        merkle_root_at_time=root_of(extended),
+        frontier=frontier_to_json(extended),
     )
     session.add(entry)
     # Flush rather than commit: surfaces a constraint violation here, attributable
@@ -222,6 +244,52 @@ def _chain_query(document_id: UUID | None):
     if document_id is None:
         return statement.where(AuditLog.document_id.is_(None))
     return statement.where(AuditLog.document_id == document_id)
+
+
+def _chain_tail(session: Session, document_id: UUID | None) -> AuditLog | None:
+    """Return the entry nothing else builds on, or ``None`` for an empty chain.
+
+    The tail is found by its defining property rather than by sorting: it is the
+    one entry whose ``payload_hash`` no other entry in the chain claims as its
+    ``prev_hash``. Ordering by ``created_at`` would not work, since that column
+    defaults to a transaction-scoped ``now()`` and entries written together share
+    it exactly.
+
+    The ``no_forked_chain`` index on ``(document_id, prev_hash)`` serves the
+    correlated subquery, so this is a constant number of indexed lookups no matter
+    how long the chain is.
+
+    Raises:
+        AuditChainError: if more than one tail exists, meaning "what does the next
+            entry attach to" has no single answer. ``no_forked_chain`` already
+            refuses two entries sharing a predecessor, but it cannot refuse an
+            injected entry whose ``prev_hash`` names a row that does not exist,
+            and that leaves two entries nothing builds on. Refusing to extend a
+            chain in that state stops the tampering being buried under later
+            entries that each look valid on their own.
+    """
+    successor = aliased(AuditLog, name="successor")
+    builds_on_it = (
+        select(1)
+        .where(successor.prev_hash == AuditLog.payload_hash)
+        .where(
+            successor.document_id.is_(None)
+            if document_id is None
+            else successor.document_id == document_id
+        )
+        .exists()
+    )
+
+    tails = list(
+        session.scalars(_chain_query(document_id).where(~builds_on_it).limit(2)).all()
+    )
+
+    if len(tails) > 1:
+        raise AuditChainError(
+            f"Chain for document_id={document_id!r} has more than one tail, so "
+            "there is no single entry to append after. The chain is broken."
+        )
+    return tails[0] if tails else None
 
 
 def _lock_key(document_id: UUID | None) -> str:

@@ -13,11 +13,18 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.audit.merkle import EMPTY_ROOT, build, canonicalize, verify
+from app.audit.merkle import (
+    EMPTY_ROOT,
+    build,
+    canonicalize,
+    frontier_from_json,
+    root_of,
+    verify,
+)
 from app.db.enums import AuditEventType, UserRole
 from app.db.models import AuditLog, Document
 from app.db.repositories import audit as audit_repo
@@ -46,6 +53,7 @@ def insert_raw_entry(
     document_id: UUID | None,
     prev_hash: str | None,
     payload: dict[str, object] | None = None,
+    frontier: list[object] | None = None,
 ) -> None:
     """Insert an entry with raw SQL, bypassing the repository's chain logic.
 
@@ -58,9 +66,9 @@ def insert_raw_entry(
         text(
             "INSERT INTO audit_log "
             "(document_id, event_type, payload, payload_hash, prev_hash, "
-            " merkle_root_at_time) "
+            " merkle_root_at_time, frontier) "
             "VALUES (:document_id, :event_type, CAST(:payload AS jsonb), "
-            "        :payload_hash, :prev_hash, :root)"
+            "        :payload_hash, :prev_hash, :root, CAST(:frontier AS jsonb))"
         ),
         {
             "document_id": document_id,
@@ -69,6 +77,12 @@ def insert_raw_entry(
             "payload_hash": audit_repo.hash_payload(body),
             "prev_hash": prev_hash,
             "root": EMPTY_ROOT,
+            # Defaults to an empty frontier regardless of what precedes this row.
+            # These inserts exist to build states the repository refuses to
+            # produce, so a frontier consistent with the chain would be a
+            # contradiction. Pass one explicitly only when it is what is under
+            # test.
+            "frontier": json.dumps([] if frontier is None else frontier),
         },
     )
 
@@ -436,6 +450,175 @@ def test_an_unreachable_entry_is_reported_as_a_broken_chain(
 
     with pytest.raises(audit_repo.AuditChainError, match="not reachable"):
         audit_repo.load_chain(db_session, registered_document.id)
+
+
+# --------------------------------------------------------------------------
+# The append path carries the frontier instead of rereading the chain
+#
+# app.audit.merkle already asserts the incremental root equals a full rebuild as a
+# pure property. What these add is that the stored column still agrees with an
+# independent recomputation from the stored payloads after a real round trip
+# through jsonb, and that a write's cost stops growing with the chain.
+# --------------------------------------------------------------------------
+
+
+def test_stored_roots_agree_with_independent_recomputation(
+    db_session: Session, registered_document: Document
+) -> None:
+    """Every row's stored root matches one rebuilt from the payloads before it.
+
+    The write path carries an O(log n) frontier forward; the verification path
+    rehashes every stored payload. This is the test that keeps the fast path
+    honest, and it checks every prefix rather than only the final root, so a
+    divergence cannot hide behind a later append that happens to agree.
+    """
+    for index in range(12):
+        append(db_session, registered_document.id, f"entry-{index}")
+
+    chain = audit_repo.load_chain(db_session, registered_document.id)
+
+    for length in range(1, len(chain) + 1):
+        rebuilt = build([canonicalize(e.payload) for e in chain[:length]]).root
+        assert chain[length - 1].merkle_root_at_time == rebuilt
+
+
+def test_the_newest_stored_root_is_the_current_root(
+    db_session: Session, registered_document: Document
+) -> None:
+    """``current_root`` recomputes, and lands on what the tail already stored."""
+    for index in range(7):
+        append(db_session, registered_document.id, f"entry-{index}")
+
+    chain = audit_repo.load_chain(db_session, registered_document.id)
+    assert audit_repo.current_root(db_session, registered_document.id) == (
+        chain[-1].merkle_root_at_time
+    )
+
+
+def test_a_stored_frontier_round_trips_through_jsonb(
+    db_session: Session, registered_document: Document
+) -> None:
+    """The frontier has to survive Postgres, or the next append computes nonsense."""
+    for index in range(11):
+        append(db_session, registered_document.id, f"entry-{index}")
+
+    tail = audit_repo.load_chain(db_session, registered_document.id)[-1]
+    frontier = frontier_from_json(tail.frontier)
+
+    assert frontier.leaf_count == 11
+    assert [subtree.size for subtree in frontier.subtrees] == [8, 2, 1]
+    assert root_of(frontier) == tail.merkle_root_at_time
+
+
+def test_an_append_never_reads_the_whole_chain(
+    db_session: Session, registered_document: Document
+) -> None:
+    """Every ``audit_log`` read an append performs is bounded, whatever the length.
+
+    The regression this guards against is the one review caught: computing a root
+    by rereading the chain costs O(n) per append and O(n^2) over a chain's life, on
+    the write path every decision in the system goes through.
+
+    It asserts on the shape of the SQL rather than on a statement count, because
+    the old code read the chain in a single unbounded query, so counting statements
+    would have passed while the cost was still linear. A row count or a timing
+    assertion would be flakier in CI than this is.
+    """
+    for index in range(25):
+        append(db_session, registered_document.id, f"filler-{index}")
+
+    statements: list[str] = []
+    engine = db_session.get_bind()
+
+    def record(conn, cursor, statement, parameters, context, executemany) -> None:
+        statements.append(" ".join(statement.split()))
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        append(db_session, registered_document.id, "the-one-under-test")
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    reads = [
+        statement
+        for statement in statements
+        if statement.upper().startswith("SELECT") and "audit_log" in statement
+    ]
+    assert reads, "expected the append to read the chain tail"
+    for statement in reads:
+        assert "LIMIT" in statement.upper(), (
+            "an unbounded read of audit_log during an append means the write path "
+            f"is O(n) again: {statement}"
+        )
+
+
+def test_appending_to_an_ambiguous_chain_is_refused(
+    db_session: Session, registered_document: Document
+) -> None:
+    """More than one tail means the chain is not one chain, so the append refuses.
+
+    The shape planted here is an injected orphan: an entry whose ``prev_hash``
+    names a row that does not exist. That leaves two entries nothing builds on, so
+    "what does the next entry attach to" has no single answer. Note it does not
+    violate ``no_forked_chain``, since the two have different predecessors, which
+    is why the check is worth having on top of the constraint.
+
+    Without it an append would pick one arbitrarily and bury the tampering under
+    entries that each look valid.
+    """
+    append(db_session, registered_document.id, "genesis")
+    insert_raw_entry(
+        db_session,
+        document_id=registered_document.id,
+        prev_hash="ab" * 32,
+        payload={"note": "orphan"},
+    )
+
+    with pytest.raises(audit_repo.AuditChainError, match="more than one tail"):
+        append(db_session, registered_document.id, "next")
+
+
+def test_an_ambiguous_system_chain_is_refused_too(db_session: Session) -> None:
+    """The null-document chain gets the same check, not a weaker one.
+
+    Worth asserting separately because the tail query branches on whether
+    ``document_id`` is null, so the system chain runs different SQL. It is also the
+    chain with no natural bound, since every document-less event in the system
+    lands in it.
+    """
+    append(db_session, None, "system-genesis")
+    insert_raw_entry(
+        db_session,
+        document_id=None,
+        prev_hash="cd" * 32,
+        payload={"note": "system-orphan"},
+    )
+
+    with pytest.raises(audit_repo.AuditChainError, match="more than one tail"):
+        append(db_session, None, "next")
+
+
+def test_a_tampered_stored_frontier_is_refused_on_the_next_append(
+    db_session: Session, registered_document: Document
+) -> None:
+    """A frontier is validated when read back, not trusted.
+
+    Left unchecked, a malformed frontier on the tail would produce a plausible but
+    wrong root for this entry and every entry after it, and the log would look
+    internally consistent while committing to nothing.
+    """
+    insert_raw_entry(
+        db_session,
+        document_id=registered_document.id,
+        prev_hash=None,
+        # 3 is not a power of two, so no complete subtree has that many leaves and
+        # extend_frontier could not have produced this. Planted with an INSERT
+        # because audit_log rejects UPDATE, which is the point of the table.
+        frontier=[[3, "aa" * 32]],
+    )
+
+    with pytest.raises(ValueError, match="power of two"):
+        append(db_session, registered_document.id, "next")
 
 
 def test_ordering_refuses_a_forked_chain() -> None:

@@ -16,15 +16,28 @@ import hashlib
 import pytest
 
 from app.audit.merkle import (
+    EMPTY_FRONTIER,
     EMPTY_ROOT,
     LEAF_PREFIX,
     NODE_PREFIX,
     build,
     canonicalize,
+    extend_frontier,
+    frontier_from_json,
+    frontier_to_json,
     hash_internal,
     hash_leaf,
+    root_of,
     verify,
 )
+
+
+def frontier_over(count: int):
+    """Return the frontier reached by appending ``count`` entries one at a time."""
+    frontier = EMPTY_FRONTIER
+    for entry in entries(count):
+        frontier = extend_frontier(frontier, entry)
+    return frontier
 
 
 def entries(count: int) -> list[bytes]:
@@ -286,3 +299,128 @@ def test_canonicalized_entries_build_and_verify_end_to_end() -> None:
     log[1]["label"] = "PUBLIC"
     tampered = [canonicalize(entry) for entry in log]
     assert verify(tampered, root).is_valid is False
+
+
+# --------------------------------------------------------------------------
+# The incremental frontier
+#
+# Design note 4 in the module docstring: the incremental path exists so appending
+# is not quadratic, and it is only safe while it agrees with build() exactly. The
+# first test below is the one that enforces that, and it is the reason the rest of
+# this section can be read as describing an optimisation rather than a second,
+# separately-trusted implementation.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("count", range(0, 35))
+def test_frontier_root_matches_a_full_rebuild(count: int) -> None:
+    """The two paths to a root must never disagree, at any length.
+
+    Swept across every length in the range rather than sampled, because the tree's
+    shape changes with the binary representation of the leaf count: powers of two,
+    one past a power of two, and one short of one all merge differently.
+    """
+    assert root_of(frontier_over(count)) == build(entries(count)).root
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 8, 11, 16, 100])
+def test_frontier_leaf_count_tracks_the_entries_added(count: int) -> None:
+    """The frontier knows how many entries it covers, without a separate counter."""
+    assert frontier_over(count).leaf_count == count
+
+
+def test_frontier_holds_one_subtree_per_set_bit() -> None:
+    """11 entries decompose into subtrees of 8, 2, and 1.
+
+    This is what keeps the carried state O(log n) rather than O(n), so it is
+    asserted directly instead of being left as a comment.
+    """
+    assert [subtree.size for subtree in frontier_over(11).subtrees] == [8, 2, 1]
+
+
+def test_frontier_of_a_power_of_two_collapses_to_one_subtree() -> None:
+    """A full tree needs exactly one hash carried forward."""
+    subtrees = frontier_over(16).subtrees
+    assert len(subtrees) == 1
+    assert subtrees[0].size == 16
+
+
+def test_empty_frontier_root_is_the_empty_root() -> None:
+    """An empty chain agrees with build([]) too, not just non-empty ones."""
+    assert root_of(EMPTY_FRONTIER) == EMPTY_ROOT
+    assert EMPTY_FRONTIER.leaf_count == 0
+
+
+def test_extend_frontier_does_not_mutate_its_input() -> None:
+    """Frozen and returned fresh, so a caller cannot advance a frontier it shares."""
+    original = frontier_over(5)
+    before = original.subtrees
+
+    extend_frontier(original, b"another-entry")
+
+    assert original.subtrees == before
+
+
+# --------------------------------------------------------------------------
+# Storing and reloading a frontier
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("count", [0, 1, 3, 11, 32])
+def test_frontier_survives_a_json_round_trip(count: int) -> None:
+    """It is stored as jsonb, so it has to come back as what went in."""
+    frontier = frontier_over(count)
+    assert frontier_from_json(frontier_to_json(frontier)) == frontier
+
+
+def test_stored_frontier_is_self_describing() -> None:
+    """Sizes travel with the hashes, so the value needs no external leaf count."""
+    assert frontier_to_json(frontier_over(3)) == [
+        [2, frontier_over(3).subtrees[0].hash],
+        [1, frontier_over(3).subtrees[1].hash],
+    ]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"not": "a list"},
+        [[2]],
+        [[2, "aa" * 32, "extra"]],
+        [["2", "aa" * 32]],
+        [[True, "aa" * 32]],
+        [[0, "aa" * 32]],
+        [[-2, "aa" * 32]],
+        [[3, "aa" * 32]],
+        [[2, "short"]],
+        [[2, "zz" * 32]],
+        [[2, 12345]],
+        [[1, "aa" * 32], [2, "bb" * 32]],
+        [[2, "aa" * 32], [2, "bb" * 32]],
+    ],
+    ids=[
+        "not-a-list",
+        "missing-hash",
+        "too-many-fields",
+        "size-as-string",
+        "size-as-bool",
+        "size-zero",
+        "size-negative",
+        "size-not-a-power-of-two",
+        "hash-too-short",
+        "hash-not-hex",
+        "hash-not-a-string",
+        "sizes-ascending",
+        "sizes-equal",
+    ],
+)
+def test_a_malformed_stored_frontier_is_rejected(raw: object) -> None:
+    """Validated on the way in, not trusted.
+
+    This value comes back out of the database, and a wrong one would silently
+    produce a plausible root for every entry appended after it. Sizes must be
+    strictly decreasing powers of two because no other shape can have come from
+    ``extend_frontier``, so anything else means the value did not come from here.
+    """
+    with pytest.raises(ValueError):
+        frontier_from_json(raw)
