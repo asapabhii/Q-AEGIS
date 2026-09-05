@@ -6,13 +6,197 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Pending
 
-- **Policy engine: Cedar vs OPA** (`SPEC.md` 2.2, `SPEC.md` 3.6). Not yet decided. Abhinav drives it to a conclusion with Udhav's input and logs it here; it is a hard blocker on the policy engine, so it needs to be settled before that module starts rather than discovered at its first commit. Cedar is the better-aligned default per 2.2 given FR-5's determinism requirement, but "default" is not "decided", and an unlogged assumption is the failure mode this file exists to prevent.
 - **Event bus: Redis Streams vs Kafka** (`SPEC.md` 2.3, `SPEC.md` 3.1). Default assumption is Redis Streams until a concrete scale need appears.
 - **Vector store: pgvector vs Qdrant** (`SPEC.md` 2.4, `SPEC.md` 3.12). Default assumption is pgvector until a measured latency or filtered-search problem appears.
 
 ---
 
 ## Log
+
+### 2026-09-05: Policy engine, chose OPA with Rego
+
+Decided by: Abhinav, as integration owner. Replaces the Pending entry and
+supersedes the default stated in `SPEC.md` 2.2, which has been updated to point
+here. Udhav owns 3.6 and can reopen this before writing code if he disagrees;
+after that the cost of switching stops being a conversation and starts being a
+rewrite.
+
+This goes against 2.2's stated default. Three things drove it.
+
+**FR-5 is not an authorization problem, and Cedar is an authorization engine.**
+Cedar answers "may this principal perform this action on this resource". FR-5 asks
+"what should the system do about this document's protection, and did a rule
+override what the AI proposed". `policy_rules.action` includes `require_mfa` and
+`force_pqc`, which are actions the system takes, not access decisions about a
+request. Expressing them through permit and forbid is a category change, not an
+encoding inconvenience, and the translation layer on either side of it would be
+new unverified code sitting in the module `PRD.md` R2 calls the
+highest-consequence one in the system. That is the opposite of what adopting a
+formally verified engine is supposed to buy.
+
+**The merged schema already commits to semantics Cedar does not have.** Three
+independent ones, all pointing the same way. `policy_rules.priority` is an integer,
+lower evaluated first, unique among active rules, and that unique partial index is
+what closes DEF-10 from the Sprint 3 defect log; Cedar has no rule ordering at all,
+and its order-independence is one of its proven theorems rather than a setting.
+`policy_decisions.rule_id` is a single nullable foreign key, matching FR-5's "and
+which rule", singular; Cedar returns a set of determining policies. And
+`policy_decisions.ai_recommendation` and `final_decision` both draw from a
+four-value domain; Cedar answers Allow or Deny. Changing the schema to suit the
+engine was considered and rejected: it is the source of truth, it came from the
+CIA-I design and a real defect log, and priority ordering is a product requirement
+rather than an implementation detail.
+
+**Rules are data here, not code, and only Rego can take them that way.**
+`policy_rules.condition_expr` is a `jsonb` condition tree produced by FR-13's rule
+builder, and `AGENTS.md` requires one test per condition operator, which only makes
+sense for a closed operator set. So the rules are structured data authored through
+a UI, not policy source authored by engineers. That means one fixed, reviewed Rego
+module interprets condition trees passed in as input, and no policy text is ever
+generated from user input. Cedar has no data-driven equivalent, so it would require
+compiling user-authored trees into Cedar source, which is code generation from user
+input in the security gate. Rules-as-data also keeps the amount of Rego in the
+repository small enough to review line by line, which is the direct mitigation for
+Rego's measured error-proneness.
+
+Why the determinism objection no longer decides it: it is fixable by the build
+rather than by discipline. `opa check` and `opa build` accept a `--capabilities`
+file listing permitted built-ins, and a policy referencing anything outside it
+fails to compile. Banning the non-deterministic built-ins there turns FR-5's
+determinism requirement into a CI gate, which is the standard this repository
+already holds itself to everywhere else. Two caveats worth writing down now rather
+than discovering later: `opa eval` does not honour capabilities for parsing
+(OPA issue 6379), so the gate has to be `opa check` in CI and not a runtime flag;
+and compiling to WebAssembly does not by itself remove the network built-ins, since
+whether `http.send` exists depends on what the host runtime implements, so the
+capabilities file is the real control and WASM is not a substitute for it.
+
+Rejected: Cedar. Its formal guarantees are real and stronger than OPA's, and
+giving them up is the actual cost of this decision, stated plainly rather than
+argued away. But the property Cedar proves is order-independence, and this system
+needs priority-ordered first match, so the proof covers a behaviour we are not
+relying on while the behaviour that decides the outcome would move into Python
+around the engine. Cedar also has no first-party Python binding, so embedding it
+means `cedarpy`, which is third party and explicitly unsupported by AWS, and the
+only first-party Python path is boto3 against AWS Verified Permissions.
+
+Also rejected: AWS Verified Permissions, independently of the language choice. A
+policy decision and its `audit_log` entry commit in one Postgres transaction, and a
+call to a paid external service inside that transaction swaps a local function call
+for a dependency that can fail, rate-limit, or hold the transaction open, while
+moving evaluation somewhere the audit log cannot observe it. Deployment is out of
+scope this phase anyway per `PRD.md` NG4. The same objection rules out an OPA
+sidecar answering over HTTP, which is why evaluation runs in-process via a
+WebAssembly bundle; that also avoids adding a container to
+`infra/docker-compose.yml` and the TLS obligation `AGENTS.md` places on local
+compose services. The in-process Python host is `opa-wasmtime`, which is third
+party and small, so if it proves unreliable the fallback is a localhost sidecar and
+accepting the network hop. That is a reversible implementation detail; the language
+choice is not.
+
+Revisit if: the condition operator set stays as small as it currently looks. At
+that point a hand-written evaluator over a closed operator set would be fully
+testable with no engine dependency at all, and the honest question becomes whether
+either engine is earning its place. Not acted on now, because 2.2 framed this as a
+choice between two engines and because a third option deserves its own decision
+rather than being smuggled in through this one.
+
+The rest of this entry is the criterion-by-criterion comparison against the list in
+2.2, written down because several findings contradict what 2.2 assumes and nobody
+should have to rediscover them. Everything below holds regardless of which way the
+decision had gone.
+
+**2.2's determinism citation is weaker than 2.2 makes it sound.** The source is
+the Teleport/Doyensec Security Policy Evaluation Framework (June 2025), built on
+threat-modelling research AWS itself commissioned from Trail of Bits. Cedar is
+AWS's language, so "independent benchmarking" overstates it. The framework's
+authors also say plainly they would not encourage using it to compare engines
+against each other and that they optimised none of them. On the determinism test
+specifically, testcase-06, Rego's FAIL is measured while Cedar's PASS is marked a
+predicted result rather than a run one. Cedar also fails testcase-02 outright and
+is predicted to fail testcase-01 and testcase-08, the last being about logging
+values and decisions, which for a system built around FR-7 is not a minor column.
+
+The broader claim survives even though that one does not. Rego measurably fails a
+range of tests around undefined values, negation, side effects and
+denial-of-service resilience, so "error-prone" is supported. "Non-deterministic"
+is narrower than it sounds, and the precise version is more useful: Rego
+evaluation is deterministic unless a policy calls one of a known set of
+non-deterministic builtins, and OPA has machinery acknowledging exactly that, a
+`Nondeterministic` flag per builtin, a cache for their results, and a
+`--nondeterministic-builtins` switch for partial evaluation. Two of them,
+`json.match_schema` and `json.verify_schema`, can dereference arbitrary URLs and
+were not declared non-deterministic at all (OPA issue 8998). So on OPA the
+property FR-5 needs is available but rests on author discipline. On Cedar the
+engine enforces it: the Lean model carries a machine-checked theorem that
+authorization produces the same result regardless of policy evaluation order or
+duplicates, and no release ships without its model, proofs and differential tests
+current.
+
+**`policy_rules.priority` has no Cedar equivalent.** This is the mismatch nobody
+had noticed. `docs/data-dictionary.md` gives `policy_rules` an integer `priority`,
+lower evaluated first, unique among active rules, and that unique partial index is
+what closes DEF-10 from the Sprint 3 defect log. That is a priority-ordered
+first-match model. Cedar has no rule ordering whatsoever; its only precedence is
+that `forbid` beats `permit`, and its order-independence is deliberate, one of the
+proven theorems. Cedar's headline guarantee is therefore not the guarantee FR-5
+asks for, and priority resolution would have to be implemented in Python around
+the engine, which puts the ordering behaviour back in our own unverified code for
+the part that actually decides the outcome.
+
+Cedar's decision shape is narrower than FR-5's too. Cedar answers Allow or Deny.
+`policy_rules.action` has four values, `allow`, `deny`, `require_mfa` and
+`force_pqc`, and `policy_decisions` stores an `ai_recommendation` and a
+`final_decision` from that same domain. Getting four outcomes from a boolean engine
+means either one authorization query per candidate action, or carrying the action
+in policy annotations and reading it back out of the diagnostics. Both are
+encodings.
+
+**"No rule fired, the AI recommendation stood" fits Rego and fights Cedar.**
+`SPEC.md` 3.6 and FR-5 both call this the common case, and
+`policy_decisions.rule_id` is nullable for it. In Rego a rule set that matches
+nothing is undefined, which maps onto null directly, and one evaluation can return
+the matched rule's id and action as structured JSON. Cedar defaults to deny, so
+nothing matching yields a `Deny` with an empty determining-policy set, and the
+caller has to read "no rule fired, defer to the AI" out of a response whose value
+says Deny. Recoverable by inspecting diagnostics, but it places a semantic
+inversion inside the module `PRD.md` R2 calls the highest-consequence one in the
+system.
+
+**Ecosystem maturity, checked rather than assumed.** OPA came out of the August
+2025 Apple acqui-hire in better shape than 2.2 implies. It is still CNCF Graduated
+with governance, licence and monthly release cadence unchanged, its maintainers now
+span Apple, Google and Microsoft, and v1.19.0 shipped in July 2026. What did change
+is the commercial layer: Styra has wound down, styra.com no longer resolves, and
+its paid products, Enterprise OPA, the OPA Control Plane, several SDKs and the
+Regal linter, were open-sourced into the CNCF OPA organisation. 2.2's "less settled
+than it was" is fair about the commercial tooling and wrong about the project.
+Cedar is healthy but AWS-led rather than foundation-governed, a different risk of
+the same kind that 2.2 does not mention.
+
+**Python integration is a wash; neither engine has a first-party answer.** Cedar's
+engine is Rust with no AWS-supported Python binding. In-process use means
+`cedarpy`, third party, PyO3-based, explicitly not supported by AWS or the Cedar
+team, though it tracks engine releases closely and ships wheels for Python 3.9
+through 3.14 including Windows. OPA's canonical deployment is a sidecar answering
+over HTTP, which is first-party but adds a container to
+`infra/docker-compose.yml`, a network hop inside the decision path, and a TLS
+obligation, since `AGENTS.md` requires TLS in transit for local compose services
+too. In-process OPA means compiling Rego to WebAssembly and running it through
+`opa-wasmtime`, also third party.
+
+**AWS Verified Permissions is rejected whichever engine wins.** A policy decision
+and its `audit_log` entry commit in one Postgres transaction. A network call to a
+paid AWS service inside that transaction trades a local function call for a
+dependency that can fail, rate-limit or hold the transaction open, and it moves
+evaluation somewhere the audit log cannot observe it. Deployment of any kind is
+also out of scope this phase per `PRD.md` NG4. Either engine has to run embedded
+and offline, which is what the decision above settles on.
+
+Not answered here: team familiarity. 2.2 lists it as a criterion, but nobody on the
+team has production experience with either engine, so it does not discriminate
+between them. It does argue for keeping the amount of hand-written Rego small,
+which the rules-as-data shape above already does.
 
 ### 2026-09-05: audit appends carry a Merkle frontier instead of rereading the chain
 
@@ -198,10 +382,10 @@ discipline as documented in `AGENTS.md`, not by the platform. Treat it as such.
 
 <!-- Add entries above this line, most recent first. Example format:
 
-### 2026-08-20: Policy engine, chose Cedar
+### 2026-08-20: Vector store, chose pgvector
 
-Decided by: Udhav.
-Why: formal determinism guarantee matched PRD FR-5's requirement directly; team had no existing OPA/Rego experience to lose by switching.
-Rejected: OPA, larger ecosystem but Rego's documented non-determinism issues were a direct conflict with FR-5.
+Decided by: Whoever made the call.
+Why: one fewer service to run, and the filtered-search volumes here are nowhere near where a dedicated store starts paying for itself.
+Rejected: Qdrant, better filtered-search performance at scale, but that scale is not in evidence and it adds a container.
 
 -->
