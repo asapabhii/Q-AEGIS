@@ -65,6 +65,12 @@ things have to stay internally consistent or a service will not start:
    `QAEGIS_NEO4J_PASSWORD`. If they diverge, Neo4j starts but never reports
    healthy.
 
+**Use `127.0.0.1`, not `localhost`, in all three URLs.** `.env.example` already
+does. On Windows `localhost` resolves to the IPv6 address `::1` first, while the
+containers publish on IPv4 only, so a connection does not fail, it hangs until it
+times out. That is a much more confusing symptom than a refused connection, which
+is why the example file spells the address out.
+
 **Do not add any variable starting with `NEO4J_` to `.env`.** The official Neo4j
 image treats that prefix as its server-config namespace, maps each such variable
 to a config setting, strict-validates the result, and crash-loops with
@@ -80,7 +86,7 @@ Variables and what reads them:
 | Variable | Read by |
 |---|---|
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | the Postgres container, and its healthcheck |
-| `DATABASE_URL` | the application, once the data model lands (`SPEC.md` Section 5) |
+| `DATABASE_URL` | the application and Alembic (`backend/app/config.py`). Required; there is no default, and the app refuses to guess one |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | the Redis container and its healthcheck |
 | `REDIS_URL` | the application, once the event bus lands (`SPEC.md` 3.1) |
 | `NEO4J_AUTH` | the Neo4j container's entrypoint, sets the initial password |
@@ -123,8 +129,9 @@ docker compose down -v         # stop and delete data, use when a container is w
 ```
 
 The backend is deliberately **not** a service in this compose file. It connects
-to none of these stores yet, and listing it would imply wiring that does not
-exist. It joins the file in the pull request that first opens a connection.
+to Postgres now, but you run it from your shell with `--reload` while working, so
+containerizing it would mean rebuilding an image to see a code change. Redis and
+Neo4j are still unused by any module.
 
 Known gap, stated rather than hidden: these three services speak plaintext on
 loopback, while `AGENTS.md` requires TLS in transit everywhere. Binding to
@@ -153,9 +160,33 @@ CI. If you only ever install the runtime file you will not be able to run the
 tests you are required to write.
 
 `requirements.txt` intentionally omits most of `SPEC.md` Section 8's dependency
-list. SQLAlchemy, Alembic, redis, langgraph, neo4j, pgvector, qiskit, and
-liboqs-python are each added by the pull request that first imports them. Add
-yours there, pinned exactly, when you need it.
+list. redis, langgraph, neo4j, pgvector, qiskit, and liboqs-python are each added
+by the pull request that first imports them. Add yours there, pinned exactly,
+when you need it.
+
+### Build the schema
+
+From `backend/`, with the containers healthy and `DATABASE_URL` set:
+
+```bash
+alembic upgrade head
+python -m app.db.seed
+```
+
+The first builds all twelve tables from empty and installs the append-only
+triggers. The second creates one development user per role, and is idempotent, so
+running it again is harmless.
+
+The seed is a **stub** and is labelled one in its own module. It exists because
+`documents.uploaded_by`, `audit_log.actor_id`, `manual_overrides.overridden_by`
+and `policy_rules.created_by` are real foreign keys to `users.id`, while the API's
+identity source is still a header-trusting stub that knows a caller's role and
+nothing else. Without a row per role, every write fails its foreign key. Skip this
+step and requests come back `503` telling you to run it.
+
+Both commands are also what the test suite runs, so if `pytest` passes, your
+schema is current. Re-run `alembic upgrade head` after every `git pull` that
+touches `backend/alembic/versions/`.
 
 ### Run it
 
@@ -176,23 +207,40 @@ forge, so it is authorization plumbing, not authentication. Read the docstring i
 `backend/app/api/deps.py` before you build anything on top of it. The header is
 required; without it you get a 401.
 
+It takes two calls, not one. `document_id` is a real foreign key, so register the
+document first and classify the id you get back. An arbitrary UUID returns a 404.
+
 ```bash
+# 1. register, and keep the "id" from the response
+curl -X POST http://127.0.0.1:8000/api/v1/documents \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: data_owner" \
+  -d '{"filename": "payroll-q3.pdf"}'
+
+# 2. classify it
 curl -X POST http://127.0.0.1:8000/api/v1/classify \
   -H "Content-Type: application/json" \
   -H "X-Q-AEGIS-Actor-Role: data_owner" \
-  -d '{"document_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+  -d '{"document_id": "<the id from step 1>",
        "content": "Employee SSN 123-45-6789 and salary details"}'
 ```
+
+`/documents` registers metadata only, there is no file upload yet, which is why
+`storage_path` comes back null and the status is `registered` rather than
+`uploaded`.
 
 Roles accepted on `/classify`: `data_owner`, `security_analyst`,
 `security_admin`. `compliance_officer` and `auditor` are refused with a 403 on
 purpose, neither persona's stated need involves submitting documents.
+`/documents` accepts `data_owner` and `security_admin`.
 
-Open defect you should know about before building on this endpoint: it computes
-a classification and persists nothing, no `classification_metadata` row and no
-`audit_log` entry, because the Section 5 tables do not exist yet. `PRD.md`
-Section 7 treats a decision without an audit entry as a defect. Abhinav owns
-closing it.
+Each classify call writes one `classification_metadata` row and one `audit_log`
+entry in the same transaction as the document's status change, so a failure
+anywhere leaves none of it behind. Reclassifying appends rows rather than
+replacing them; the history tables are append-only and a trigger enforces it.
+
+There is no read endpoint for that history yet. If you need one, say so rather
+than querying the tables directly from the frontend.
 
 ### Test and lint
 
@@ -311,6 +359,24 @@ starting Redis with authentication silently disabled.
 **`required variable ... is missing a value`.** You are running `docker compose`
 from somewhere other than `infra/`, or `.env` does not exist at the repository
 root.
+
+**`DatabaseNotConfiguredError`, or pytest skipping every database test.**
+`DATABASE_URL` is unset or blank. There is deliberately no fallback: a default
+would embed a credential in source and let a misconfigured process connect
+somewhere unintended and appear to work.
+
+**A connection to Postgres hangs instead of failing.** Your URL says `localhost`.
+Use `127.0.0.1`, see section 3.
+
+**`503` with "No user exists with role ...".** You have not run
+`python -m app.db.seed`, see section 5.
+
+**`404` from `/classify` on a `document_id` you made up.** Expected. Register the
+document through `POST /api/v1/documents` first.
+
+**A test fails on `RestrictViolation` with "Table ... is append-only".** The
+trigger is doing its job. A new decision is a new row; do not reach for an
+`UPDATE`.
 
 **A port is already in use.** Ports are hardcoded in
 `infra/docker-compose.yml`, edit the mapping there.
