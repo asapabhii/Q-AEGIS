@@ -301,3 +301,32 @@ def test_verify_endpoint_unknown_document_returns_error(
     )
     # An empty chain raises ValueError in the service; the endpoint maps it to 422.
     assert response.status_code == 422
+
+
+def test_verify_endpoint_forked_chain_returns_409(
+    client: TestClient,
+    registered_document: Document,
+) -> None:
+    """A broken or forked chain surfaces as 409, not a silent pass or 500.
+
+    The database trigger prevents a real forked chain from being written, so
+    the exception is injected via a mock. The route must catch
+    ``AuditChainError`` and map it to 409; this test asserts that mapping
+    without relying on a state the trigger forbids.
+    """
+    from unittest.mock import patch
+
+    from app.db.repositories.audit import AuditChainError
+
+    with patch(
+        "app.api.routes.audit.verify_chain_range",
+        side_effect=AuditChainError("Simulated forked chain for test"),
+    ):
+        response = client.get(
+            VERIFY_URL,
+            params={"document_id": str(registered_document.id)},
+            headers={ROLE_HEADER: UserRole.AUDITOR.value},
+        )
+
+    assert response.status_code == 409
+    assert "forked" in response.json()["detail"].lower()
