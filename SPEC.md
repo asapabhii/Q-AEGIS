@@ -142,9 +142,11 @@ ML-DSA's signing algorithm uses randomized, hedged signing with a rejection-samp
 
 ## 7. Build order
 
+Status markers below describe what is actually merged to `main`, not what was planned. Update them in the pull request that lands the work, never ahead of it.
+
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
-2. Crypto-selector stub, CI hardening with coverage gate and branch protection. Complete.
-3. **Current phase**: contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7).
+2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening and branch protection are complete; the data model and the crypto-selector stub are not started.
+3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). Blocked until the Section 5 tables exist, there is nowhere to persist a risk score, a trust score, or a policy decision without them, and the Cedar vs OPA decision (2.2) must be logged before 3.6 starts.
 4. Crypto-shredding (3.9), agentic RAG (3.12), knowledge graph (3.11).
 5. Full LangGraph multi-agent orchestration (3.4), migration scheduler with real baseline benchmark (3.10).
 6. Full evaluation against PRD Section 8's success metrics.

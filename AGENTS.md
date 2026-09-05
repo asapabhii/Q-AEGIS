@@ -49,7 +49,7 @@ Read this before starting work on any module. If you are an agent acting on beha
 
 | Module (SPEC.md section) | Owner |
 |---|---|
-| Repo/CI/CD, integration, Trust Engine (3.5), multi-agent orchestration (3.4) | Abhinav |
+| Repo/CI/CD, integration, data model and migrations (Section 5), Trust Engine (3.5), multi-agent orchestration (3.4) | Abhinav |
 | Policy engine (3.6), crypto engine (3.7), audit log (3.8), crypto-shredding (3.9), migration scheduler (3.10) | Udhav |
 | Classifier (3.2), frontend (3.13), documentation, test authorship across all modules | Sukhmani |
 
@@ -57,7 +57,7 @@ Full detail: `WORK_DIVISION.md`.
 
 ## Code style
 
-Backend: Python, `black` formatting, `flake8` linting, type hints on every function signature. Pydantic models for every API request/response, no raw dicts crossing an API boundary. SQLAlchemy models mirror the data dictionary in the system design document exactly, do not rename a column without updating that document in the same PR.
+Backend: Python, `black` formatting, `flake8` linting, type hints on every function signature. Pydantic models for every API request/response, no raw dicts crossing an API boundary. SQLAlchemy models mirror the data dictionary in the system design document exactly, do not rename a column without updating that document in the same PR. Note before writing the first model: that document is referenced by `SPEC.md` Section 5 but is not in this repository, and `docs/` has no ER diagram. Settle that first, either bring the document in under `docs/` or define the schema in-repo and make it the cited source of truth. Do not invent columns against a reference nobody can open.
 
 Frontend: TypeScript only, no plain `.js` files. Tailwind for styling. Centralize API calls in `frontend/src/lib/api/`, no inline `fetch()` calls scattered through components.
 

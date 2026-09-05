@@ -36,7 +36,9 @@ Full environment setup detail: `SPEC.md` Section 8.
 
 ## Current phase
 
-See `SPEC.md` Section 7 for the full build order. Current phase: Phase 1, repository scaffolding, the classifier stub, the core audit log functions, and initial CI.
+See `SPEC.md` Section 7 for the full build order. Phase 1 is complete: repository scaffolding, the classifier stub, the core audit log functions, and CI with branch protection and a coverage gate. Current phase: Phase 2, the data model (`SPEC.md` Section 5) and the crypto-selector stub.
+
+Running this locally for the first time: `docs/LOCAL_DEV.md`.
 
 ## Contributing
 
