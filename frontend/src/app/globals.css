@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/*
+ * Q-AEGIS Shield — Design system tokens.
+ *
+ * Dark, premium cyber-security aesthetic. Slate base with cyan/blue accents
+ * reflecting quantum-readiness and shield motifs.
+ */
+
+:root {
+  /* Surface palette */
+  --color-bg-primary: #0b0e14;
+  --color-bg-secondary: #111827;
+  --color-bg-card: #1a1f2e;
+  --color-bg-card-hover: #232938;
+  --color-border: #2d3548;
+  --color-border-focus: #3b82f6;
+
+  /* Text palette */
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+
+  /* Accent palette */
+  --color-accent-cyan: #22d3ee;
+  --color-accent-blue: #3b82f6;
+  --color-accent-indigo: #6366f1;
+  --color-accent-green: #34d399;
+  --color-accent-amber: #fbbf24;
+  --color-accent-red: #f87171;
+
+  /* Sensitivity label colors */
+  --label-public: #34d399;
+  --label-internal: #3b82f6;
+  --label-confidential: #f59e0b;
+  --label-restricted: #ef4444;
+}
+
+/* Base resets */
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* Smooth transitions globally */
+*,
+*::before,
+*::after {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Glow animation for status indicators */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 6px 0 currentColor;
+  }
+  50% {
+    box-shadow: 0 0 14px 2px currentColor;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Subtle gradient shimmer for cards */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.card-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(59, 130, 246, 0.03) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 8s ease-in-out infinite;
+}
