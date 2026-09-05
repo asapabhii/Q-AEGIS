@@ -112,7 +112,15 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
+      # REDISCLI_AUTH rather than `redis-cli -a <password>`: a command-line
+      # argument is visible to anything that can read /proc inside the
+      # container, and to `docker top`, for as long as the probe runs. An
+      # environment variable scoped to this one command is not. It also avoids
+      # the "using a password with -a is insecure" warning that redis-cli would
+      # otherwise print on every probe.
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG
       interval: 10s
       timeout: 5s
       retries: 5
@@ -146,12 +154,19 @@ services:
       # Runs a real query rather than checking that the port is open, because
       # Neo4j accepts connections before it finishes opening the database.
       #
-      # Reads QAEGIS_NEO4J_PASSWORD, not NEO4J_PASSWORD: this image treats the
-      # NEO4J_ prefix as its server-configuration namespace and warns about
-      # keys it does not recognize.
+      # NEO4J_USERNAME and NEO4J_PASSWORD are what cypher-shell reads, and they
+      # are set as a prefix on this one command rather than via `-p`, which
+      # would expose the password in the probe's process arguments.
+      #
+      # They must stay scoped to this command. Moving them into the service's
+      # `environment:` block would hand them to the Neo4j server too, which
+      # maps every NEO4J_-prefixed variable to a config setting and strict-
+      # validates it, so the container would crash-loop on an unrecognized
+      # setting named PASSWORD. That is why the value is sourced from
+      # QAEGIS_NEO4J_PASSWORD in .env instead of a NEO4J_-prefixed name.
       test:
         - CMD-SHELL
-        - cypher-shell -u neo4j -p "$${QAEGIS_NEO4J_PASSWORD}" "RETURN 1" || exit 1
+        - NEO4J_USERNAME=neo4j NEO4J_PASSWORD="$${QAEGIS_NEO4J_PASSWORD}" cypher-shell "RETURN 1" || exit 1
       interval: 15s
       timeout: 10s
       retries: 10

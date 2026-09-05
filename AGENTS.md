@@ -10,6 +10,10 @@ Q-AEGIS Shield: a platform that classifies data sensitivity, continuously scores
 
 Never run `git commit`, `git push`, `git merge`, or `gh pr merge` autonomously. Always stop and present the exact command(s) for a human to review and run themselves, with a short explanation of what each does. This applies to every session, regardless of who is driving.
 
+## Writing style for commits, PRs, and comments
+
+Write PR descriptions and commit messages the way a developer actually would: state what changed and why, plainly. No exhaustive self-narrated structure, no explaining why a section exists before the section, no restating obvious inferences. If a sentence would only be there to sound thorough, cut it.
+
 ## Repository layout
 
 ```
