@@ -4,12 +4,15 @@
 # highest-consequence modules require Udhav's review regardless of who authored
 # the change, and the frontend is Sukhmani's.
 #
-# NOTE ON ENFORCEMENT: this file only takes effect once "Require review from Code
-# Owners" is enabled in branch protection, AND every listed owner has write
-# access to the repository. An owner without write access is silently ignored by
-# GitHub rather than blocking the merge. As of the last check, UdhavFr has write
-# access but sukhideas is not yet a collaborator, so the frontend/ line below
-# would not enforce. See docs/decisions.md for the deferral rationale.
+# NOTE ON ENFORCEMENT: this file only takes effect while "Require review from
+# Code Owners" is enabled in branch protection AND every listed owner has write
+# access. An owner without write access is silently ignored by GitHub rather
+# than blocking the merge, so a typo or a removed collaborator degrades this
+# file into a no-op without any error.
+#
+# As of 2026-09-05 both owners have write access and enforcement is enabled.
+# If either is ever removed from the repository, their lines here stop
+# enforcing silently. See docs/decisions.md.
 
 # Crypto engine, SPEC.md 3.7 and 3.9, PRD FR-6 and FR-8.
 backend/app/crypto/    @UdhavFr
