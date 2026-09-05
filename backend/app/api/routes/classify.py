@@ -1,18 +1,16 @@
-"""Classification endpoint, ``SPEC.md`` 3.2's ``POST /classify`` contract.
+"""Sensitivity classification endpoint, ``SPEC.md`` 3.2, ``PRD.md`` FR-1."""
 
-Backed by the keyword-rule STUB in :mod:`app.classifier.stub_classifier`. The
-API contract here is the real one and is not expected to change when the stub is
-replaced by the real model, apart from ``content`` dropping out of the request
-once a document store exists to resolve ``document_id`` against.
-"""
+from uuid import UUID
 
-from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, status
 
-from fastapi import APIRouter, status
-
-from app.api.deps import ClassifyCaller
+from app.api.deps import ClassifyCaller, DbSession, resolve_seeded_actor
 from app.classifier.schemas import ClassificationRequest, ClassificationResponse
 from app.classifier.stub_classifier import classify
+from app.db.enums import AuditEventType
+from app.db.repositories import audit as audit_repo
+from app.db.repositories import classification as classification_repo
+from app.db.repositories import documents as documents_repo
 
 router = APIRouter(tags=["classifier"])
 
@@ -25,35 +23,65 @@ router = APIRouter(tags=["classifier"])
 )
 def classify_document(
     request: ClassificationRequest,
+    session: DbSession,
     caller: ClassifyCaller,
 ) -> ClassificationResponse:
-    """Classify one document and return its label, confidence, and provenance.
+    """Classify a document, persist the result, and record it in the audit log.
 
-    A confidence score below the configured threshold escalates the returned
-    label to the more sensitive option and sets ``is_defaulted`` to True, per
-    ``PRD.md`` FR-1. Clients must treat ``is_defaulted`` as a prompt for analyst
-    review, not as an error.
+    The classification row, the audit entry, and the document's status change all
+    share the request's transaction. That is the requirement, not an optimisation:
+    ``PRD.md`` Section 7 treats a decision with no corresponding audit entry as a
+    defect, so a committed classification that lost its log entry to a partial
+    failure would itself be the defect.
 
-    NOT YET IMPLEMENTED, and required before this endpoint is complete against
-    ``PRD.md``: persisting the result to ``classification_metadata`` as a new
-    append-only row (FR-1, never overwriting a prior classification) and writing
-    a corresponding ``audit_log`` entry (FR-7). Until the database layer exists,
-    this endpoint computes and returns a classification without recording it. A
-    decision with no audit entry is a defect per ``PRD.md`` Section 7, so this
-    endpoint is not finished, only usable.
+    Note what the classifier is and is not: the label and confidence come from a
+    keyword stub (``SPEC.md`` 3.2), while the fail-safe escalation that low
+    confidence triggers is real and is not a stub.
 
-    Args:
-        request: The document reference and, for Phase 1 only, its inline text.
-        caller: Resolved caller role, injected by the authorization guard. The
-            guard runs before this body executes; an unauthorized caller never
-            reaches this code.
-
-    Returns:
-        The classification result.
+    Raises:
+        HTTPException: 404 if the document is not registered. Classifying an
+            unknown id would either violate the foreign key or, worse, invent a
+            document row from a classification request.
     """
+    document = documents_repo.get_document(session, request.document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_unknown_document_detail(request.document_id),
+        )
+
+    actor = resolve_seeded_actor(session, caller)
     result = classify(request.content)
+
+    row = classification_repo.append_classification(
+        session, document_id=document.id, result=result
+    )
+    audit_repo.append_entry(
+        session,
+        event_type=AuditEventType.CLASSIFICATION_COMPLETED.value,
+        document_id=document.id,
+        actor_id=actor.id,
+        payload=classification_repo.classification_audit_payload(
+            document_id=document.id,
+            result=result,
+            classification_id=row.id,
+        ),
+    )
+    documents_repo.mark_classified(session, document)
+
     return ClassificationResponse.from_result(
-        document_id=request.document_id,
+        document_id=document.id,
         result=result,
-        classified_at=datetime.now(timezone.utc),
+        # The persisted timestamp, not a fresh datetime.now(). The two would
+        # differ by microseconds, which is enough for the value an auditor reads
+        # in the response to disagree with the row it describes.
+        classified_at=row.classified_at,
+    )
+
+
+def _unknown_document_detail(document_id: UUID) -> str:
+    """Explain a 404 in terms of the action the caller needs to take."""
+    return (
+        f"No document registered with id {document_id}. Register it first via "
+        "POST /api/v1/documents."
     )

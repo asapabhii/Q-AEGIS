@@ -14,6 +14,98 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-05: audit appends carry a Merkle frontier instead of rereading the chain
+
+Decided by: Abhinav, from review feedback on PR #4.
+
+The first version of `append_entry` loaded a document's entire chain on every
+append, rehashed every payload, and rebuilt the tree from scratch. That is O(n)
+per write and O(n^2) over a chain's life, on the one write path every decision in
+the system passes through. The system chain, meaning rows with a null
+`document_id`, has no natural bound at all.
+
+`audit_log` now carries a `frontier` column, `[[size, hash], ...]`, holding the
+O(log n) Merkle state as of that row. An append reads only the current tail, found
+through the `no_forked_chain` index by the property that nothing builds on it, and
+extends that frontier. Details and the reasoning are in
+`docs/data-dictionary.md` under `audit_log`.
+
+What deliberately did not change: verification still rebuilds the root from the
+stored payloads and never reads `frontier` or `merkle_root_at_time` back. The
+whole point of `PRD.md` FR-7 is that an auditor does not have to trust state this
+system wrote, so the fast path is for writing only. `app.audit.merkle` holds both,
+and a property test asserts the incremental root equals a full rebuild at every
+length from 0 to 34; if they ever diverge, the incremental path is wrong.
+
+Rejected: keeping the full rebuild and treating this as acceptable at coursework
+data volumes. It would have been, right up until the risk engine started
+recomputing scores on a schedule, and by then the signature would have been baked
+into three other modules. Also rejected: dropping the per-row
+`merkle_root_at_time` so appends became trivially O(1). That column is what makes
+tampering detectable per row and is what external anchoring would commit to.
+
+Consequence worth stating: `frontier` is derived data living in an append-only
+table, and a wrong one would produce a plausible but wrong root for every entry
+after it. `frontier_from_json` therefore validates the structure, sizes, and
+digests on the way back in rather than trusting the database, and an append against
+a malformed frontier fails instead of continuing.
+
+### 2026-09-05: `docs/data-dictionary.md` is the schema's source of truth
+
+Decided by: Abhinav.
+
+`SPEC.md` Section 5 pointed the column-level data dictionary and ER diagram at a
+"system design reference document" that is not in this repository, and `docs/`
+has no `er-diagram.svg`. `AGENTS.md` already warned against inventing columns
+against a reference nobody can open, which left the data model blocked.
+
+The document exists outside the repository as the team's CIA-I submission. It is
+now used as a reference, not as the citation: `docs/data-dictionary.md` is
+written in-repo, is the cited source of truth, and `SPEC.md` Section 5 and
+`AGENTS.md`'s code-style note both point at it.
+
+Why in-repo rather than committing the PDF: a schema reference has to be
+reviewable in a diff and changeable in the same pull request as the migration
+that implements it. A binary attachment satisfies neither, and a column rename
+would then be invisible to review. Every place the models depart from CIA-I is
+listed in that file's "Deviations" section with the reason, so the coursework
+document stays traceable rather than being quietly overwritten.
+
+### 2026-09-05: Four schema calls made while writing the models
+
+Decided by: Abhinav. Detail and the full deviation list: `docs/data-dictionary.md`.
+
+Recorded here because each one is a choice someone could reasonably have made
+differently, and all four are cheap to change now and expensive later.
+
+**Sensitivity labels are stored uppercase.** CIA-I lowercases them. The shipped
+`SensitivityLabel` enum in `backend/app/classifier/labels.py` uses `PUBLIC` and
+already serializes that way in the live `/classify` response, so matching it
+keeps one representation across the API and the database instead of a mapping
+layer between them. The alternative meant editing the classifier owner's module
+and its tests to satisfy a casing preference. Changing this later means changing
+`labels.py` and the database enum in one pull request.
+
+**`audit_log` gains a `payload` column.** CIA-I stores only `payload_hash`. A
+hash with no payload can confirm that a stored row has not changed, but nobody
+can independently re-derive what the decision actually was, which is most of what
+`SPEC.md` 3.8 is for. The payload is stored as `jsonb` and hashed canonically, so
+the hash still verifies after a round trip through Postgres key reordering.
+
+**`audit_log` gains a nullable `actor_id`.** CIA-I's Output Screen 2 specifies an
+"Actor" column sourced from the acting user, but no column held one, so that
+screen could not have been built as specified. Nullable because system-initiated
+events have no human actor and a sentinel user row would be a false statement.
+
+**Development accounts are seeded by a script, not a migration.** Four tables
+have foreign keys to `users.id` while the API's identity source is still the
+header-trusting stub, so no request could satisfy them without a row per role.
+`python -m app.db.seed` is idempotent and labelled a stub in code, docstring, and
+tests. Deliberately not an Alembic data migration: a migration inserting people
+into `users` would run against every database the chain is ever applied to,
+including a future non-development one. It is deleted, along with the
+`first_by_role` lookup, when real authentication lands.
+
 ### 2026-09-05: Code Owner review and a one-approval minimum, now enabled
 
 Decided by: Abhinav. Supersedes the deferral logged on 2026-09-04.
