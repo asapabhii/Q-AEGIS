@@ -44,81 +44,81 @@ Organizations today apply a single, uniform encryption policy to nearly all data
 
 Each requirement has an ID, a priority (P0 blocks release of that capability, P1 expected, P2 nice to have this phase), acceptance criteria, and a backlog reference for traceability. Full technical implementation detail for each is in the correspondingly numbered `SPEC.md` section, referenced per requirement.
 
-### FR-1: Sensitivity Classification (P0, backlog PB-01, SPEC.md 5.2)
+### FR-1: Sensitivity Classification (P0, backlog PB-01, SPEC.md 3.2)
 The system assigns a sensitivity label and a confidence score to every submitted document.
 - Given a submitted document, the system returns a sensitivity label and a numeric confidence score.
 - Given a confidence score below the defined threshold, the system defaults to the more sensitive label, never the less sensitive one.
 - Every classification records which model version produced it.
 - A document can be reclassified over time; prior classifications are never overwritten, only superseded by a new record.
 
-### FR-2: Contextual Risk Scoring (P0, backlog PB-02, SPEC.md 5.3)
+### FR-2: Contextual Risk Scoring (P0, backlog PB-02, SPEC.md 3.3)
 The system continuously computes a risk value from signals beyond document content.
 - Risk recomputes on a defined schedule and immediately on defined trigger events (new device, after-hours access).
 - Each risk computation records the specific signals that contributed to it.
 - Risk scores are append-only; a new computation never overwrites a prior one.
 
-### FR-3: Multi-Agent Risk Assessment (P0, backlog PB-02/PB-03 inputs, SPEC.md 5.4)
+### FR-3: Multi-Agent Risk Assessment (P0, backlog PB-02/PB-03 inputs, SPEC.md 3.4)
 Five independent agents (security, compliance, contextual risk, quantum-readiness, sustainability) each score a given situation.
 - All five agents execute in parallel for a given assessment, not sequentially.
 - Each agent's output includes both a numeric score and a human-readable rationale.
 - A single agent's failure or timeout does not silently corrupt or block the overall assessment; the failure is recorded and visible.
 
-### FR-4: Trust Score Computation (P0, backlog PB-02/PB-03, SPEC.md 5.5)
+### FR-4: Trust Score Computation (P0, backlog PB-02/PB-03, SPEC.md 3.5)
 The system combines the five agent outputs into one continuously updated trust score via an explicit, explainable consensus function.
 - The consensus function's method (weights or aggregation logic) is documented and versioned, not an opaque black-box output.
 - Every trust score computation references the exact agent outputs that produced it.
 - Trust scores are append-only.
 
-### FR-5: Policy Override Gate (P0, backlog PB-03, SPEC.md 5.6)
+### FR-5: Policy Override Gate (P0, backlog PB-03, SPEC.md 3.6)
 A deterministic rule layer can override any AI-generated recommendation.
 - A compliance-authored rule, when its condition matches, produces the defined action regardless of what the AI recommended.
 - The system records whether a given decision was overridden by a rule, and which rule, for every decision.
 - The common case, no rule fires and the AI recommendation stands, is a normal, correctly modeled outcome, not a workaround.
 
-### FR-6: Crypto-Agile Protection Selection (P0, backlog PB-04, SPEC.md 5.7)
+### FR-6: Crypto-Agile Protection Selection (P0, backlog PB-04, SPEC.md 3.7)
 The system selects one of three protection profiles (AES-256, hybrid, full post-quantum) based on the current trust score, after the policy gate.
 - Every protection selection references the specific trust score that drove it.
 - Profile selection is re-evaluated when the underlying trust score changes materially, not fixed permanently at first classification.
 
-### FR-7: Tamper-Evident Audit Logging (P0, backlog PB-05, SPEC.md 5.8)
+### FR-7: Tamper-Evident Audit Logging (P0, backlog PB-05, SPEC.md 3.8)
 Every decision made anywhere in the pipeline (classification, risk score, agent output, trust score, policy decision, protection selection) is written to a permanent, chained, independently verifiable log.
 - A verification operation can be run by a party independent of the system's operators and will detect any alteration to any prior entry.
 - The log is structurally append-only; no code path can update or delete an existing entry.
 
-### FR-8: Crypto-Shredding / Erasure (P1, backlog PB-06, SPEC.md 5.9)
+### FR-8: Crypto-Shredding / Erasure (P1, backlog PB-06, SPEC.md 3.9)
 A data owner's right-to-erasure request results in the underlying document becoming permanently unreadable, without deleting the audit trail that proves the request was made and honored.
 - Erasure destroys the document's specific encryption key, not the audit log entries referencing it.
 - Key destruction is irreversible once confirmed, no recovery path exists past that point.
 
-### FR-9: Migration Prioritization (P1, backlog PB-07, SPEC.md 5.10)
+### FR-9: Migration Prioritization (P1, backlog PB-07, SPEC.md 3.10)
 The system ranks which protected documents should be upgraded to full post-quantum protection first, under a defined budget or time constraint.
 - The ranking method is measured against at least one simpler baseline method on the same constraint set before any claim is made about its quality.
 - Ranking output includes the specific constraint values used to produce it (not just the resulting order).
 
-### FR-10: Knowledge Graph Reasoning (P2, backlog PB-09, SPEC.md 5.11)
+### FR-10: Knowledge Graph Reasoning (P2, backlog PB-09, SPEC.md 3.11)
 The system can surface multi-hop relationships (employee, repository, vendor, cloud asset) relevant to an attack path that would not be visible from a single event in isolation.
 
-### FR-11: Agentic Retrieval / Q&A (P2, backlog PB-08, SPEC.md 5.12)
+### FR-11: Agentic Retrieval / Q&A (P2, backlog PB-08, SPEC.md 3.12)
 A user can ask a natural-language question about a security event and receive an answer grounded in and verified against actual system records, not an unverified generated response.
 
-### FR-12: Manual Override Workflow (P0, backlog PB-11, SPEC.md 5.13, Input Screen 2)
+### FR-12: Manual Override Workflow (P0, backlog PB-11, SPEC.md 3.13, Input Screen 2)
 A Security Analyst can override an AI classification through a dedicated screen.
 - Submission requires a justification of at least 20 characters.
 - Submission requires explicit confirmation that the action will be permanently logged.
 - The submit action is disabled until that confirmation is given.
 
-### FR-13: Policy Rule Authoring (P0, backlog PB-12, SPEC.md 5.13, Input Screen 3)
+### FR-13: Policy Rule Authoring (P0, backlog PB-12, SPEC.md 3.13, Input Screen 3)
 A Compliance Officer can author a new override rule through a dedicated screen.
 - A rule requires a unique name and at least one condition before it can be saved.
 - A "test rule" action evaluates the rule against recent historical decisions without applying its action, before the rule goes live.
 
-### FR-14: Risk Dashboard (P0, backlog PB-13, SPEC.md 5.13, Output Screen 1)
+### FR-14: Risk Dashboard (P0, backlog PB-13, SPEC.md 3.13, Output Screen 1)
 A Security Admin can view an aggregate, near-real-time view of risk and protection status across all monitored documents.
 
-### FR-15: Audit Viewer (P0, backlog PB-14, SPEC.md 5.13, Output Screen 2)
+### FR-15: Audit Viewer (P0, backlog PB-14, SPEC.md 3.13, Output Screen 2)
 An Auditor can view the full chained decision history for a specific document and independently trigger a full-chain verification.
 
-### FR-16: Document Summary Report (P1, backlog PB-15, SPEC.md 5.13, Output Screen 3)
+### FR-16: Document Summary Report (P1, backlog PB-15, SPEC.md 3.13, Output Screen 3)
 A Data Owner or Security Admin can generate an exportable (PDF and CSV) summary of a specific document's classification, protection, and risk breakdown.
 
 ---
@@ -145,7 +145,7 @@ A Data Owner or Security Admin can generate an exportable (PDF and CSV) summary 
 ## 9. Assumptions and dependencies
 
 - A labelled dataset for FR-1's real model does not exist yet and is a dependency, not an assumption already satisfied, do not build the real model against synthetic or assumed labels.
-- FR-10 and FR-11 depend on FR-4 and FR-7 being stable first, they are sequenced later in the build order for that reason (see `SPEC.md` Section 9).
+- FR-10 and FR-11 depend on FR-4 and FR-7 being stable first, they are sequenced later in the build order for that reason (see `SPEC.md` Section 7).
 - All personas in Section 5 are assumed to be internal to the organization deploying this system this phase; no external/public-facing access model is in scope.
 
 ## 10. Risks
@@ -162,19 +162,19 @@ Maps directly to `SPEC.md` Section 7's build order. Phase 1 (current): repo scaf
 
 | FR | Backlog ID | SPEC.md section | Primary owner |
 |---|---|---|---|
-| FR-1 | PB-01 | 5.2 | Sukhmani |
-| FR-2 | PB-02 | 5.3 | Abhinav |
-| FR-3 | PB-02/PB-03 | 5.4 | Abhinav |
-| FR-4 | PB-02/PB-03 | 5.5 | Abhinav |
-| FR-5 | PB-03 | 5.6 | Udhav |
-| FR-6 | PB-04 | 5.7 | Udhav |
-| FR-7 | PB-05 | 5.8 | Udhav |
-| FR-8 | PB-06 | 5.9 | Udhav |
-| FR-9 | PB-07 | 5.10 | Udhav |
-| FR-10 | PB-09 | 5.11 | Abhinav |
-| FR-11 | PB-08 | 5.12 | Abhinav |
-| FR-12 | PB-11 | 5.13 | Sukhmani |
-| FR-13 | PB-12 | 5.13 | Sukhmani |
-| FR-14 | PB-13 | 5.13 | Sukhmani |
-| FR-15 | PB-14 | 5.13 | Sukhmani |
-| FR-16 | PB-15 | 5.13 | Sukhmani |
+| FR-1 | PB-01 | 3.2 | Sukhmani |
+| FR-2 | PB-02 | 3.3 | Abhinav |
+| FR-3 | PB-02/PB-03 | 3.4 | Abhinav |
+| FR-4 | PB-02/PB-03 | 3.5 | Abhinav |
+| FR-5 | PB-03 | 3.6 | Udhav |
+| FR-6 | PB-04 | 3.7 | Udhav |
+| FR-7 | PB-05 | 3.8 | Udhav |
+| FR-8 | PB-06 | 3.9 | Udhav |
+| FR-9 | PB-07 | 3.10 | Udhav |
+| FR-10 | PB-09 | 3.11 | Abhinav |
+| FR-11 | PB-08 | 3.12 | Abhinav |
+| FR-12 | PB-11 | 3.13 | Sukhmani |
+| FR-13 | PB-12 | 3.13 | Sukhmani |
+| FR-14 | PB-13 | 3.13 | Sukhmani |
+| FR-15 | PB-14 | 3.13 | Sukhmani |
+| FR-16 | PB-15 | 3.13 | Sukhmani |
