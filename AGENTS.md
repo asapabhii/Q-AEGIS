@@ -21,7 +21,7 @@ backend/app/{classifier,risk_engine,agents,trust_engine,policy,crypto,audit,sche
 backend/tests/
 frontend/src/
 infra/           # docker-compose, deployment config
-docs/            # architecture-diagram.svg, er-diagram.svg, decisions.md
+docs/            # data-dictionary.md (schema source of truth), decisions.md, LOCAL_DEV.md
 ```
 
 Each `backend/app/` subpackage corresponds to exactly one numbered module in `SPEC.md` Section 3. Do not merge modules together for convenience, the separation is structural, not cosmetic.
@@ -57,7 +57,7 @@ Full detail: `WORK_DIVISION.md`.
 
 ## Code style
 
-Backend: Python, `black` formatting, `flake8` linting, type hints on every function signature. Pydantic models for every API request/response, no raw dicts crossing an API boundary. SQLAlchemy models mirror the data dictionary in the system design document exactly, do not rename a column without updating that document in the same PR. Note before writing the first model: that document is referenced by `SPEC.md` Section 5 but is not in this repository, and `docs/` has no ER diagram. Settle that first, either bring the document in under `docs/` or define the schema in-repo and make it the cited source of truth. Do not invent columns against a reference nobody can open.
+Backend: Python, `black` formatting, `flake8` linting, type hints on every function signature. Pydantic models for every API request/response, no raw dicts crossing an API boundary. SQLAlchemy models mirror `docs/data-dictionary.md` exactly, that file is the schema's source of truth. Do not rename a column, change a type, or add a constraint without updating it in the same PR as the migration. If a model and that document disagree, the document is what review will hold you to. Do not reintroduce a citation to an external system design document; that is what left the data model blocked before, and its content now lives in `docs/data-dictionary.md`.
 
 Frontend: TypeScript only, no plain `.js` files. Tailwind for styling. Centralize API calls in `frontend/src/lib/api/`, no inline `fetch()` calls scattered through components.
 

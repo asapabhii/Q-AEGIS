@@ -32,8 +32,10 @@ def create_app() -> FastAPI:
             "protection, and tamper-evident audit logging."
         ),
         description=(
-            "Phase 1 build. Live endpoints are the health check and the "
-            "classifier stub. See SPEC.md Section 7 for the full build order."
+            "Phase 2 build. Live endpoints are the health check, document "
+            "registration, and the classifier stub, the last of which now "
+            "persists its result and an audit log entry. See SPEC.md Section 7 "
+            "for the full build order."
         ),
     )
     application.include_router(api_router)

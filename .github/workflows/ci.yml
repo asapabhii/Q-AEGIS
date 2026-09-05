@@ -37,6 +37,42 @@ jobs:
       run:
         working-directory: backend
 
+    # The data model's tests run against a real Postgres, not SQLite and not a
+    # mock. They have to: the guarantees under test are a plpgsql trigger
+    # rejecting UPDATE and DELETE, a partial unique index, NULLS NOT DISTINCT,
+    # and CHECK constraints, none of which SQLite has. A stand-in would let all
+    # of them pass while the real database enforced nothing.
+    #
+    # Version pinned to match infra/docker-compose.yml. NULLS NOT DISTINCT needs
+    # Postgres 15 or newer, so a silent downgrade here would fail the audit log's
+    # fork-prevention test rather than warn.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: qaegis_test
+          POSTGRES_USER: qaegis
+          # CI-only, ephemeral, and reachable solely from this job's containers.
+          # Not a secret in any meaningful sense; a GitHub secret here would
+          # imply otherwise while protecting nothing.
+          POSTGRES_PASSWORD: ci-throwaway
+        ports:
+          - 5432:5432
+        # Without this the first migration races the database's startup and the
+        # job fails intermittently on connection refused.
+        options: >-
+          --health-cmd "pg_isready -U qaegis -d qaegis_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The test suite runs `alembic upgrade head` itself, so the schema under
+      # test is built by the same migration a developer runs, not by
+      # create_all(). A migration that works against the models but not against
+      # an empty database would fail here rather than in someone's local setup.
+      DATABASE_URL: postgresql+psycopg://qaegis:ci-throwaway@127.0.0.1:5432/qaegis_test
+
     steps:
       - uses: actions/checkout@v4
 
