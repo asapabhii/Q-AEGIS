@@ -89,10 +89,25 @@ scope this phase anyway per `PRD.md` NG4. The same objection rules out an OPA
 sidecar answering over HTTP, which is why evaluation runs in-process via a
 WebAssembly bundle; that also avoids adding a container to
 `infra/docker-compose.yml` and the TLS obligation `AGENTS.md` places on local
-compose services. The in-process Python host is `opa-wasmtime`, which is third
-party and small, so if it proves unreliable the fallback is a localhost sidecar and
-accepting the network hop. That is a reversible implementation detail; the language
-choice is not.
+compose services.
+
+The in-process host is `opa-wasmtime`, checked against PyPI on 2026-09-05: version
+0.1.1, released September 2025, built on `wasmtime`, and it resolves cleanly on the
+Python 3.13 this repository pins. It is one author and two releases, so it is the
+weakest link in this decision and is named here precisely so nobody swaps it
+casually. In particular, do not switch to `opa-wasm`, which looks like the more
+established choice at version 0.3.2 and is not: its last release was November 2022
+and it depends on `wasmer`, whose Python bindings stopped at version 1.1.0 in
+January 2022 and ship no wheel newer than CPython 3.10. It cannot install on 3.13
+at all. There is no well-maintained in-process OPA runtime for Python; that is the
+honest state of the ecosystem, not a gap in the search.
+
+If `opa-wasmtime` disappoints, the fallback ladder in order is: invoke the
+first-party `opa` binary as a subprocess, which keeps evaluation local with no
+container, no socket and no third-party binding at the cost of process spawn
+latency; and only then a localhost sidecar over HTTP, accepting the network hop.
+Both are reversible implementation details. The language choice is not, which is
+why it is the part of this entry that had to be got right.
 
 Revisit if: the condition operator set stays as small as it currently looks. At
 that point a hand-written evaluator over a closed operator set would be fully
@@ -167,9 +182,9 @@ system.
 2025 Apple acqui-hire in better shape than 2.2 implies. It is still CNCF Graduated
 with governance, licence and monthly release cadence unchanged, its maintainers now
 span Apple, Google and Microsoft, and v1.19.0 shipped in July 2026. What did change
-is the commercial layer: Styra has wound down, styra.com no longer resolves, and
-its paid products, Enterprise OPA, the OPA Control Plane, several SDKs and the
-Regal linter, were open-sourced into the CNCF OPA organisation. 2.2's "less settled
+is the commercial layer: Styra's commercial offerings have been wound down, and its
+paid products, Enterprise OPA, the OPA Control Plane, several SDKs and the Regal
+linter, were open-sourced into the CNCF OPA organisation. 2.2's "less settled
 than it was" is fair about the commercial tooling and wrong about the project.
 Cedar is healthy but AWS-led rather than foundation-governed, a different risk of
 the same kind that 2.2 does not mention.
@@ -182,8 +197,10 @@ through 3.14 including Windows. OPA's canonical deployment is a sidecar answerin
 over HTTP, which is first-party but adds a container to
 `infra/docker-compose.yml`, a network hop inside the decision path, and a TLS
 obligation, since `AGENTS.md` requires TLS in transit for local compose services
-too. In-process OPA means compiling Rego to WebAssembly and running it through
-`opa-wasmtime`, also third party.
+too. In-process OPA means compiling Rego to WebAssembly and running the bundle
+through a Python WebAssembly runtime, also third party. Two candidates exist on
+PyPI and only one of them is usable here, so the names matter and are recorded
+below rather than left to whoever installs it.
 
 **AWS Verified Permissions is rejected whichever engine wins.** A policy decision
 and its `audit_log` entry commit in one Postgres transaction. A network call to a
