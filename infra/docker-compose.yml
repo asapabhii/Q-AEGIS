@@ -112,7 +112,24 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
+      # REDISCLI_AUTH rather than `redis-cli -a <password>`. This narrows where
+      # the password is readable; it does not make it unreadable, so do not
+      # treat it as more than it is:
+      #
+      #   -a <password>  puts it in the process command line, exposed via
+      #                  /proc/<pid>/cmdline, `docker top`, and any process
+      #                  listing inside the container.
+      #   REDISCLI_AUTH  puts it in that one probe process's environment,
+      #                  exposed via /proc/<pid>/environ, still readable by root
+      #                  or the same UID in the container while the probe runs.
+      #
+      # The gain is narrower exposure, not secrecy: command lines are readable
+      # by any process, whereas a process's environ is not, and it is no longer
+      # part of the service-wide environment. It also drops the "using a
+      # password with -a is insecure" warning printed on every probe.
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG
       interval: 10s
       timeout: 5s
       retries: 5
@@ -146,12 +163,26 @@ services:
       # Runs a real query rather than checking that the port is open, because
       # Neo4j accepts connections before it finishes opening the database.
       #
-      # Reads QAEGIS_NEO4J_PASSWORD, not NEO4J_PASSWORD: this image treats the
-      # NEO4J_ prefix as its server-configuration namespace and warns about
-      # keys it does not recognize.
+      # NEO4J_USERNAME and NEO4J_PASSWORD are what cypher-shell reads, set as a
+      # prefix on this one command rather than passed via `-p`. Same tradeoff as
+      # the Redis probe above: this keeps the password out of the process
+      # command line, but it is still present in that process's environment,
+      # so it is narrower exposure rather than none.
+      #
+      # They must stay scoped to this command, for a second and harder reason:
+      # moving them into the service's `environment:` block hands them to the
+      # Neo4j server too, which maps every NEO4J_-prefixed variable to a config
+      # setting and strict-validates the result. Verified against
+      # neo4j:5-community, the container then refuses to start with:
+      #
+      #   Failed to read config: Unrecognized setting. No declared setting with
+      #   name: PASSWORD.
+      #
+      # That is also why the value is sourced from QAEGIS_NEO4J_PASSWORD in .env
+      # rather than a NEO4J_-prefixed name.
       test:
         - CMD-SHELL
-        - cypher-shell -u neo4j -p "$${QAEGIS_NEO4J_PASSWORD}" "RETURN 1" || exit 1
+        - NEO4J_USERNAME=neo4j NEO4J_PASSWORD="$${QAEGIS_NEO4J_PASSWORD}" cypher-shell "RETURN 1" || exit 1
       interval: 15s
       timeout: 10s
       retries: 10
