@@ -312,6 +312,7 @@ pipeline writes exactly one row here (`PRD.md` FR-7).
 | `payload_hash` | `char(64)` | no | SHA-256 of the canonical serialisation of `payload` |
 | `prev_hash` | `char(64)` | **yes** | `payload_hash` of the preceding row in the same chain. Null on the genesis entry, which by definition has no predecessor |
 | `merkle_root_at_time` | `char(64)` | no | Merkle root over the chain as of this row |
+| `frontier` | `jsonb` | no | Merkle frontier as of this row, `[[size, hash], ...]`. See below |
 | `created_at` | `timestamptz` | no | Indexed, defaults to `now()` |
 
 **Chains are per document.** `prev_hash` refers to the previous entry for the
@@ -334,6 +335,30 @@ lock is the courtesy.
 to confirm that each hash matches the actual event data, which is impossible if
 the data was never stored. `backend/app/audit/merkle.py`'s `canonicalize()`
 already expects the payload mapping.
+
+**`frontier` keeps appends off the O(n²) path.** A tree of `n` leaves decomposes
+into one complete subtree per set bit of `n`, and those subtree roots are all the
+state an append needs, so a chain of 11 entries carries three of them. Stored per
+row, an append reads only the current tail: one indexed lookup instead of
+rehashing every prior payload, which would cost O(n) per write and O(n²) over a
+chain's life on the one path every decision in the system goes through.
+
+It is derived data, like `merkle_root_at_time` beside it, and is trusted exactly
+as little: verification recomputes the root from the stored payloads and reads
+neither column back. Sizes are stored alongside the hashes rather than inferred
+from a row count so the value is self-describing and can be validated on its own,
+and `app.audit.merkle.frontier_from_json` does validate it rather than trusting
+what comes out of the database. A property test asserts the incremental root and
+the full recomputation agree across a range of chain lengths; if they ever
+diverge, the incremental path is wrong.
+
+**Finding the tail does not need a sort.** The tail is the entry whose
+`payload_hash` no other entry in the chain claims as its `prev_hash`, which the
+`no_forked_chain` index answers directly. Ordering by `created_at` would be wrong
+regardless: it defaults to a transaction-scoped `now()`, so entries written in one
+transaction share it exactly and their order would be arbitrary. More than one
+tail means a fork, and appending refuses rather than burying a tampered chain
+under valid-looking entries.
 
 Honest limit on the chain itself: `prev_hash` links rows but is not itself
 covered by `payload_hash`, so an attacker with write access could recompute a

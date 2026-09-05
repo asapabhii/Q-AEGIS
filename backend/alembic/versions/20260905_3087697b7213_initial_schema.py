@@ -253,6 +253,7 @@ def upgrade() -> None:
         sa.Column("payload_hash", sa.CHAR(length=64), nullable=False),
         sa.Column("prev_hash", sa.CHAR(length=64), nullable=True),
         sa.Column("merkle_root_at_time", sa.CHAR(length=64), nullable=False),
+        sa.Column("frontier", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
