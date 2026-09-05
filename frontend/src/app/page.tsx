@@ -69,7 +69,8 @@ export default function DashboardPage() {
   const [content, setContent] = useState(
     "This document contains confidential financial projections and restricted trade secrets."
   );
-  const [document, setDocument] = useState<DocumentResponse | null>(null);
+  const [registeredDocument, setRegisteredDocument] =
+    useState<DocumentResponse | null>(null);
   const [classification, setClassification] =
     useState<ClassificationResponse | null>(null);
   const [classifyError, setClassifyError] = useState<string | null>(null);
@@ -95,12 +96,12 @@ export default function DashboardPage() {
   const handleClassify = useCallback(async () => {
     setClassifyLoading(true);
     setClassifyError(null);
-    setDocument(null);
+    setRegisteredDocument(null);
     setClassification(null);
     try {
       const { document: doc, classification: cls } =
         await registerAndClassify(filename, content, role);
-      setDocument(doc);
+      setRegisteredDocument(doc);
       setClassification(cls);
     } catch (err) {
       setClassifyError(
@@ -296,7 +297,7 @@ export default function DashboardPage() {
 
             {/* Right: results */}
             <div className="space-y-4">
-              {document && (
+              {registeredDocument && (
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
                   <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
                     Step 1 — Document Registered
@@ -307,21 +308,21 @@ export default function DashboardPage() {
                         ID
                       </dt>
                       <dd className="font-mono text-xs">
-                        {document.id}
+                        {registeredDocument.id}
                       </dd>
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-[var(--color-text-secondary)]">
                         Filename
                       </dt>
-                      <dd>{document.filename}</dd>
+                      <dd>{registeredDocument.filename}</dd>
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-[var(--color-text-secondary)]">
                         Status
                       </dt>
                       <dd className="text-cyan-400 font-medium">
-                        {document.current_status}
+                        {registeredDocument.current_status}
                       </dd>
                     </div>
                   </dl>
@@ -431,7 +432,7 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {!document && !classification && !classifyError && (
+              {!registeredDocument && !classification && !classifyError && (
                 <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
                   Results will appear here
                 </div>

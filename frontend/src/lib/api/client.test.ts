@@ -199,4 +199,38 @@ describe("classifyDocument", () => {
       )
     ).rejects.toThrow(/503/);
   });
+
+  it("formats 422 validation errors with readable msg rather than [object Object]", async () => {
+    const validationErrorBody = {
+      detail: [
+        {
+          type: "string_too_long",
+          loc: ["body", "content"],
+          msg: "String should have at most 1000000 characters",
+          input: "oversized content",
+        },
+      ],
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(validationErrorBody, 422));
+
+    let caughtError: unknown;
+    try {
+      await classifyDocument(
+        {
+          document_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          content: "oversized content",
+        },
+        "data_owner"
+      );
+    } catch (e) {
+      caughtError = e;
+    }
+    expect(caughtError).toBeInstanceOf(ApiError);
+    const apiErr = caughtError as ApiError;
+    expect(apiErr.status).toBe(422);
+    expect(apiErr.message).toContain(
+      "String should have at most 1000000 characters"
+    );
+    expect(apiErr.message).not.toContain("[object Object]");
+  });
 });

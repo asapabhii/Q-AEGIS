@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Q-AEGIS Shield — Frontend
+
+Frontend application for Q-AEGIS Shield (`SPEC.md` 3.13), built with Next.js (App Router), TypeScript, and Tailwind CSS.
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies and start the development server:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Available Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev`: Starts the local Next.js development server.
+- `npm run lint`: Runs ESLint over all source files.
+- `npm test`: Runs the Vitest test suite (`src/**/*.test.ts`).
+- `npm run build`: Compiles the production build.
 
-## Learn More
+## Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+The frontend reads one environment variable:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `NEXT_PUBLIC_API_URL`: The base URL of the backend API.
+  - **Default**: `http://127.0.0.1:8000`
+  - **Note on `127.0.0.1` vs `localhost`**: Always use `127.0.0.1`. On Windows, `localhost` resolves to IPv6 (`::1`) first while local services and containers bind on IPv4, resulting in timeouts or connection hangs rather than clean, fast connections.
+  - **Security**: Do not commit real endpoints, credentials, or keys. Local overrides belong in your gitignored `.env` file (see `docs/LOCAL_DEV.md`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Architecture Constraints (AGENTS.md)
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **TypeScript only**: No plain `.js` files.
+- **Centralized API**: All backend requests are routed through `src/lib/api/client.ts` with models defined in `src/lib/api/types.ts`. No inline `fetch()` calls in UI components.
+- **Authorization plumbing**: The `X-Q-AEGIS-Actor-Role` header is a development stub for role-based testing, not authentication. The server always decides authorization.

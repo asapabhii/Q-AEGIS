@@ -44,11 +44,9 @@ export type SensitivityLabel =
 export type DocumentStatus =
   | "registered"
   | "uploaded"
-  | "classifying"
   | "classified"
-  | "risk_assessed"
   | "protected"
-  | "shredded";
+  | "archived";
 
 // ---------------------------------------------------------------------------
 // Health

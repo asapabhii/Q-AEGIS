@@ -277,21 +277,51 @@ docker run --rm -p 127.0.0.1:8000:8000 q-aegis-backend:local
 
 ## 6. Frontend
 
-`frontend/src/` is an empty placeholder, the Next.js application is not scaffolded
-yet, and there is no frontend job in CI. Both are Sukhmani's to land
-(`SPEC.md` 3.13). Once it exists:
+The frontend application (`SPEC.md` 3.13) is scaffolded as a Next.js (App Router)
+project using TypeScript and Tailwind CSS in `frontend/`. It includes:
+
+- A centralized, strictly typed API client in `frontend/src/lib/api/client.ts`
+  that models backend Pydantic schemas and DB enums (`types.ts`), handling the
+  `X-Q-AEGIS-Actor-Role` header plumbing and formatting FastAPI error details.
+- The interactive classification workbench in `frontend/src/app/page.tsx`
+  demonstrating the two-step register-then-classify flow (`POST /api/v1/documents`
+  followed by `POST /api/v1/classify`).
+- A Vitest unit test suite (`frontend/src/lib/api/client.test.ts`) validating API
+  client request construction, header injection, and error formatting.
+- A `frontend` job in `.github/workflows/ci.yml` running `npm ci`, `npm run lint`,
+  `npm test`, and `npm run build` on every push and PR. (Note: this job is not yet
+  wired as a required branch protection check; Abhinav is adding it separately once
+  runs are established).
+
+### Development commands
 
 ```bash
 cd frontend
 npm install
-npm run dev
-npm run lint
+npm run dev        # start Next.js dev server at http://127.0.0.1:3000
+npm run lint       # run ESLint
+npm test           # run Vitest suite
+npm run build      # production build
 ```
 
-Constraints from `AGENTS.md`, worth knowing before the first file is written:
-TypeScript only, no plain `.js` files; Tailwind for styling; every API call goes
-through `frontend/src/lib/api/`, no inline `fetch()` scattered through
-components. UI that hides a control is never access control, the server decides.
+### Environment variables
+
+The frontend reads a single environment variable:
+
+- `NEXT_PUBLIC_API_URL`: Base URL for the backend API.
+  - **Default**: `http://127.0.0.1:8000`
+  - **Why `127.0.0.1` rather than `localhost`**: On Windows, `localhost` resolves
+    to IPv6 (`::1`) first while local services and containers publish on IPv4 only.
+    This leads to connection hangs rather than clean, fast connections. Always use
+    explicit `127.0.0.1`.
+  - To override for custom configurations, set `NEXT_PUBLIC_API_URL` in your local
+    `.env` file or shell. Remember that `.env` is gitignored and must never be
+    committed (`AGENTS.md`).
+
+Constraints from `AGENTS.md`: TypeScript only, no plain `.js` files; Tailwind for
+styling; every API call goes through `frontend/src/lib/api/`, no inline `fetch()`
+scattered through components. UI that hides a control is never access control, the
+server decides.
 
 ---
 

@@ -46,6 +46,20 @@ const ACTOR_ROLE_HEADER = "X-Q-AEGIS-Actor-Role";
 // Error handling
 // ---------------------------------------------------------------------------
 
+function formatDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item
+          ? String((item as Record<string, unknown>).msg)
+          : JSON.stringify(item)
+      )
+      .join("; ");
+  }
+  return JSON.stringify(detail);
+}
+
 /** Structured error thrown when the backend returns a non-2xx response. */
 export class ApiError extends Error {
   constructor(
@@ -55,7 +69,7 @@ export class ApiError extends Error {
   ) {
     const detail =
       body && typeof body === "object" && "detail" in body
-        ? String((body as Record<string, unknown>).detail)
+        ? formatDetail((body as Record<string, unknown>).detail)
         : statusText;
     super(`API ${status}: ${detail}`);
     this.name = "ApiError";
