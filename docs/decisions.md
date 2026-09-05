@@ -6,7 +6,7 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Pending
 
-- **Policy engine: Cedar vs OPA** (`SPEC.md` 2.2, `SPEC.md` 3.6). Not yet decided.
+- **Policy engine: Cedar vs OPA** (`SPEC.md` 2.2, `SPEC.md` 3.6). Not yet decided. Abhinav drives it to a conclusion with Udhav's input and logs it here; it is a hard blocker on the policy engine, so it needs to be settled before that module starts rather than discovered at its first commit. Cedar is the better-aligned default per 2.2 given FR-5's determinism requirement, but "default" is not "decided", and an unlogged assumption is the failure mode this file exists to prevent.
 - **Event bus: Redis Streams vs Kafka** (`SPEC.md` 2.3, `SPEC.md` 3.1). Default assumption is Redis Streams until a concrete scale need appears.
 - **Vector store: pgvector vs Qdrant** (`SPEC.md` 2.4, `SPEC.md` 3.12). Default assumption is pgvector until a measured latency or filtered-search problem appears.
 

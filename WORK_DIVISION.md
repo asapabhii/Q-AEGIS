@@ -7,6 +7,10 @@ Ownership by module. Reference: `SPEC.md` for what each module does, `PRD.md` fo
 ## Abhinav
 
 - Repository setup, CI/CD pipeline, branch protection.
+- **Data model and persistence layer, `SPEC.md` Section 5.** The twelve core PostgreSQL tables as SQLAlchemy models plus Alembic migrations, including the database-level append-only enforcement on `audit_log` that `AGENTS.md` requires. Nobody owned this before; it sat between three module owners and got skipped. It is on the critical path: `classification_metadata`, `risk_scores`, `trust_scores`, and `crypto_profiles` are append-only history tables, and Phase 3 cannot write a risk score, a trust score, or a policy decision anywhere until they exist, which blocks Udhav as much as it blocks the integration work.
+  - Known open defect this closes, tracked here so it is not mistaken for finished work: `POST /api/v1/classify` computes a classification and persists nothing, no `classification_metadata` row and no `audit_log` entry. `PRD.md` Section 7 states that a decision without a corresponding audit entry is a defect, so Phase 1 is functionally complete but has this gap open against it.
+  - Read before starting: `SPEC.md` Section 5 declines to define the schema and points at a "system design reference document" for the column-level data dictionary and ER diagram. That document is not in this repository and `docs/` has no `er-diagram.svg`. Either bring it in under `docs/` first or define the schema in-repo and make that the cited source of truth, but do not invent columns against a reference nobody can open.
+- **Drives the Cedar vs OPA decision to a logged conclusion, `SPEC.md` 2.2**, with Udhav, before Udhav starts the policy engine (`SPEC.md` 3.6). Udhav implements against whichever engine is chosen; the choice itself must not be defaulted to silently, and it blocks him the moment he opens 3.6.
 - Trust Score computation, `SPEC.md` 3.5, PRD FR-4.
 - Contextual risk engine, `SPEC.md` 3.3, PRD FR-2.
 - Multi-agent orchestration (LangGraph), `SPEC.md` 3.4, PRD FR-3.
@@ -17,7 +21,7 @@ Ownership by module. Reference: `SPEC.md` for what each module does, `PRD.md` fo
 
 ## Udhav
 
-- Policy engine, `SPEC.md` 3.6, PRD FR-5, including the Cedar vs OPA decision at implementation time.
+- Policy engine, `SPEC.md` 3.6, PRD FR-5. Implemented against whichever engine the Cedar vs OPA decision lands on; Abhinav drives that decision to a logged conclusion in `docs/decisions.md` with Udhav's input, since it gates this module's first line of code.
 - Crypto-Agile Protection Engine, `SPEC.md` 3.7, PRD FR-6.
 - Tamper-evident audit log, `SPEC.md` 3.8, PRD FR-7.
 - Crypto-shredding, `SPEC.md` 3.9, PRD FR-8.
