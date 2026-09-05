@@ -13,13 +13,19 @@ uvicorn[standard]==0.52.4
 pydantic==2.13.5
 pydantic-settings==2.15.0
 
+# Data model, SPEC.md Section 5. psycopg 3 (not psycopg2) because DATABASE_URL
+# uses the postgresql+psycopg driver; the [binary] extra ships prebuilt wheels
+# so neither a developer machine nor the image needs libpq and a compiler.
+sqlalchemy==2.0.52
+alembic==1.19.2
+psycopg[binary]==3.3.5
+
 # --- Deliberately NOT yet included ---
 # The full dependency set in SPEC.md Section 8 is not installed at Phase 1,
 # because no module imports any of it and several carry heavy or native build
 # requirements that would slow CI for no benefit. Each is added by the pull
 # request that first imports it:
 #
-#   sqlalchemy, alembic  -> data model (SPEC.md Section 5)
 #   redis                -> event bus (SPEC.md 3.1)
 #   langgraph            -> agent orchestration (SPEC.md 3.4)
 #   neo4j                -> knowledge graph (SPEC.md 3.11)

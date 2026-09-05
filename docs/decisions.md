@@ -14,6 +14,62 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-05: `docs/data-dictionary.md` is the schema's source of truth
+
+Decided by: Abhinav.
+
+`SPEC.md` Section 5 pointed the column-level data dictionary and ER diagram at a
+"system design reference document" that is not in this repository, and `docs/`
+has no `er-diagram.svg`. `AGENTS.md` already warned against inventing columns
+against a reference nobody can open, which left the data model blocked.
+
+The document exists outside the repository as the team's CIA-I submission. It is
+now used as a reference, not as the citation: `docs/data-dictionary.md` is
+written in-repo, is the cited source of truth, and `SPEC.md` Section 5 and
+`AGENTS.md`'s code-style note both point at it.
+
+Why in-repo rather than committing the PDF: a schema reference has to be
+reviewable in a diff and changeable in the same pull request as the migration
+that implements it. A binary attachment satisfies neither, and a column rename
+would then be invisible to review. Every place the models depart from CIA-I is
+listed in that file's "Deviations" section with the reason, so the coursework
+document stays traceable rather than being quietly overwritten.
+
+### 2026-09-05: Four schema calls made while writing the models
+
+Decided by: Abhinav. Detail and the full deviation list: `docs/data-dictionary.md`.
+
+Recorded here because each one is a choice someone could reasonably have made
+differently, and all four are cheap to change now and expensive later.
+
+**Sensitivity labels are stored uppercase.** CIA-I lowercases them. The shipped
+`SensitivityLabel` enum in `backend/app/classifier/labels.py` uses `PUBLIC` and
+already serializes that way in the live `/classify` response, so matching it
+keeps one representation across the API and the database instead of a mapping
+layer between them. The alternative meant editing the classifier owner's module
+and its tests to satisfy a casing preference. Changing this later means changing
+`labels.py` and the database enum in one pull request.
+
+**`audit_log` gains a `payload` column.** CIA-I stores only `payload_hash`. A
+hash with no payload can confirm that a stored row has not changed, but nobody
+can independently re-derive what the decision actually was, which is most of what
+`SPEC.md` 3.8 is for. The payload is stored as `jsonb` and hashed canonically, so
+the hash still verifies after a round trip through Postgres key reordering.
+
+**`audit_log` gains a nullable `actor_id`.** CIA-I's Output Screen 2 specifies an
+"Actor" column sourced from the acting user, but no column held one, so that
+screen could not have been built as specified. Nullable because system-initiated
+events have no human actor and a sentinel user row would be a false statement.
+
+**Development accounts are seeded by a script, not a migration.** Four tables
+have foreign keys to `users.id` while the API's identity source is still the
+header-trusting stub, so no request could satisfy them without a row per role.
+`python -m app.db.seed` is idempotent and labelled a stub in code, docstring, and
+tests. Deliberately not an Alembic data migration: a migration inserting people
+into `users` would run against every database the chain is ever applied to,
+including a future non-development one. It is deleted, along with the
+`first_by_role` lookup, when real authentication lands.
+
 ### 2026-09-05: Code Owner review and a one-approval minimum, now enabled
 
 Decided by: Abhinav. Supersedes the deferral logged on 2026-09-04.
