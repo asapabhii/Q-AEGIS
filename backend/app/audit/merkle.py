@@ -31,6 +31,14 @@ Design choices worth not undoing:
    distinct entry lists can produce an identical root. For a log whose entire
    purpose is detecting alteration, two inputs sharing a root is precisely the
    property that must not exist.
+
+4. **``build()`` and ``extend_frontier()`` must always agree.** There are two
+   ways to reach a root here, one reading every entry and one carrying forward
+   O(log n) state. They are not alternatives to pick between: the incremental
+   path exists so appending to a log is not quadratic, and the full path exists
+   so a verifier never has to trust carried-forward state. A property test
+   asserts they produce identical roots across a range of lengths. If a change
+   makes them diverge, the change is wrong, not the test.
 """
 
 import hashlib
@@ -72,6 +80,46 @@ class MerkleTree:
     root: str
     leaf_count: int
     levels: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
+class Subtree:
+    """One complete subtree in a frontier.
+
+    Attributes:
+        size: Number of leaves beneath it. Always a power of two, because only a
+            complete subtree can be summarized by a single hash.
+        hash: Hex-encoded root hash of that subtree.
+    """
+
+    size: int
+    hash: str
+
+
+@dataclass(frozen=True)
+class Frontier:
+    """The O(log n) state an append needs, instead of every prior entry.
+
+    Frozen, and :func:`extend_frontier` returns a new one rather than mutating.
+    A frontier is a claim about a specific entry sequence; a mutable one could be
+    advanced past the entries it was read alongside.
+
+    Attributes:
+        subtrees: Complete subtrees covering the entries so far, left to right,
+            with strictly decreasing sizes. Their sizes are the set bits of the
+            entry count, so a chain of 11 entries holds subtrees of 8, 2, and 1.
+    """
+
+    subtrees: tuple[Subtree, ...] = ()
+
+    @property
+    def leaf_count(self) -> int:
+        """Number of entries this frontier covers."""
+        return sum(subtree.size for subtree in self.subtrees)
+
+
+#: Frontier over no entries. The starting point for a chain's first append.
+EMPTY_FRONTIER = Frontier()
 
 
 @dataclass(frozen=True)
@@ -190,6 +238,128 @@ def build(entries: Sequence[bytes]) -> MerkleTree:
         leaf_count=len(leaves),
         levels=tuple(levels),
     )
+
+
+def extend_frontier(frontier: Frontier, entry: bytes) -> Frontier:
+    """Return the frontier covering ``frontier``'s entries followed by ``entry``.
+
+    Pure function. This is the append path's answer to a log that only grows:
+    computing a root by reading every prior entry costs O(n) per append and so
+    O(n^2) over the life of a chain, and the audit log is written to by every
+    decision the system makes.
+
+    How it stays correct. A tree of ``n`` leaves under this module's construction
+    decomposes into exactly one complete subtree per set bit of ``n``, largest
+    first, and that set of subtree roots is all the state an append needs. Adding
+    a leaf pushes a subtree of size one, then merges equal-sized neighbours while
+    the two rightmost match, which is binary increment carried out over hashes.
+    Design note 4 in the module docstring covers why this must agree with
+    :func:`build`, and a property test enforces it.
+
+    Args:
+        frontier: Frontier over the entries so far. Use :data:`EMPTY_FRONTIER`
+            for an empty chain.
+        entry: The new entry's canonical bytes, as :func:`canonicalize` returns.
+
+    Returns:
+        A new frontier. ``frontier`` is not modified.
+    """
+    subtrees = list(frontier.subtrees) + [Subtree(size=1, hash=hash_leaf(entry))]
+
+    while len(subtrees) > 1 and subtrees[-1].size == subtrees[-2].size:
+        right = subtrees.pop()
+        left = subtrees.pop()
+        subtrees.append(
+            Subtree(
+                size=left.size + right.size,
+                hash=hash_internal(left.hash, right.hash),
+            )
+        )
+
+    return Frontier(subtrees=tuple(subtrees))
+
+
+def root_of(frontier: Frontier) -> str:
+    """Return the Merkle root a frontier commits to.
+
+    The subtrees are folded from the right, which is what promoting an odd node
+    means expressed over subtree roots: a smaller trailing subtree is combined
+    into what sits to its left rather than being padded out to match it.
+
+    Args:
+        frontier: Any frontier, including :data:`EMPTY_FRONTIER`.
+
+    Returns:
+        Hex-encoded root. :data:`EMPTY_ROOT` for an empty frontier.
+    """
+    if not frontier.subtrees:
+        return EMPTY_ROOT
+
+    root = frontier.subtrees[-1].hash
+    for subtree in reversed(frontier.subtrees[:-1]):
+        root = hash_internal(subtree.hash, root)
+    return root
+
+
+def frontier_to_json(frontier: Frontier) -> list[list[Any]]:
+    """Return ``frontier`` as JSON-safe data, for storage beside an entry.
+
+    Each subtree becomes ``[size, hash]``. Sizes are stored rather than inferred
+    from a separate leaf count so the value is self-describing: it can be
+    validated on its own, and a chain's length is the sum of them.
+    """
+    return [[subtree.size, subtree.hash] for subtree in frontier.subtrees]
+
+
+def frontier_from_json(raw: Any) -> Frontier:
+    """Rebuild a frontier from what :func:`frontier_to_json` produced.
+
+    Validates rather than trusting. This value comes back out of the database,
+    and a malformed or tampered frontier would otherwise produce a plausible but
+    wrong root for every entry appended after it. Cheap to check here; expensive
+    to discover later.
+
+    Args:
+        raw: The stored value.
+
+    Returns:
+        The frontier it represents.
+
+    Raises:
+        ValueError: if the structure, sizes, or hashes are not what this module
+            writes. Sizes must be descending powers of two, since any other
+            shape cannot have come from :func:`extend_frontier`.
+    """
+    if not isinstance(raw, list):
+        raise ValueError(f"Frontier must be a list, got {type(raw).__name__}.")
+
+    subtrees: list[Subtree] = []
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise ValueError("Each frontier element must be a [size, hash] pair.")
+        size, digest = item
+        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+            raise ValueError(f"Frontier subtree size must be a positive int: {size!r}.")
+        if size & (size - 1):
+            raise ValueError(f"Frontier subtree size must be a power of two: {size}.")
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise ValueError("Frontier subtree hash must be a 64-character hex digest.")
+        try:
+            bytes.fromhex(digest)
+        except ValueError:
+            raise ValueError(
+                "Frontier subtree hash must be a 64-character hex digest."
+            ) from None
+        subtrees.append(Subtree(size=size, hash=digest))
+
+    for left, right in zip(subtrees, subtrees[1:]):
+        if left.size <= right.size:
+            raise ValueError(
+                "Frontier subtree sizes must strictly decrease: "
+                f"{left.size} is not greater than {right.size}."
+            )
+
+    return Frontier(subtrees=tuple(subtrees))
 
 
 def verify(entries: Sequence[bytes], expected_root: str) -> VerificationResult:

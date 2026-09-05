@@ -14,6 +14,42 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-05: audit appends carry a Merkle frontier instead of rereading the chain
+
+Decided by: Abhinav, from review feedback on PR #4.
+
+The first version of `append_entry` loaded a document's entire chain on every
+append, rehashed every payload, and rebuilt the tree from scratch. That is O(n)
+per write and O(n^2) over a chain's life, on the one write path every decision in
+the system passes through. The system chain, meaning rows with a null
+`document_id`, has no natural bound at all.
+
+`audit_log` now carries a `frontier` column, `[[size, hash], ...]`, holding the
+O(log n) Merkle state as of that row. An append reads only the current tail, found
+through the `no_forked_chain` index by the property that nothing builds on it, and
+extends that frontier. Details and the reasoning are in
+`docs/data-dictionary.md` under `audit_log`.
+
+What deliberately did not change: verification still rebuilds the root from the
+stored payloads and never reads `frontier` or `merkle_root_at_time` back. The
+whole point of `PRD.md` FR-7 is that an auditor does not have to trust state this
+system wrote, so the fast path is for writing only. `app.audit.merkle` holds both,
+and a property test asserts the incremental root equals a full rebuild at every
+length from 0 to 34; if they ever diverge, the incremental path is wrong.
+
+Rejected: keeping the full rebuild and treating this as acceptable at coursework
+data volumes. It would have been, right up until the risk engine started
+recomputing scores on a schedule, and by then the signature would have been baked
+into three other modules. Also rejected: dropping the per-row
+`merkle_root_at_time` so appends became trivially O(1). That column is what makes
+tampering detectable per row and is what external anchoring would commit to.
+
+Consequence worth stating: `frontier` is derived data living in an append-only
+table, and a wrong one would produce a plausible but wrong root for every entry
+after it. `frontier_from_json` therefore validates the structure, sizes, and
+digests on the way back in rather than trusting the database, and an append against
+a malformed frontier fails instead of continuing.
+
 ### 2026-09-05: `docs/data-dictionary.md` is the schema's source of truth
 
 Decided by: Abhinav.
