@@ -14,6 +14,31 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-05: Code Owner review and a one-approval minimum, now enabled
+
+Decided by: Abhinav. Supersedes the deferral logged on 2026-09-04.
+
+`@sukhideas` now has write access, so both owners named in `.github/CODEOWNERS`
+resolve and the silent no-op described in that earlier entry no longer applies.
+Branch protection on `main` is therefore tightened to:
+
+- `require_code_owner_reviews: true`
+- `required_approving_review_count: 1`
+
+Consequence worth stating plainly, because it changes everyone's workflow:
+GitHub does not let an author approve their own pull request. Every change to
+`main` now needs a second person, including Abhinav's. That is the intent, not a
+side effect, but it does mean no one can land work solo any more.
+
+Ordering note for anyone repeating this: enable the approval minimum only after
+any in-flight pull request has merged. Turning it on with an open PR authored by
+the sole admin blocks that PR outright, since there is nobody eligible to
+approve it.
+
+If a genuine emergency ever requires bypassing this, the honest route is to
+lower the setting, land the fix, and put it back, leaving the change visible in
+the audit trail. Do not add an exemption that quietly persists.
+
 ### 2026-09-04: Branching model, trunk-based with no long-lived branches
 
 Decided by: Abhinav.
