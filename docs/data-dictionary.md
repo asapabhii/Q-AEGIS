@@ -197,9 +197,15 @@ Append-only. One row per recomputation.
 |---|---|---|---|
 | `id` | `uuid` PK | no | |
 | `document_id` | `uuid` FK → `documents.id` | no | Indexed |
-| `risk_value` | `numeric(4,3)` | no | `0.000` to `1.000`, `CHECK` enforced. Aggregate across `agent_outputs` |
-| `context_snapshot` | `jsonb` | no | User, device, network, and behaviour signals as they were at computation time |
+| `risk_value` | `numeric(5,4)` | no | `0.0000` to `1.0000`, `CHECK` enforced. The contextual engine's own score (`SPEC.md` 3.3), not the five-agent aggregate |
+| `model_version` | `varchar(30)` | no | Formula that produced `risk_value`. Bumped when any weight changes |
+| `context_snapshot` | `jsonb` | no | Closed v1 set: `actor_user_id`, `device_id`, `device_is_new`, `accessed_at`, `after_hours`. Extra keys forbidden at the API. Caller-asserted facts, not derived |
 | `computed_at` | `timestamptz` | no | Indexed; dashboard queries filter by recency |
+
+`risk_value` is **not** an aggregate of `agent_outputs`. That aggregate is
+`trust_scores.consensus_value` (`SPEC.md` 3.5). 3.3 writes this table before
+3.4 exists; treating the column as a five-agent rollup would require inventing
+agent rows this phase does not have.
 
 ## `agent_outputs`
 
@@ -410,6 +416,14 @@ Each of these differs from the CIA-I Section 4 dictionary on purpose.
     `policy_action`.** CIA-I says "enum" for both without listing values. Sprint 3
     describes a matching rule's `action` becoming the `final_decision`, so all
     three share one domain.
+11. **`risk_scores.risk_value` is the contextual engine's score, not an
+    aggregate of `agent_outputs`.** The five-agent number is
+    `trust_scores.consensus_value`. The original sentence here was wrong: 3.3
+    writes `risk_scores` before 3.4 exists.
+12. **`risk_scores.risk_value` is `numeric(5,4)`**, not `numeric(4,3)`, and
+    **`model_version` is a required column.** The scorer rounds to four decimal
+    places, same reason as `confidence_score`. The version column is what makes a
+    stored score attributable after the placeholder weights change.
 
 ## Why Neo4j and the vector store are not here
 

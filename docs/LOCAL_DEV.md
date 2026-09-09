@@ -242,6 +242,34 @@ replacing them; the history tables are append-only and a trigger enforces it.
 There is no read endpoint for that history yet. If you need one, say so rather
 than querying the tables directly from the frontend.
 
+### Compute contextual risk
+
+`POST /api/v1/risk-scores` scores a closed snapshot. The server computes
+`risk_value`; the client cannot supply it. Roles: `security_analyst` and
+`security_admin` only. All five snapshot fields are required; extra keys are
+rejected. An unknown `document_id` is a 404.
+
+There is no scheduler and no event bus on this endpoint. Each call writes one
+`risk_scores` row and one `audit_log` entry in the same transaction. It does
+not change `documents.current_status`.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/risk-scores \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{
+    "document_id": "<the id from step 1>",
+    "actor_user_id": "<a users.id from python -m app.db.seed>",
+    "device_id": "laptop-12",
+    "device_is_new": true,
+    "accessed_at": "2026-09-09T22:15:00+00:00",
+    "after_hours": true
+  }'
+```
+
+`after_hours` is whatever the caller asserts, not something the server derives
+from `accessed_at`. Re-scoring appends a new row; prior scores stay.
+
 ### Test and lint
 
 Run all three before every pull request. CI runs exactly these and the coverage

@@ -34,6 +34,9 @@ class RiskScore(Base):
     ``PRD.md`` FR-2: risk recomputes on a schedule and on trigger events, each
     computation records the signals that contributed to it, and a new computation
     never overwrites a prior one. A database trigger rejects UPDATE.
+
+    ``risk_value`` is this engine's own score (``SPEC.md`` 3.3), not the
+    five-agent aggregate. That aggregate is ``trust_scores.consensus_value``.
     """
 
     __tablename__ = "risk_scores"
@@ -47,7 +50,11 @@ class RiskScore(Base):
         nullable=False,
         index=True,
     )
-    risk_value: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    # numeric(5,4), not (4,3): the scorer rounds to four decimal places, and
+    # three would store a different number than the API returned. Same reason
+    # as classification_metadata.confidence_score.
+    risk_value: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(30), nullable=False)
     context_snapshot: Mapped[dict[str, Any]] = jsonb_column()
     computed_at: Mapped[datetime] = created_timestamp(index=True)
 

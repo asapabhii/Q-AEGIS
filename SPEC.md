@@ -72,6 +72,8 @@ Implements PRD FR-1. Build order: a rule/keyword-based stub with a confidence he
 ### 3.3 Contextual Risk Engine
 Implements PRD FR-2. Recomputes on a defined schedule and on trigger events (new device login, after-hours access), not once at upload. Writes to `risk_scores`, with a `context_snapshot` jsonb column since the signal set will grow over time without requiring schema migrations for each new signal.
 
+v1 is caller-triggered via `POST /api/v1/risk-scores`; scheduled recomputes and the event bus are later work (the Redis Streams vs Kafka choice in 2.3 stays open until then). The v1 snapshot is a closed five-field set (`actor_user_id`, `device_id`, `device_is_new`, `accessed_at`, `after_hours`); `risk_value` is this engine's own score, not the five-agent aggregate (`trust_scores.consensus_value`).
+
 ### 3.4 Multi-Agent Risk Assessment
 Implements PRD FR-3. Five agents (security, compliance, contextual, quantum-readiness, sustainability) as parallel LangGraph nodes, not sequential calls. Each agent writes one row to `agent_outputs` including a `rationale` field, not only a numeric score, this is what powers the risk breakdown shown in the document summary report (PRD FR-16).
 
@@ -157,7 +159,7 @@ Status markers below describe what is actually merged to `main`, not what was pl
 
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
 2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening, branch protection, the data model, and the crypto-selector stub are complete. The stub maps a trust score to a profile; it does not persist and does not take a ``trust_score_id`` until Phase 3.
-3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked.
+3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked. 3.3's scoring function and `POST /api/v1/risk-scores` are complete; recomputes are still caller-triggered, not scheduled, and no event bus is wired.
 4. Crypto-shredding (3.9), agentic RAG (3.12), knowledge graph (3.11).
 5. Full LangGraph multi-agent orchestration (3.4), migration scheduler with real baseline benchmark (3.10).
 6. Full evaluation against PRD Section 8's success metrics.
