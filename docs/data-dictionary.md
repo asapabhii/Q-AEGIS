@@ -219,7 +219,8 @@ agent rows this phase does not have.
 
 Unique on `(risk_score_id, agent_type)`: one output per agent per assessment. A
 duplicate means an agent ran twice and the consensus function would double-count
-it.
+it. The Trust Engine (`SPEC.md` 3.5) refuses to compute from anything other than
+exactly these five types; a partial set is 422, not a silently short mean.
 
 A separate child table rather than five nullable columns on `risk_scores`, so a
 sixth agent type needs no migration and the one-to-five relationship is
@@ -236,7 +237,7 @@ Append-only. One row per recomputation. The Trust Engine's output
 | `document_id` | `uuid` FK → `documents.id` | no | Indexed |
 | `risk_score_id` | `uuid` FK → `risk_scores.id` | no | Indexed. The assessment whose `agent_outputs` produced this score |
 | `consensus_value` | `numeric(4,3)` | no | `0.000` to `1.000`, `CHECK` enforced |
-| `consensus_version` | `varchar(30)` | no | Version of the consensus function that produced this value |
+| `consensus_version` | `varchar(30)` | no | Version of the consensus function that produced this value. v1 is `trust-weighted-mean-0.1.0` |
 | `computed_at` | `timestamptz` | no | Indexed, defaults to `now()` |
 
 ## `policy_rules`

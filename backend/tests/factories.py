@@ -126,6 +126,19 @@ def make_agent_output(
     return row
 
 
+def make_all_agent_outputs(
+    session: Session,
+    risk_score: RiskScore,
+    *,
+    score: str = "0.700",
+) -> list[AgentOutput]:
+    """Create one ``agent_outputs`` row per ``AgentType``."""
+    return [
+        make_agent_output(session, risk_score, agent_type=agent_type, score=score)
+        for agent_type in AgentType
+    ]
+
+
 def make_trust_score(
     session: Session,
     document: Document,
@@ -138,7 +151,7 @@ def make_trust_score(
         document_id=document.id,
         risk_score_id=risk_score.id,
         consensus_value=Decimal(consensus_value),
-        consensus_version="weighted-mean-0.1",
+        consensus_version="trust-weighted-mean-0.1.0",
     )
     session.add(row)
     session.flush()

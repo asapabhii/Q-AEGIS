@@ -1,18 +1,17 @@
 """Trust score computation, ``SPEC.md`` 3.5, implements ``PRD.md`` FR-4.
 
-NOT IMPLEMENTED. Scheduled for Phase 3 (``SPEC.md`` Section 7). This package
-exists so the module boundary is fixed before code is written; it contains no
-logic, stubbed or otherwise.
+v1 is an equal-weight arithmetic mean over exactly the five ``AgentType``
+values, versioned as ``trust-weighted-mean-0.1.0``. The weights are placeholders;
+see ``docs/decisions.md``. A partial set is refused.
 
-When built: an explicit, documented, versioned consensus function over the five
-agent outputs, either a weighted average with published weights or a small
-explainable aggregator, never an opaque model call. ``trust_scores`` is
-append-only and every row references the exact ``agent_outputs`` rows that
-produced it.
+The five scores are caller-asserted until 3.4 exists to produce them. This
+package does not run agents and does not import LangGraph.
 
-Carries the same fail-safe rule as the classifier: ambiguity resolves toward
-LESS trust, never more. See ``app.classifier.labels`` for how that ordering is
-made explicit rather than implied.
+``trust_scores`` is append-only. Every row references the ``risk_score_id``
+whose ``agent_outputs`` produced it.
+
+Ambiguity resolves toward less trust, never more: a missing agent produces no
+score, not a default of 1.0.
 
 Owner: Abhinav (``WORK_DIVISION.md``).
 """
