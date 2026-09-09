@@ -87,6 +87,48 @@ def test_a_non_finite_score_is_rejected_by_the_schema() -> None:
             score=float("inf"),
             rationale="not a real number",
         )
+    with pytest.raises(ValidationError):
+        AgentOutputBody(
+            agent_type=AgentType.SECURITY,
+            score=Decimal("NaN"),
+            rationale="not a real number",
+        )
+    with pytest.raises(ValidationError):
+        AgentOutputBody(
+            agent_type=AgentType.SECURITY,
+            score=Decimal("Infinity"),
+            rationale="not a real number",
+        )
+    with pytest.raises(ValidationError):
+        AgentOutputBody(
+            agent_type=AgentType.SECURITY,
+            score="NaN",
+            rationale="not a real number",
+        )
+
+
+def test_duplicate_agent_type_is_named_in_the_schema_error() -> None:
+    from uuid import uuid4
+
+    from pydantic import ValidationError
+
+    from app.trust_engine.schemas import AgentOutputBody, TrustScoreRequest
+
+    bodies = [
+        AgentOutputBody(
+            agent_type=agent,
+            score=Decimal("0.5"),
+            rationale=f"{agent.value} assessed this snapshot.",
+        )
+        for agent in AgentType
+    ]
+    bodies[-1] = AgentOutputBody(
+        agent_type=AgentType.SECURITY,
+        score=Decimal("0.5"),
+        rationale="duplicate security",
+    )
+    with pytest.raises(ValidationError, match="Duplicate: security"):
+        TrustScoreRequest(risk_score_id=uuid4(), outputs=bodies)
 
 
 def test_four_agents_are_refused() -> None:

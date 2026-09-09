@@ -864,6 +864,7 @@ def test_trust_score_rejects_a_duplicate_agent_type(client: TestClient) -> None:
         TRUST_URL, json=trust_body(uuid4(), outputs=outputs), headers=ANALYST_HEADERS
     )
     assert response.status_code == 422
+    assert "Duplicate" in response.text
 
 
 def test_trust_score_rejects_a_boolean_score(client: TestClient) -> None:

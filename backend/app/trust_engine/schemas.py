@@ -36,6 +36,16 @@ class AgentOutputBody(BaseModel):
             raise ValueError("must be a finite number")
         if isinstance(value, float) and not math.isfinite(value):
             raise ValueError("must be a finite number")
+        if isinstance(value, Decimal) and not value.is_finite():
+            raise ValueError("must be a finite number")
+        return value
+
+    @field_validator("score")
+    @classmethod
+    def score_must_be_finite_decimal(cls, value: Decimal) -> Decimal:
+        """JSON has no NaN; a Decimal or string still can. Reject those too."""
+        if not value.is_finite():
+            raise ValueError("must be a finite number")
         return value
 
     @field_validator("rationale")
@@ -69,7 +79,14 @@ class TrustScoreRequest(BaseModel):
     @model_validator(mode="after")
     def outputs_must_be_the_five_types(self) -> "TrustScoreRequest":
         """A duplicate or a missing type is 422, not a silently short mean."""
-        seen = {item.agent_type for item in self.outputs}
+        types = [item.agent_type for item in self.outputs]
+        seen = set(types)
+        if len(seen) != len(types):
+            duplicates = sorted({item.value for item in types if types.count(item) > 1})
+            raise ValueError(
+                "Exactly one output is required for each agent type. "
+                f"Duplicate: {', '.join(duplicates)}."
+            )
         missing = [agent.value for agent in AgentType if agent not in seen]
         if missing:
             raise ValueError(
