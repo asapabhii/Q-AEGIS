@@ -1,4 +1,4 @@
-# Runtime dependencies, Phase 1.
+﻿# Runtime dependencies, Phase 1.
 #
 # Direct dependencies are pinned exactly so a local run, a CI run, and a Docker
 # build resolve to the same versions. Transitive dependencies are intentionally
@@ -31,7 +31,8 @@ psycopg[binary]==3.3.5
 #   neo4j                -> knowledge graph (SPEC.md 3.11)
 #   pgvector             -> agentic RAG (SPEC.md 3.12)
 #   qiskit               -> migration scheduler (SPEC.md 3.10)
-#   liboqs-python        -> crypto engine (SPEC.md 3.7). Pin the exact version
+liboqs-python==0.16.0  # crypto engine (SPEC.md 3.7)
+#   liboqs-python        -> crypto engine (SPEC.md 3.7) (SPEC.md 3.7). Pin the exact version
 #                           when added and re-run the full crypto suite after
 #                           any bump; this library's API has changed before.
 #                           liboqs is not independently audited.

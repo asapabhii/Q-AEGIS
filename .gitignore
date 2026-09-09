@@ -39,3 +39,6 @@ ROADMAP.md
 
 # Policy engine (will be implemented)
 backend/app/policy/rego/
+
+# Build tools
+cmake-4.4.3/
