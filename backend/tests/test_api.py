@@ -7,7 +7,8 @@ not, so it is tested as real behavior: a missing or unrecognized role must be
 refused rather than defaulted to some permitted value.
 
 What those endpoints *persist* is tested separately in ``test_api_persistence.py``.
-The policy gate (``SPEC.md`` 3.6) is covered here for auth and request validation.
+The policy gate (``SPEC.md`` 3.6) and trust consensus (``SPEC.md`` 3.5) are
+covered here for auth and request validation.
 """
 
 from decimal import Decimal
@@ -29,6 +30,7 @@ CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
 RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
+TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
 
 #: A role permitted to call /classify.
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
@@ -329,6 +331,7 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
     assert RISK_URL in paths
     assert POLICY_RULES_URL in paths
     assert POLICY_DECISIONS_URL in paths
+    assert TRUST_URL in paths
 
 
 # --------------------------------------------------------------------------
@@ -747,5 +750,190 @@ def test_a_non_unique_integrity_error_is_not_mapped_to_409(
     monkeypatch.setattr("app.api.routes.policy.policy_repo.insert_rule", boom)
     response = raising_client.post(
         POLICY_RULES_URL, json=policy_rule_body(), headers=COMPLIANCE_HEADERS
+    )
+    assert response.status_code == 500
+
+
+# --------------------------------------------------------------------------
+# POST /trust-scores, SPEC.md 3.5
+# --------------------------------------------------------------------------
+
+
+def agent_outputs_body(**score_overrides: str) -> list[dict[str, object]]:
+    scores = {
+        "security": "0.50",
+        "compliance": "0.50",
+        "contextual": "0.50",
+        "quantum": "0.50",
+        "sustainability": "0.50",
+    }
+    scores.update(score_overrides)
+    return [
+        {
+            "agent_type": agent,
+            "score": score,
+            "rationale": f"{agent} assessed this snapshot.",
+        }
+        for agent, score in scores.items()
+    ]
+
+
+def trust_body(risk_score_id: UUID | str, **overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "risk_score_id": str(risk_score_id),
+        "outputs": agent_outputs_body(),
+    }
+    body.update(overrides)
+    return body
+
+
+def test_trust_score_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    response = client.post(TRUST_URL, json=trust_body(uuid4()))
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "role",
+    [UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN],
+)
+def test_trust_score_admits_permitted_roles(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    role: UserRole,
+) -> None:
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+    response = client.post(
+        TRUST_URL,
+        json=trust_body(risk.json()["id"]),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_trust_score_refuses_roles_outside_the_allow_list(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.post(
+        TRUST_URL,
+        json=trust_body(uuid4()),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+def test_trust_score_rejects_client_supplied_consensus(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+    body = trust_body(risk.json()["id"], consensus_value="0.99")
+    response = client.post(TRUST_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_trust_score_rejects_a_partial_agent_set(client: TestClient) -> None:
+    body = trust_body(uuid4(), outputs=agent_outputs_body()[:4])
+    response = client.post(TRUST_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_trust_score_rejects_a_duplicate_agent_type(client: TestClient) -> None:
+    outputs = agent_outputs_body()
+    outputs[4]["agent_type"] = "security"
+    response = client.post(
+        TRUST_URL, json=trust_body(uuid4(), outputs=outputs), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+
+
+def test_trust_score_rejects_a_boolean_score(client: TestClient) -> None:
+    outputs = agent_outputs_body()
+    outputs[0]["score"] = True
+    response = client.post(
+        TRUST_URL, json=trust_body(uuid4(), outputs=outputs), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+
+
+def test_trust_score_rejects_a_blank_rationale(client: TestClient) -> None:
+    outputs = agent_outputs_body()
+    outputs[0]["rationale"] = "   "
+    response = client.post(
+        TRUST_URL, json=trust_body(uuid4(), outputs=outputs), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+
+
+def test_trust_score_rejects_an_unknown_risk_score(client: TestClient) -> None:
+    unknown = str(uuid4())
+    response = client.post(TRUST_URL, json=trust_body(unknown), headers=ANALYST_HEADERS)
+    assert response.status_code == 404
+    assert "POST /api/v1/risk-scores" in response.json()["detail"]
+
+
+def test_trust_score_maps_an_engine_incomplete_set_to_422(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.trust_engine.consensus import IncompleteAgentSetError
+
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise IncompleteAgentSetError("Missing: sustainability")
+
+    monkeypatch.setattr("app.api.routes.trust.combine", boom)
+    response = client.post(
+        TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+
+
+def test_a_non_unique_integrity_error_on_outputs_is_not_a_409(
+    raising_client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    risk = raising_client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise IntegrityError("INSERT", {}, RuntimeError("deadlock"))
+
+    monkeypatch.setattr("app.api.routes.trust.trust_repo.append_agent_outputs", boom)
+    response = raising_client.post(
+        TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
     )
     assert response.status_code == 500

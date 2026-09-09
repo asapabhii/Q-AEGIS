@@ -2,7 +2,7 @@
 
 Computes ``risk_scores.risk_value`` from a closed v1 context snapshot. That
 number is this engine's own score, not the five-agent aggregate; that aggregate
-is ``trust_scores.consensus_value`` and does not exist until 3.5.
+is ``trust_scores.consensus_value`` (``SPEC.md`` 3.5).
 
 THIS MODULE'S WEIGHTS ARE PLACEHOLDERS. ``BASE_RISK``, ``NEW_DEVICE_WEIGHT``,
 and ``AFTER_HOURS_WEIGHT`` have no calibration against real incident data.

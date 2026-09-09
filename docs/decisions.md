@@ -13,6 +13,26 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-09: Trust v1 is an equal-weight mean over a complete agent set
+
+Decided by: Abhinav, implementing 3.5.
+
+v1 consensus, `SPEC.md` 3.5:
+
+- Weighted arithmetic mean of the five `AgentType` scores.
+- Each weight is `0.200`. They sum to `1.000`.
+- Scores are quantized to three decimal places (half-even) before weighting, matching `agent_outputs.score` `numeric(4,3)`.
+- `consensus_version = trust-weighted-mean-0.1.0`.
+- A missing or duplicate type is 422. The function does not invent a score for an absent agent.
+
+These weights have no calibration against real incident data. Equal fifths exist so the function is deterministic and reviewable, not because security and sustainability are known to contribute the same amount. Changing any weight bumps the version.
+
+The five scores on `POST /trust-scores` are caller-asserted until 3.4 exists to produce them. Same treatment as 3.3's `after_hours`. LangGraph is Phase 5 and is not imported here.
+
+Rejected: filling a missing agent with 0.0 or 1.0. Either default fabricates a number the audit log would then treat as real. Rejected: an opaque model call; FR-4 requires the method to be documented.
+
+Roles: `POST /trust-scores` is `security_analyst` and `security_admin`, the same allow-list as 3.3.
+
 ### 2026-09-09: Policy v1 condition language, depth-unrolled Rego, caller-supplied facts
 
 Decided by: Abhinav, implementing 3.6.
@@ -28,7 +48,9 @@ Rego forbids recursive rules (evaluation must terminate). The interpreter is the
 
 `trust_score` and `ai_recommendation` on `POST /policy-decisions` are caller-asserted until 3.5 and 3.7 exist to produce them. Same treatment as 3.3's `after_hours`.
 
-Host builtins provided to `opa-wasmtime`: `object.get` and `count` only, in-process. Network builtins are not implemented and are stripped from `capabilities.json`. Compile with OPA 1.8.0.
+Host builtins provided to `opa-wasmtime`: `object.get` and `count` only, in-process. `capabilities.json` is an allowlist of the eleven builtins `policy.rego` actually uses (`assign`, `count`, `eq`, `equal`, `gt`, `gte`, `lt`, `lte`, `neq`, `object.get`, `internal.member_2`). It is not OPA `--current` minus a few names. `io.jwt.*`, `providers.aws.sign_req`, `http.*`, `net.*`, and `time.now_ns` are absent, so `opa check --capabilities` fails if they appear in the interpreter. Compile with OPA 1.8.0.
+
+Inequality operators (`gt`/`gte`/`lt`/`lte`) are numeric-only and the comparison value must lie in `[0, 1]`, same as `eq`/`neq` on those fields. A threshold of `1.5` is 422, not a rule that never matches.
 
 Rejected: interpreting the tree in Python and using OPA only for first-match. That would make the engine a fig leaf. Rejected: unbounded recursion in Rego; the compiler refuses it.
 
