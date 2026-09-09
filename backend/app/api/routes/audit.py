@@ -1,6 +1,6 @@
 """Audit log verification endpoint, ``SPEC.md`` 3.8, ``PRD.md`` FR-7.
 
-Exposes a range-verification endpoint for the tamper-evident audit log.
+Exposes a prefix-verification endpoint for the tamper-evident audit log.
 The endpoint is restricted to roles whose personas in ``PRD.md`` Section 5
 include a need to independently verify the audit trail:
 
@@ -11,11 +11,10 @@ include a need to independently verify the audit trail:
 - ``SECURITY_ANALYST``: reviews classifications and overrides, which requires
   being able to verify the log entries around a decision.
 
-``COMPLIANCE_OFFICER`` and ``DATA_OWNER`` are deliberately excluded: the
-compliance role authors rules and handles erasure but the audit trail
-verification role belongs to the auditor persona, and a data owner's stated
-need is a summary of their own document's handling (FR-16), not chain
-verification.
+``COMPLIANCE_OFFICER``, ``DATA_OWNER``, ``CISO``, and ``ENGINEER`` are
+deliberately excluded: chain verification belongs to the auditor persona,
+a data owner's stated need is a summary of their own document (FR-16), and
+CISO/engineer are not given a verify action in Section 5.
 
 Role check is enforced server-side through :mod:`app.api.deps`. A missing or
 unrecognized header returns 401 or 403 before any database access occurs.
@@ -48,16 +47,19 @@ VerifyChainCaller = Annotated[
 
 
 class VerifyRangeResponse(BaseModel):
-    """Response from the chain-range verification endpoint.
+    """Response from the chain-prefix verification endpoint.
 
     Both roots are returned so a caller can compare them independently. A bare
     ``is_valid: false`` gives an auditor nothing to act on.
+
+    Verification is always a prefix from genesis through ``end_index``. A
+    stored Merkle root on entry N covers ``0..N``, so an arbitrary start
+    offset cannot be checked against it.
     """
 
     is_valid: bool
     computed_root: str
     stored_root: str
-    start_index: int
     end_index: int
     entry_count: int
     document_id: UUID | None
@@ -66,7 +68,7 @@ class VerifyRangeResponse(BaseModel):
 @router.get(
     "/verify",
     response_model=VerifyRangeResponse,
-    summary="Verify a range of the audit log chain",
+    summary="Verify a prefix of the audit log chain",
 )
 def verify_audit_range(
     session: DbSession,
@@ -80,31 +82,22 @@ def verify_audit_range(
             )
         ),
     ] = None,
-    start_index: Annotated[
-        int,
-        Query(
-            ge=0,
-            description=(
-                "Zero-based index of the first entry to verify (inclusive). "
-                "Defaults to 0."
-            ),
-        ),
-    ] = 0,
     end_index: Annotated[
         int | None,
         Query(
             ge=0,
             description=(
                 "Zero-based index of the last entry to verify (inclusive). "
-                "Defaults to the chain tail."
+                "The prefix 0..end_index is verified. Defaults to the chain "
+                "tail."
             ),
         ),
     ] = None,
 ) -> VerifyRangeResponse:
-    """Verify a contiguous range of the audit log chain.
+    """Verify the prefix of the audit log chain through ``end_index``.
 
     Recomputes the Merkle root from the stored payloads and compares it
-    against the root recorded when the last entry in the range was written.
+    against the root recorded when the last entry in the prefix was written.
     No stored validity flag is consulted; the computation is fully independent.
 
     Honest limit: ``prev_hash`` links rows but is not itself covered by
@@ -119,7 +112,6 @@ def verify_audit_range(
         result: RangeVerificationResult = verify_chain_range(
             session,
             document_id,
-            start_index=start_index,
             end_index=end_index,
         )
     except AuditChainError as exc:
@@ -137,7 +129,6 @@ def verify_audit_range(
         is_valid=result.is_valid,
         computed_root=result.computed_root,
         stored_root=result.stored_root,
-        start_index=result.start_index,
         end_index=result.end_index,
         entry_count=result.entry_count,
         document_id=result.document_id,

@@ -6,7 +6,8 @@ chain integrity (trigger, fork constraint, broken chain) is covered in
 ``test_audit_chain.py``. What this file adds is the service layer:
 
 1. Verification that ignores any stored flag and recomputes from payloads.
-2. Verification over a range whose boundaries do not align with the chain start.
+2. Prefix verification through ``end_index`` (a stored root on entry N covers
+   ``0..N``, so there is no ``start_index``).
 3. Role check refusing roles that are not permitted to verify.
 
 Never add UPDATE or DELETE against ``audit_log``, and do not add a parallel
@@ -14,12 +15,14 @@ append path. All writes here go through
 :func:`app.db.repositories.audit.append_entry`.
 """
 
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.audit import service as audit_service
 from app.audit.service import verify_chain_range
 from app.db.enums import AuditEventType, UserRole
 from app.db.models import Document
@@ -66,52 +69,47 @@ def test_verify_chain_range_passes_clean_chain(
 
 
 def test_verify_chain_range_detects_tampered_payload(
-    db_session: Session, registered_document: Document
+    db_session: Session, registered_document: Document, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verification detects an altered payload even when the chain links are intact.
+    """verify_chain_range itself flags a mutated payload, not just merkle.verify.
 
-    The alteration is simulated in-memory: the trigger refuses UPDATE, so an
-    attacker who bypassed the trigger at the storage layer would still be caught
-    here when the recomputed root diverges from the stored one.
+    The trigger refuses UPDATE, so the mutation is injected through the
+    load_chain seam the service actually calls. Copies, not live ORM rows:
+    dirtying a mapped instance would flush an UPDATE and abort the test on
+    the trigger rather than on the service.
     """
     for note in ("one", "two", "three"):
         append(db_session, registered_document.id, note)
 
-    chain = audit_repo.load_chain(db_session, registered_document.id)
-    # Simulate what load_chain returns with one entry's payload mutated in memory.
-    # We cannot UPDATE the real row (trigger refuses it), but the service calls
-    # verify() over the payloads it reads — so we verify directly here to confirm
-    # the function would catch a tampered in-transit payload.
-    from app.audit.merkle import canonicalize, verify
+    real_chain = audit_repo.load_chain(db_session, registered_document.id)
+    tampered = [
+        SimpleNamespace(
+            payload=({"note": "two-but-altered"} if i == 1 else dict(entry.payload)),
+            merkle_root_at_time=entry.merkle_root_at_time,
+        )
+        for i, entry in enumerate(real_chain)
+    ]
+    monkeypatch.setattr(audit_service, "load_chain", lambda session, doc_id: tampered)
 
-    entries = [canonicalize(e.payload) for e in chain]
-    entries[1] = canonicalize({"note": "two-but-altered"})
-    result = verify(entries, chain[-1].merkle_root_at_time)
+    result = verify_chain_range(db_session, registered_document.id)
+
     assert not result.is_valid
-    assert result.computed_root != result.expected_root
+    assert result.computed_root != result.stored_root
 
 
-def test_verify_chain_range_mid_chain_slice(
+def test_verify_chain_range_prefix_through_end_index(
     db_session: Session, registered_document: Document
 ) -> None:
-    """Verification of a range that does not start at the chain genesis.
-
-    The prefix slice [0..end_index] is what verify_chain_range checks. The
-    stored root on entry at end_index was computed over exactly that prefix,
-    so a mid-chain slice is meaningful and must pass on an untampered chain.
-    """
+    """end_index cuts a prefix from genesis, which is what the stored root covers."""
     for note in ("a", "b", "c", "d", "e", "f"):
         append(db_session, registered_document.id, note)
 
-    # Verify up to index 3 (entries 0..3, four entries total).
-    result = verify_chain_range(
-        db_session, registered_document.id, start_index=0, end_index=3
-    )
+    result = verify_chain_range(db_session, registered_document.id, end_index=3)
 
     assert result.is_valid
     assert result.entry_count == 4
-    assert result.start_index == 0
     assert result.end_index == 3
+    assert not hasattr(result, "start_index")
 
 
 def test_verify_chain_range_end_index_default_is_chain_tail(
@@ -148,25 +146,13 @@ def test_verify_chain_range_empty_chain(
         verify_chain_range(db_session, registered_document.id)
 
 
-def test_verify_chain_range_negative_start_index_is_rejected(
+def test_verify_chain_range_negative_end_index_is_rejected(
     db_session: Session, registered_document: Document
 ) -> None:
-    """Negative start_index is always invalid."""
+    """Negative end_index is always invalid."""
     append(db_session, registered_document.id, "only")
     with pytest.raises(ValueError, match="non-negative"):
-        verify_chain_range(db_session, registered_document.id, start_index=-1)
-
-
-def test_verify_chain_range_end_before_start_is_rejected(
-    db_session: Session, registered_document: Document
-) -> None:
-    """end_index < start_index is a caller error."""
-    for note in ("a", "b", "c"):
-        append(db_session, registered_document.id, note)
-    with pytest.raises(ValueError, match="end_index"):
-        verify_chain_range(
-            db_session, registered_document.id, start_index=2, end_index=1
-        )
+        verify_chain_range(db_session, registered_document.id, end_index=-1)
 
 
 def test_verify_chain_range_out_of_bounds_end_index_is_rejected(
@@ -210,19 +196,19 @@ def test_verify_endpoint_admits_permitted_roles(
 
 @pytest.mark.parametrize(
     "role",
-    [UserRole.DATA_OWNER, UserRole.COMPLIANCE_OFFICER],
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
 )
 def test_verify_endpoint_refuses_excluded_roles(
     client: TestClient,
     registered_document: Document,
     role: UserRole,
 ) -> None:
-    """data_owner and compliance_officer must be refused with 403.
-
-    Neither persona's stated need in ``PRD.md`` Section 5 includes independent
-    chain verification. A data_owner's need is a summary of their own document
-    (FR-16), not cryptographic chain verification.
-    """
+    """Roles outside the auditor/admin/analyst set must be refused with 403."""
     response = client.get(
         VERIFY_URL,
         params={"document_id": str(registered_document.id)},
@@ -273,6 +259,7 @@ def test_verify_endpoint_mid_chain_slice(
     assert data["is_valid"] is True
     assert data["entry_count"] == 3
     assert data["end_index"] == 2
+    assert "start_index" not in data
 
 
 def test_verify_endpoint_system_chain(client: TestClient, db_session: Session) -> None:

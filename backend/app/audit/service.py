@@ -6,6 +6,12 @@ and compares it against the value recorded at write time. It does NOT consult
 any stored "valid" flag or any value this system set at write time — the root
 is recomputed entirely from the payloads themselves.
 
+A stored ``merkle_root_at_time`` on entry N is the root of the prefix
+``0..N``, never of an arbitrary window ``start..N``. This service therefore
+verifies prefixes only: from the genesis entry through ``end_index``. There is
+no ``start_index`` parameter, because accepting one would either ignore it or
+compare a sub-window against a prefix root, both of which lie to the caller.
+
 Honest limit (also stated in ``docs/data-dictionary.md``): ``prev_hash`` links
 rows but is not itself covered by ``payload_hash``, so an attacker with write
 access to the database could recompute a whole consistent chain.
@@ -31,7 +37,7 @@ from app.db.repositories.audit import load_chain
 
 @dataclass(frozen=True)
 class RangeVerificationResult:
-    """Result of verifying a contiguous slice of a document's audit chain.
+    """Result of verifying a prefix of a document's audit chain.
 
     Both roots are returned so a failure report can show what the entries
     actually produce against what was stored. A bare boolean gives an auditor
@@ -39,14 +45,14 @@ class RangeVerificationResult:
 
     Attributes:
         is_valid: True only if the recomputed root matches the stored root at
-            the end of the range.
-        computed_root: Root recomputed from the range's payloads, with no
+            the end of the prefix.
+        computed_root: Root recomputed from the prefix payloads, with no
             reliance on any stored validity claim.
         stored_root: The ``merkle_root_at_time`` stored on the last entry in
-            the range.
-        start_index: Zero-based index of the first entry verified (inclusive).
+            the prefix.
         end_index: Zero-based index of the last entry verified (inclusive).
-        entry_count: Number of entries in the verified range.
+        entry_count: Number of entries in the verified prefix (always
+            ``end_index + 1``).
         document_id: The document chain that was verified, or ``None`` for the
             system chain.
     """
@@ -54,7 +60,6 @@ class RangeVerificationResult:
     is_valid: bool
     computed_root: str
     stored_root: str
-    start_index: int
     end_index: int
     entry_count: int
     document_id: UUID | None
@@ -64,21 +69,14 @@ def verify_chain_range(
     session: Session,
     document_id: UUID | None,
     *,
-    start_index: int = 0,
     end_index: int | None = None,
 ) -> RangeVerificationResult:
-    """Verify a contiguous range of a document's audit chain.
+    """Verify the prefix of a document's audit chain through ``end_index``.
 
-    Loads the full chain in link order, slices the requested range, then calls
-    :func:`app.audit.merkle.verify` against the stored root at the end of the
-    range. The stored root is read but never trusted as a verdict: the
+    Loads the full chain in link order, takes entries ``0..end_index``, then
+    calls :func:`app.audit.merkle.verify` against the stored root on that last
+    entry. The stored root is read but never trusted as a verdict: the
     recomputed root is what determines ``is_valid``, exactly as FR-7 requires.
-
-    A range that does not start at the chain's beginning is still verifiable.
-    The Merkle root stored on the last entry in the slice was computed over the
-    whole chain up to that point, so slicing mid-chain is meaningful: you are
-    verifying that the first ``end_index + 1`` entries of the chain produce the
-    root that was recorded after entry ``end_index`` was appended.
 
     Honest limit: ``prev_hash`` is not covered by ``payload_hash``. A party
     with write access could rebuild the link structure around altered entries.
@@ -89,24 +87,21 @@ def verify_chain_range(
         session: Active SQLAlchemy session.
         document_id: Document whose chain to verify, or ``None`` for the system
             chain of events with no document.
-        start_index: Zero-based index of the first entry to include (inclusive,
-            defaults to 0). Must be non-negative.
         end_index: Zero-based index of the last entry to include (inclusive).
-            Defaults to the last entry in the chain. Must be >= ``start_index``
-            when supplied.
+            Defaults to the last entry in the chain.
 
     Returns:
         A :class:`RangeVerificationResult` containing the verdict and both
         roots so a caller can report discrepancies.
 
     Raises:
-        ValueError: if ``start_index`` is negative, ``end_index`` is less than
-            ``start_index``, or the range falls outside the chain length.
+        ValueError: if ``end_index`` is negative or falls outside the chain
+            length, or if the chain is empty.
         app.db.repositories.audit.AuditChainError: if the stored chain is
             broken or forked.
     """
-    if start_index < 0:
-        raise ValueError(f"start_index must be non-negative, got {start_index}.")
+    if end_index is not None and end_index < 0:
+        raise ValueError(f"end_index must be non-negative, got {end_index}.")
 
     chain = load_chain(session, document_id)
     chain_length = len(chain)
@@ -119,18 +114,12 @@ def verify_chain_range(
 
     resolved_end = chain_length - 1 if end_index is None else end_index
 
-    if end_index is not None and end_index < start_index:
-        raise ValueError(
-            f"end_index ({end_index}) must be >= start_index ({start_index})."
-        )
     if resolved_end >= chain_length:
         raise ValueError(
             f"end_index ({resolved_end}) is out of range for a chain of "
             f"{chain_length} entries (max index {chain_length - 1})."
         )
 
-    # The slice covers entries 0..resolved_end inclusive. The Merkle root
-    # stored on entry at resolved_end was computed over exactly this prefix.
     prefix = chain[: resolved_end + 1]
     entry_payloads = [canonicalize(entry.payload) for entry in prefix]
     stored_root = chain[resolved_end].merkle_root_at_time
@@ -141,7 +130,6 @@ def verify_chain_range(
         is_valid=result.is_valid,
         computed_root=result.computed_root,
         stored_root=stored_root,
-        start_index=start_index,
         end_index=resolved_end,
         entry_count=len(prefix),
         document_id=document_id,
