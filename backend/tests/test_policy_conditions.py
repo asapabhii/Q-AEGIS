@@ -103,6 +103,13 @@ def test_inequality_requires_a_numeric_value() -> None:
         parse_condition({"field": "trust_score", "op": "gt", "value": "high"})
 
 
+def test_inequality_out_of_range_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        parse_condition({"field": "trust_score", "op": "gt", "value": 1.5})
+    with pytest.raises(ValidationError):
+        parse_condition({"field": "risk_value", "op": "lt", "value": -0.01})
+
+
 def test_in_rejects_nested_lists() -> None:
     with pytest.raises(ValidationError):
         parse_condition(

@@ -6,10 +6,18 @@ Append only. There is no update function.
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import RiskScore
 from app.risk_engine.scorer import RiskScoreResult
+
+
+def get_risk_score(session: Session, risk_score_id: UUID) -> RiskScore | None:
+    """Return one contextual risk row, or ``None`` if it was never written."""
+    return session.scalars(
+        select(RiskScore).where(RiskScore.id == risk_score_id)
+    ).one_or_none()
 
 
 def append_risk_score(
