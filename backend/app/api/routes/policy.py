@@ -88,8 +88,8 @@ def evaluate_policy(
     """Evaluate active rules, persist the decision, and write the audit entry.
 
     ``final_decision`` is computed here. It is not accepted from the client.
-    ``trust_score`` and ``ai_recommendation`` are caller-supplied until 3.5 and
-    3.7 exist to produce them.
+    ``trust_score`` and ``ai_recommendation`` are still caller-supplied; this
+    endpoint does not read ``trust_scores``.
 
     Raises:
         HTTPException: 404 if the document is not registered, 422 if a stored

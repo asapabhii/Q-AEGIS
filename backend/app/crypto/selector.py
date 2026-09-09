@@ -1,10 +1,9 @@
 """Crypto-selector stub, ``SPEC.md`` 3.7, ``PRD.md`` FR-6.
 
 This is a stub, not finished work. It maps a numeric trust score onto one of
-the three protection profiles. It does not persist a ``crypto_profiles`` row,
-does not accept a ``trust_score_id``, and does not write an audit entry. Those
-belong to the Phase 3 replacement, once the trust engine exists to produce a
-real score that can be referenced.
+the three protection profiles. Persist, ``trust_score_id``, and the audit
+entry live on ``POST /api/v1/crypto-profiles``. The thresholds here remain
+placeholders with no calibration against incident data.
 
 SECURITY CAVEAT: liboqs is NOT independently audited, and OQS-OpenSSL is
 documented by its own maintainers as development and interop-testing only, not
@@ -31,10 +30,11 @@ HYBRID_MAX = 0.8
 def select_crypto_profile(trust_score: float) -> CryptoProfileType:
     """Map a trust score in ``[0.0, 1.0]`` to a protection profile.
 
-    This is a stub. Thresholds are placeholders until the trust engine (3.5)
-    exists and can justify them. Boundary values resolve toward more
-    protection: ``0.4`` is post-quantum, not hybrid; ``0.8`` is hybrid, not
-    AES-256.
+    This is a stub. Thresholds are placeholders; 3.5 now produces a real
+    consensus value, but these cut-points have no calibration. Boundary
+    values resolve toward more protection: ``0.4`` is post-quantum, not
+    hybrid; ``0.8`` is hybrid, not AES-256. Persist is
+    ``POST /api/v1/crypto-profiles``, not this function.
 
     Invalid input is refused, not coerced. ``NaN`` and infinities make every
     ``<=`` comparison false in IEEE-754, which would otherwise fall through to

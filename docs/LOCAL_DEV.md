@@ -349,6 +349,27 @@ opa build -t wasm -e q_aegis/policy/first_match \
   -o bundle.tar.gz backend/app/policy/rego/policy.rego
 ```
 
+### Select a crypto profile
+
+`POST /api/v1/crypto-profiles` maps a persisted trust score onto AES-256,
+hybrid (`X25519MLKEM768`), or full post-quantum. The server computes
+`profile_type`; the client cannot supply it. Roles: `security_analyst` and
+`security_admin`. An unknown `trust_score_id` is a 404. If this document has
+no `policy_decisions` row yet, the call is 422 — run the policy gate first
+(FR-6). A `deny` still counts. Thresholds are placeholders (`<= 0.4`
+post-quantum, `<= 0.8` hybrid, else AES-256). This does not encrypt bytes.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/crypto-profiles \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{"trust_score_id": "<the id from the trust-score call>"}'
+```
+
+Each call writes one `crypto_profiles` row and one `audit_log` entry in the
+same transaction. It does not change `documents.current_status`. Reselection
+is a new row.
+
 ### Test and lint
 
 Run all three before every pull request. CI runs exactly these and the coverage

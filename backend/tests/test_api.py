@@ -7,8 +7,9 @@ not, so it is tested as real behavior: a missing or unrecognized role must be
 refused rather than defaulted to some permitted value.
 
 What those endpoints *persist* is tested separately in ``test_api_persistence.py``.
-The policy gate (``SPEC.md`` 3.6) and trust consensus (``SPEC.md`` 3.5) are
-covered here for auth and request validation.
+The policy gate (``SPEC.md`` 3.6), trust consensus (``SPEC.md`` 3.5), and
+crypto-profile persist (``SPEC.md`` 3.7) are covered here for auth and request
+validation.
 """
 
 from decimal import Decimal
@@ -31,6 +32,7 @@ RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
+CRYPTO_URL = f"{API_V1_PREFIX}/crypto-profiles"
 
 #: A role permitted to call /classify.
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
@@ -332,6 +334,7 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
     assert POLICY_RULES_URL in paths
     assert POLICY_DECISIONS_URL in paths
     assert TRUST_URL in paths
+    assert CRYPTO_URL in paths
 
 
 # --------------------------------------------------------------------------
@@ -938,3 +941,196 @@ def test_a_non_unique_integrity_error_on_outputs_is_not_a_409(
         TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
     )
     assert response.status_code == 500
+
+
+# --------------------------------------------------------------------------
+# POST /crypto-profiles, SPEC.md 3.7, PRD.md FR-6
+# --------------------------------------------------------------------------
+
+
+def crypto_body(trust_score_id: UUID | str, **overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {"trust_score_id": str(trust_score_id)}
+    body.update(overrides)
+    return body
+
+
+def gated_trust_score_id(
+    client: TestClient,
+    document_id: UUID,
+    owner_user_id: UUID,
+    outputs: list[dict[str, object]] | None = None,
+) -> str:
+    """Risk → trust → policy decision. Returns the trust-score id."""
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, owner_user_id),
+        headers=ANALYST_HEADERS,
+    )
+    assert risk.status_code == 201, risk.text
+    trust = client.post(
+        TRUST_URL,
+        json=trust_body(risk.json()["id"], outputs=outputs or agent_outputs_body()),
+        headers=ANALYST_HEADERS,
+    )
+    assert trust.status_code == 201, trust.text
+    decision = client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(document_id),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert decision.status_code == 201, decision.text
+    return trust.json()["id"]
+
+
+def test_crypto_profile_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    response = client.post(CRYPTO_URL, json=crypto_body(uuid4()))
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "role",
+    [UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN],
+)
+def test_crypto_profile_admits_permitted_roles(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    role: UserRole,
+) -> None:
+    trust_id = gated_trust_score_id(
+        client, document_id, seeded_users[UserRole.DATA_OWNER].id
+    )
+    response = client.post(
+        CRYPTO_URL,
+        json=crypto_body(trust_id),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["profile_type"] == "hybrid"
+    assert response.json()["consensus_value"] == "0.500"
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_crypto_profile_refuses_roles_outside_the_allow_list(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.post(
+        CRYPTO_URL,
+        json=crypto_body(uuid4()),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+def test_crypto_profile_rejects_client_supplied_profile_type(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    trust_id = gated_trust_score_id(
+        client, document_id, seeded_users[UserRole.DATA_OWNER].id
+    )
+    body = crypto_body(trust_id, profile_type="aes256")
+    response = client.post(CRYPTO_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_crypto_profile_rejects_client_supplied_document_id(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    trust_id = gated_trust_score_id(
+        client, document_id, seeded_users[UserRole.DATA_OWNER].id
+    )
+    body = crypto_body(trust_id, document_id=str(document_id))
+    response = client.post(CRYPTO_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_crypto_profile_rejects_an_unknown_trust_score(client: TestClient) -> None:
+    unknown = str(uuid4())
+    response = client.post(
+        CRYPTO_URL, json=crypto_body(unknown), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 404
+    assert "POST /api/v1/trust-scores" in response.json()["detail"]
+
+
+def test_crypto_profile_requires_a_prior_policy_decision(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+    trust = client.post(
+        TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
+    )
+    response = client.post(
+        CRYPTO_URL, json=crypto_body(trust.json()["id"]), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+    assert "POST /api/v1/policy-decisions" in response.json()["detail"]
+
+
+def test_crypto_profile_does_not_accept_another_documents_policy_decision(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    """A gate evaluation on document B does not unlock selection on document A."""
+    other = client.post(
+        DOCUMENTS_URL, json={"filename": "other.pdf"}, headers=OWNER_HEADERS
+    )
+    assert other.status_code == 201, other.text
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+    trust = client.post(
+        TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
+    )
+    decision = client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(other.json()["id"]),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert decision.status_code == 201, decision.text
+    response = client.post(
+        CRYPTO_URL, json=crypto_body(trust.json()["id"]), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+
+
+def test_crypto_profile_maps_a_selector_refusal_to_422(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trust_id = gated_trust_score_id(
+        client, document_id, seeded_users[UserRole.DATA_OWNER].id
+    )
+
+    def boom(_score: float) -> None:
+        raise ValueError("trust_score must be finite and in [0.0, 1.0]")
+
+    monkeypatch.setattr("app.api.routes.crypto.select_crypto_profile", boom)
+    response = client.post(
+        CRYPTO_URL, json=crypto_body(trust_id), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
