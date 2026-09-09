@@ -286,12 +286,17 @@ project using TypeScript and Tailwind CSS in `frontend/`. It includes:
 - The interactive classification workbench in `frontend/src/app/page.tsx`
   demonstrating the two-step register-then-classify flow (`POST /api/v1/documents`
   followed by `POST /api/v1/classify`).
-- A Vitest unit test suite (`frontend/src/lib/api/client.test.ts`) validating API
-  client request construction, header injection, and error formatting.
+- A Vitest unit and component test suite (`src/**/*.test.{ts,tsx}`) using `jsdom`,
+  Testing Library (`@testing-library/react`, `@testing-library/user-event`,
+  `@testing-library/jest-dom`), and
+  `@vitejs/plugin-react`. Validates API client request construction, FastAPI error
+  formatting, and component workbench rendering.
+- A 70% coverage floor matching the backend requirement (`AGENTS.md`), enforced locally
+  via `npm test` (`@vitest/coverage-v8`) and in CI.
 - A `frontend` job in `.github/workflows/ci.yml` running `npm ci`, `npm run lint`,
-  `npm test`, and `npm run build` on pull requests targeting `main` and pushes to
-  `main`. (Note: this job is not yet wired as a required branch protection check;
-  Abhinav is adding it separately once runs are established).
+  `npm test` (with coverage gate), and `npm run build` on pull requests targeting
+  `main` and pushes to `main`. (Note: this job is not yet wired as a required branch
+  protection check; Abhinav is adding it separately once runs are established).
 
 ### Development commands
 

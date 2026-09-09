@@ -169,7 +169,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Test
+      # The 70% floor is enforced by vitest.config.ts coverage thresholds
+      - name: Test with coverage gate
         run: npm test
 
       - name: Build
