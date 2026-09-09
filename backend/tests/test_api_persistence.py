@@ -1,10 +1,10 @@
-"""Persistence behavior of the API, ``PRD.md`` Section 7 and FR-1.
+"""Persistence behavior of the API, ``PRD.md`` Section 7, FR-1, and FR-2.
 
 Closes a known defect: before the data model existed, ``POST /classify`` computed
 a classification and stored nothing, and ``PRD.md`` Section 7 treats a decision
-with no corresponding audit entry as a defect rather than an edge case. What these
-tests assert is that the decision and its audit entry are written together, or not
-at all.
+with no corresponding audit entry as a defect rather than an edge case. The same
+atomicity applies to ``POST /risk-scores``. What these tests assert is that the
+decision and its audit entry are written together, or not at all.
 """
 
 from datetime import datetime
@@ -19,17 +19,25 @@ from app.api.deps import ACTOR_ROLE_HEADER
 from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
 from app.db.enums import AuditEventType, UserRole
-from app.db.models import AuditLog, ClassificationMetadata, Document
+from app.db.models import AuditLog, ClassificationMetadata, Document, RiskScore, User
 from app.db.repositories import audit as audit_repo
+from app.risk_engine.scorer import MODEL_VERSION as RISK_MODEL_VERSION
 
 DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
+RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
+ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
 
 #: Content the keyword stub classifies confidently, so ``is_defaulted`` is False
 #: and the escalation path is not what is being measured here.
 CONFIDENT_CONTENT = "Employee SSN, passport number, and CVV are on file."
+
+
+def as_datetime(value: str) -> datetime:
+    """Parse a JSON timestamp. FastAPI writes UTC as ``Z``."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def register(client: TestClient, filename: str = "report.pdf") -> dict:
@@ -48,6 +56,30 @@ def classify(client: TestClient, document_id: str, content: str = CONFIDENT_CONT
         json={"document_id": document_id, "content": content},
         headers=OWNER_HEADERS,
     )
+
+
+def owner_user_id(session: Session) -> str:
+    """The seeded Data Owner, used as the snapshot's ``actor_user_id``."""
+    return str(session.query(User).filter(User.role == UserRole.DATA_OWNER).one().id)
+
+
+def score_risk(
+    client: TestClient,
+    document_id: str,
+    actor_user_id: str,
+    **overrides: object,
+):
+    """Submit a contextual-risk request for ``document_id``."""
+    body: dict[str, object] = {
+        "document_id": document_id,
+        "actor_user_id": actor_user_id,
+        "device_id": "laptop-12",
+        "device_is_new": False,
+        "accessed_at": "2026-09-09T12:00:00+00:00",
+        "after_hours": False,
+    }
+    body.update(overrides)
+    return client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
 
 
 def rows(session: Session, model, **filters) -> list:
@@ -210,7 +242,7 @@ def test_the_response_timestamp_is_the_stored_one(
     row = rows(db_session, ClassificationMetadata, document_id=document_id)[0]
     # Compared as instants, not strings: the JSON encoder writes the UTC offset
     # as "Z" while ``isoformat()`` writes "+00:00" for the same moment.
-    assert datetime.fromisoformat(payload["classified_at"]) == row.classified_at
+    assert as_datetime(payload["classified_at"]) == row.classified_at
 
 
 def test_the_audit_payload_carries_the_full_decision(
@@ -363,4 +395,146 @@ def test_a_failed_audit_write_rolls_back_the_classification(
     assert rows(db_session, ClassificationMetadata, document_id=document_id) == []
     # The registration entry from before the patch survives; only the failed
     # request's writes are gone.
+    assert len(rows(db_session, AuditLog, document_id=document_id)) == 1
+
+
+# --------------------------------------------------------------------------
+# POST /risk-scores, SPEC.md 3.3, PRD.md FR-2 and Section 7
+# --------------------------------------------------------------------------
+
+
+def test_scoring_risk_persists_the_row_and_the_audit_entry(
+    client: TestClient, db_session: Session
+) -> None:
+    """One computation, one ``risk_scores`` row, one ``RISK_SCORE_COMPUTED`` event."""
+    document_id = register(client)["id"]
+    actor_id = owner_user_id(db_session)
+
+    assert score_risk(client, document_id, actor_id).status_code == 201
+
+    scores = rows(db_session, RiskScore, document_id=document_id)
+    assert len(scores) == 1
+    assert scores[0].model_version == RISK_MODEL_VERSION
+    assert scores[0].risk_value == Decimal("0.2000")
+
+    risk_events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.RISK_SCORE_COMPUTED.value
+    ]
+    assert len(risk_events) == 1
+    assert risk_events[0].payload["model_version"] == RISK_MODEL_VERSION
+    assert risk_events[0].payload["risk_value"] == "0.2000"
+    assert risk_events[0].payload["risk_score_id"] == str(scores[0].id)
+
+
+def test_the_persisted_risk_row_matches_the_response(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    payload = score_risk(
+        client,
+        document_id,
+        owner_user_id(db_session),
+        device_is_new=True,
+        after_hours=True,
+    ).json()
+
+    row = rows(db_session, RiskScore, document_id=document_id)[0]
+    assert str(row.id) == payload["id"]
+    assert row.model_version == payload["model_version"] == RISK_MODEL_VERSION
+    assert row.risk_value == Decimal(str(payload["risk_value"])) == Decimal("0.8000")
+    assert row.context_snapshot["device_id"] == "laptop-12"
+    assert row.context_snapshot["device_is_new"] is True
+    assert row.context_snapshot["after_hours"] is True
+
+
+def test_the_risk_response_timestamp_is_the_stored_one(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    payload = score_risk(client, document_id, owner_user_id(db_session)).json()
+    row = rows(db_session, RiskScore, document_id=document_id)[0]
+    assert as_datetime(payload["computed_at"]) == row.computed_at
+
+
+def test_scoring_risk_does_not_change_document_status(
+    client: TestClient, db_session: Session
+) -> None:
+    """Contextual risk is not a document lifecycle transition."""
+    document_id = register(client)["id"]
+    score_risk(client, document_id, owner_user_id(db_session))
+
+    db_session.expire_all()
+    assert db_session.get(Document, document_id).current_status.value == "registered"
+
+
+def test_rescoring_appends_rather_than_overwrites(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    actor_id = owner_user_id(db_session)
+
+    score_risk(client, document_id, actor_id, device_is_new=False)
+    score_risk(client, document_id, actor_id, device_is_new=True)
+
+    scores = rows(db_session, RiskScore, document_id=document_id)
+    assert len(scores) == 2
+    assert {row.risk_value for row in scores} == {
+        Decimal("0.2000"),
+        Decimal("0.5500"),
+    }
+    risk_events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.RISK_SCORE_COMPUTED.value
+    ]
+    assert len(risk_events) == 2
+
+
+def test_the_risk_entry_links_to_the_registration_entry(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    score_risk(client, document_id, owner_user_id(db_session))
+
+    chain = audit_repo.load_chain(db_session, document_id)
+    assert [entry.event_type for entry in chain] == [
+        AuditEventType.DOCUMENT_REGISTERED.value,
+        AuditEventType.RISK_SCORE_COMPUTED.value,
+    ]
+    assert chain[1].prev_hash == chain[0].payload_hash
+
+
+def test_risk_score_refuses_an_unregistered_document(
+    client: TestClient, db_session: Session
+) -> None:
+    unknown = str(uuid4())
+    response = score_risk(client, unknown, owner_user_id(db_session))
+    assert response.status_code == 404
+    assert "POST /api/v1/documents" in response.json()["detail"]
+
+    assert rows(db_session, RiskScore, document_id=unknown) == []
+    assert rows(db_session, AuditLog, document_id=unknown) == []
+
+
+def test_a_failed_audit_write_rolls_back_the_risk_score(
+    raising_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A risk score with no audit entry is the Section 7 defect. Neither commits."""
+    document_id = register(raising_client)["id"]
+    actor_id = owner_user_id(db_session)
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated audit log failure")
+
+    monkeypatch.setattr(audit_repo, "append_entry", explode)
+
+    response = score_risk(raising_client, document_id, actor_id)
+    assert response.status_code == 500
+
+    db_session.expire_all()
+    assert rows(db_session, RiskScore, document_id=document_id) == []
     assert len(rows(db_session, AuditLog, document_id=document_id)) == 1

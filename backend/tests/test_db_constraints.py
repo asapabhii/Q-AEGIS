@@ -374,12 +374,31 @@ def test_ids_are_generated_by_the_database(
     """A client cannot choose a primary key, and neither can a raw SQL insert."""
     generated = db_session.execute(
         text(
-            "INSERT INTO risk_scores (document_id, risk_value, context_snapshot) "
-            "VALUES (:doc, 0.5, CAST('{}' AS jsonb)) RETURNING id"
+            "INSERT INTO risk_scores "
+            "(document_id, risk_value, model_version, context_snapshot) "
+            "VALUES (:doc, 0.5, 'contextual-risk-additive-0.1.0', "
+            "CAST('{}' AS jsonb)) RETURNING id"
         ),
         {"doc": registered_document.id},
     ).scalar_one()
     assert generated is not None
+
+
+def test_risk_score_requires_model_version(
+    db_session: Session, registered_document: Document
+) -> None:
+    """A stored score without a formula version cannot be attributed later."""
+    with statement_expected_to_fail(db_session):
+        with pytest.raises(IntegrityError):
+            db_session.execute(
+                text(
+                    "INSERT INTO risk_scores "
+                    "(document_id, risk_value, context_snapshot) "
+                    "VALUES (:doc, 0.5, CAST('{}' AS jsonb))"
+                ),
+                {"doc": registered_document.id},
+            )
+            db_session.flush()
 
 
 def test_a_new_document_starts_as_registered(registered_document: Document) -> None:
