@@ -287,7 +287,8 @@ project using TypeScript and Tailwind CSS in `frontend/`. It includes:
   demonstrating the two-step register-then-classify flow (`POST /api/v1/documents`
   followed by `POST /api/v1/classify`).
 - A Vitest unit and component test suite (`src/**/*.test.{ts,tsx}`) using `jsdom`,
-  Testing Library (`@testing-library/react`, `@testing-library/user-event`), and
+  Testing Library (`@testing-library/react`, `@testing-library/user-event`,
+  `@testing-library/jest-dom`), and
   `@vitejs/plugin-react`. Validates API client request construction, FastAPI error
   formatting, and component workbench rendering.
 - A 70% coverage floor matching the backend requirement (`AGENTS.md`), enforced locally

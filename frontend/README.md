@@ -24,7 +24,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser.
 
 Component and API client unit tests are written in TypeScript (`src/**/*.test.{ts,tsx}`) using:
 - **Runner**: Vitest with `@vitejs/plugin-react` and `jsdom` environment.
-- **Testing Library**: `@testing-library/react` and `@testing-library/user-event` for user-visible component assertion.
+- **Testing Library**: `@testing-library/react`, `@testing-library/user-event`, and `@testing-library/jest-dom` for user-visible component assertion.
 - **Coverage Gate**: 70% floor enforced across lines, functions, branches, and statements (`@vitest/coverage-v8`), matching `AGENTS.md`. `npm test` fails locally and in CI if coverage drops below 70%.
 
 ## Environment Variables

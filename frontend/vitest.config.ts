@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["src/test/setup.ts"],
     coverage: {
       provider: "v8",
       enabled: true,
@@ -19,6 +20,9 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: [
         "src/**/*.test.{ts,tsx}",
+        "src/test/**",
+        // Types-only barrel. If this file ever grows runtime logic, drop the
+        // exclude so the 70% gate covers it instead of hiding it.
         "src/**/types.ts",
       ],
       thresholds: {

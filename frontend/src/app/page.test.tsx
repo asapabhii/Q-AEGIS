@@ -72,19 +72,15 @@ describe("DashboardPage workbench", () => {
 
     render(<DashboardPage />);
 
-    const classifyButton = screen.getByRole("button", {
-      name: /register & classify/i,
-    });
-    await user.click(classifyButton);
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
 
-    // Assert Step 1 document details
-    expect(screen.getByText("Step 1 — Document Registered")).toBeDefined();
-    expect(screen.getByText("doc-uuid-12345")).toBeDefined();
-
-    // Assert Step 2 classification details
-    expect(screen.getByText("Step 2 — Classification Result")).toBeDefined();
-    expect(screen.getByText("CONFIDENTIAL")).toBeDefined();
-    expect(screen.getByText("85.0%")).toBeDefined();
+    expect(screen.getByText("Step 1 — Document Registered")).toBeInTheDocument();
+    expect(screen.getByText("doc-uuid-12345")).toBeInTheDocument();
+    expect(screen.getByText("Step 2 — Classification Result")).toBeInTheDocument();
+    expect(screen.getByText("CONFIDENTIAL")).toBeInTheDocument();
+    expect(screen.getByText("85.0%")).toBeInTheDocument();
 
     expect(mockRegisterAndClassify).toHaveBeenCalledTimes(1);
     expect(mockRegisterAndClassify).toHaveBeenCalledWith(
@@ -94,52 +90,46 @@ describe("DashboardPage workbench", () => {
     );
   });
 
-  it("renders fail-safe escalation row when is_defaulted is true, and omits it when false", async () => {
+  it("renders the fail-safe escalation row when is_defaulted is true", async () => {
     const user = userEvent.setup();
-
-    // 1. When is_defaulted is true:
-    const defaultedClassification: ClassificationResponse = {
-      ...sampleClassification,
-      sensitivity_label: "CONFIDENTIAL",
-      is_defaulted: true,
-      base_label: "PUBLIC",
-      confidence: 0.42,
-    };
     mockRegisterAndClassify.mockResolvedValueOnce({
       document: sampleDocument,
-      classification: defaultedClassification,
+      classification: {
+        ...sampleClassification,
+        sensitivity_label: "CONFIDENTIAL",
+        is_defaulted: true,
+        base_label: "PUBLIC",
+        confidence: 0.42,
+      },
     });
 
-    const { unmount } = render(<DashboardPage />);
+    render(<DashboardPage />);
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
 
-    const classifyButton = screen.getByRole("button", {
-      name: /register & classify/i,
-    });
-    await user.click(classifyButton);
+    expect(screen.getByText("Escalated from")).toBeInTheDocument();
+    expect(screen.getByText("PUBLIC")).toBeInTheDocument();
+    expect(screen.getByText(/fail-safe/i)).toBeInTheDocument();
+  });
 
-    expect(screen.getByText("Escalated from")).toBeDefined();
-    expect(screen.getByText("PUBLIC")).toBeDefined();
-    expect(screen.getByText(/fail-safe/i)).toBeDefined();
-
-    unmount();
-
-    // 2. When is_defaulted is false:
+  it("omits the fail-safe escalation row when is_defaulted is false", async () => {
+    const user = userEvent.setup();
     mockRegisterAndClassify.mockResolvedValueOnce({
       document: sampleDocument,
       classification: { ...sampleClassification, is_defaulted: false },
     });
 
     render(<DashboardPage />);
-    const classifyButton2 = screen.getByRole("button", {
-      name: /register & classify/i,
-    });
-    await user.click(classifyButton2);
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
 
-    expect(screen.queryByText("Escalated from")).toBeNull();
-    expect(screen.queryByText(/fail-safe/i)).toBeNull();
+    expect(screen.queryByText("Escalated from")).not.toBeInTheDocument();
+    expect(screen.queryByText(/fail-safe/i)).not.toBeInTheDocument();
   });
 
-  it("renders error message and leaves results panel empty on ApiError", async () => {
+  it("renders the error message and leaves the results panel empty on ApiError", async () => {
     const user = userEvent.setup();
     mockRegisterAndClassify.mockRejectedValueOnce(
       new ApiError(404, "Not Found", {
@@ -148,23 +138,22 @@ describe("DashboardPage workbench", () => {
     );
 
     render(<DashboardPage />);
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
 
-    const classifyButton = screen.getByRole("button", {
-      name: /register & classify/i,
-    });
-    await user.click(classifyButton);
-
-    // Error text is rendered
     expect(
       screen.getByText(/API 404: No document registered with that id/i)
-    ).toBeDefined();
-
-    // Results panel remains empty
-    expect(screen.queryByText("Step 1 — Document Registered")).toBeNull();
-    expect(screen.queryByText("Step 2 — Classification Result")).toBeNull();
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Step 1 — Document Registered")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Step 2 — Classification Result")
+    ).not.toBeInTheDocument();
   });
 
-  it("disables classify button when filename or content is blank or whitespace-only, and enables when both are present", async () => {
+  it("disables classify when filename or content is blank or whitespace-only", async () => {
     const user = userEvent.setup();
     render(<DashboardPage />);
 
@@ -172,36 +161,29 @@ describe("DashboardPage workbench", () => {
     const contentInput = screen.getByLabelText(/^document content/i);
     const classifyButton = screen.getByRole("button", {
       name: /register & classify/i,
-    }) as HTMLButtonElement;
+    });
 
-    // Initially both fields have default values, so button is enabled
-    expect(classifyButton.disabled).toBe(false);
+    expect(classifyButton).toBeEnabled();
 
-    // Blank out filename
     await user.clear(filenameInput);
-    expect(classifyButton.disabled).toBe(true);
+    expect(classifyButton).toBeDisabled();
 
-    // Whitespace only filename
     await user.type(filenameInput, "   ");
-    expect(classifyButton.disabled).toBe(true);
+    expect(classifyButton).toBeDisabled();
 
-    // Restore filename
     await user.clear(filenameInput);
     await user.type(filenameInput, "report.docx");
-    expect(classifyButton.disabled).toBe(false);
+    expect(classifyButton).toBeEnabled();
 
-    // Blank out content
     await user.clear(contentInput);
-    expect(classifyButton.disabled).toBe(true);
+    expect(classifyButton).toBeDisabled();
 
-    // Whitespace only content
     await user.type(contentInput, "   \n  \t ");
-    expect(classifyButton.disabled).toBe(true);
+    expect(classifyButton).toBeDisabled();
 
-    // Restore content
     await user.clear(contentInput);
     await user.type(contentInput, "Some classified data.");
-    expect(classifyButton.disabled).toBe(false);
+    expect(classifyButton).toBeEnabled();
   });
 
   it("passes the newly selected role through to the client call", async () => {
@@ -213,55 +195,49 @@ describe("DashboardPage workbench", () => {
 
     render(<DashboardPage />);
 
-    const roleSelect = screen.getByLabelText(/caller role/i);
-    await user.selectOptions(roleSelect, "compliance_officer");
-
-    const classifyButton = screen.getByRole("button", {
-      name: /register & classify/i,
-    });
-    await user.click(classifyButton);
+    // security_analyst is actually admitted by POST /classify. Do not use a
+    // role the backend would 403, or this test locks that mismatch in.
+    await user.selectOptions(
+      screen.getByLabelText(/caller role/i),
+      "security_analyst"
+    );
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
 
     expect(mockRegisterAndClassify).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),
-      "compliance_officer"
+      "security_analyst"
     );
   });
 
-  it("renders status, service, and version on health check success, and error message on failure", async () => {
+  it("renders status, service, and version on a successful health check", async () => {
     const user = userEvent.setup();
-
-    // 1. Success case
     mockCheckHealth.mockResolvedValueOnce(sampleHealth);
-    const { unmount } = render(<DashboardPage />);
 
-    const healthButton = screen.getByRole("button", {
-      name: /check health/i,
-    });
-    await user.click(healthButton);
+    render(<DashboardPage />);
+    await user.click(screen.getByRole("button", { name: /check health/i }));
 
-    expect(screen.getByText("ok")).toBeDefined();
-    expect(screen.getByText("q-aegis-shield-backend")).toBeDefined();
-    expect(screen.getByText("0.1.0")).toBeDefined();
-    expect(screen.getByText("v0.1.0")).toBeDefined();
+    expect(screen.getByText("ok")).toBeInTheDocument();
+    expect(screen.getByText("q-aegis-shield-backend")).toBeInTheDocument();
+    expect(screen.getByText("0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.1.0")).toBeInTheDocument();
+  });
 
-    unmount();
-
-    // 2. Failure case
+  it("renders the error message when the health check fails", async () => {
+    const user = userEvent.setup();
     mockCheckHealth.mockRejectedValueOnce(
       new ApiError(503, "Service Unavailable", {
         detail: "Postgres connection refused",
       })
     );
-    render(<DashboardPage />);
 
-    const healthButton2 = screen.getByRole("button", {
-      name: /check health/i,
-    });
-    await user.click(healthButton2);
+    render(<DashboardPage />);
+    await user.click(screen.getByRole("button", { name: /check health/i }));
 
     expect(
       screen.getByText(/API 503: Postgres connection refused/i)
-    ).toBeDefined();
+    ).toBeInTheDocument();
   });
 });
