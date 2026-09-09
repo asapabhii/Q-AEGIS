@@ -169,3 +169,18 @@ RiskScoreCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
+
+#: Roles allowed to author override rules, ``PRD.md`` FR-13. Compliance Officers
+#: define hard rules the AI cannot bypass. Nobody else authors them.
+PolicyRuleCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.COMPLIANCE_OFFICER)),
+]
+
+#: Roles allowed to trigger a policy-gate evaluation, ``PRD.md`` FR-5.
+#: Compliance Officers check that a rule fires; Security Admins run it for
+#: the dashboard. Analysts, owners, CISO, and auditors do not trigger the gate.
+PolicyDecisionCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.COMPLIANCE_OFFICER, UserRole.SECURITY_ADMIN)),
+]

@@ -7,6 +7,7 @@ not, so it is tested as real behavior: a missing or unrecognized role must be
 refused rather than defaulted to some permitted value.
 
 What those endpoints *persist* is tested separately in ``test_api_persistence.py``.
+The policy gate (``SPEC.md`` 3.6) is covered here for auth and request validation.
 """
 
 from decimal import Decimal
@@ -26,6 +27,8 @@ HEALTH_URL = f"{API_V1_PREFIX}/health"
 DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
 RISK_URL = f"{API_V1_PREFIX}/risk-scores"
+POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
+POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 
 #: A role permitted to call /classify.
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
@@ -324,6 +327,8 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
     assert DOCUMENTS_URL in paths
     assert CLASSIFY_URL in paths
     assert RISK_URL in paths
+    assert POLICY_RULES_URL in paths
+    assert POLICY_DECISIONS_URL in paths
 
 
 # --------------------------------------------------------------------------
@@ -506,3 +511,241 @@ def test_risk_score_rejects_unknown_snapshot_fields(
     )
     response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
     assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------
+# POST /policy-rules and /policy-decisions, SPEC.md 3.6
+# --------------------------------------------------------------------------
+
+
+COMPLIANCE_HEADERS = {ACTOR_ROLE_HEADER: UserRole.COMPLIANCE_OFFICER.value}
+
+
+def policy_rule_body(**overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "rule_name": "Deny restricted",
+        "condition_expr": {
+            "field": "sensitivity_label",
+            "op": "eq",
+            "value": "RESTRICTED",
+        },
+        "action": "deny",
+        "priority": 10,
+    }
+    body.update(overrides)
+    return body
+
+
+def policy_decision_body(
+    document_id: UUID | str, **overrides: object
+) -> dict[str, object]:
+    body: dict[str, object] = {
+        "document_id": str(document_id),
+        "ai_recommendation": "allow",
+        "sensitivity_label": "RESTRICTED",
+        "risk_value": 0.2,
+        "trust_score": 0.3,
+    }
+    body.update(overrides)
+    return body
+
+
+def test_policy_rule_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    response = client.post(POLICY_RULES_URL, json=policy_rule_body())
+    assert response.status_code == 401
+
+
+def test_policy_rule_admits_compliance_officer(client: TestClient) -> None:
+    response = client.post(
+        POLICY_RULES_URL, json=policy_rule_body(), headers=COMPLIANCE_HEADERS
+    )
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.SECURITY_ANALYST,
+        UserRole.SECURITY_ADMIN,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_policy_rule_refuses_roles_outside_the_allow_list(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.post(
+        POLICY_RULES_URL,
+        json=policy_rule_body(rule_name=f"rule-{role.value}"),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role",
+    [UserRole.COMPLIANCE_OFFICER, UserRole.SECURITY_ADMIN],
+)
+def test_policy_decision_admits_permitted_roles(
+    client: TestClient, document_id: UUID, role: UserRole
+) -> None:
+    response = client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(document_id),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.SECURITY_ANALYST,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_policy_decision_refuses_roles_outside_the_allow_list(
+    client: TestClient, document_id: UUID, role: UserRole
+) -> None:
+    response = client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(document_id),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+def test_policy_decision_rejects_client_supplied_final_decision(
+    client: TestClient, document_id: UUID
+) -> None:
+    body = policy_decision_body(document_id, final_decision="deny")
+    response = client.post(POLICY_DECISIONS_URL, json=body, headers=COMPLIANCE_HEADERS)
+    assert response.status_code == 422
+
+
+def test_policy_rule_rejects_an_unknown_operator(client: TestClient) -> None:
+    body = policy_rule_body(
+        condition_expr={
+            "field": "sensitivity_label",
+            "op": "regex",
+            "value": "RESTRICTED",
+        }
+    )
+    response = client.post(POLICY_RULES_URL, json=body, headers=COMPLIANCE_HEADERS)
+    assert response.status_code == 422
+
+
+def test_policy_rule_rejects_an_empty_all(client: TestClient) -> None:
+    body = policy_rule_body(condition_expr={"all": []})
+    response = client.post(POLICY_RULES_URL, json=body, headers=COMPLIANCE_HEADERS)
+    assert response.status_code == 422
+
+
+def test_policy_rule_rejects_a_tree_deeper_than_the_unrolled_rego(
+    client: TestClient,
+) -> None:
+    tree: dict[str, object] = {
+        "field": "trust_score",
+        "op": "lt",
+        "value": 0.5,
+    }
+    for _ in range(9):
+        tree = {"not": tree}
+    body = policy_rule_body(condition_expr=tree)
+    response = client.post(POLICY_RULES_URL, json=body, headers=COMPLIANCE_HEADERS)
+    assert response.status_code == 422
+
+
+def test_policy_rule_rejects_a_duplicate_name(client: TestClient) -> None:
+    assert (
+        client.post(
+            POLICY_RULES_URL, json=policy_rule_body(), headers=COMPLIANCE_HEADERS
+        ).status_code
+        == 201
+    )
+    response = client.post(
+        POLICY_RULES_URL, json=policy_rule_body(), headers=COMPLIANCE_HEADERS
+    )
+    assert response.status_code == 409
+
+
+def test_policy_rule_rejects_a_duplicate_active_priority(client: TestClient) -> None:
+    assert (
+        client.post(
+            POLICY_RULES_URL,
+            json=policy_rule_body(rule_name="first", priority=4),
+            headers=COMPLIANCE_HEADERS,
+        ).status_code
+        == 201
+    )
+    response = client.post(
+        POLICY_RULES_URL,
+        json=policy_rule_body(rule_name="second", priority=4),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 409
+
+
+def test_policy_decision_rejects_an_unknown_document(client: TestClient) -> None:
+    unknown = str(uuid4())
+    response = client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(unknown),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 404
+    assert "POST /api/v1/documents" in response.json()["detail"]
+
+
+def test_policy_decision_rejects_a_boolean_score(
+    client: TestClient, document_id: UUID
+) -> None:
+    body = policy_decision_body(document_id, risk_value=True)
+    response = client.post(POLICY_DECISIONS_URL, json=body, headers=COMPLIANCE_HEADERS)
+    assert response.status_code == 422
+
+
+def test_policy_rule_rejects_a_blank_name(client: TestClient) -> None:
+    response = client.post(
+        POLICY_RULES_URL,
+        json=policy_rule_body(rule_name="   "),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+def test_policy_decision_returns_500_when_the_engine_fails(
+    raising_client: TestClient, document_id: UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.policy.engine import PolicyEngineError
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise PolicyEngineError("wasm down")
+
+    monkeypatch.setattr("app.api.routes.policy.evaluate", explode)
+    response = raising_client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(document_id),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 500
+
+
+def test_a_non_unique_integrity_error_is_not_mapped_to_409(
+    raising_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise IntegrityError("INSERT", {}, RuntimeError("deadlock"))
+
+    monkeypatch.setattr("app.api.routes.policy.policy_repo.insert_rule", boom)
+    response = raising_client.post(
+        POLICY_RULES_URL, json=policy_rule_body(), headers=COMPLIANCE_HEADERS
+    )
+    assert response.status_code == 500
