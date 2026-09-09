@@ -23,7 +23,7 @@ def upgrade() -> None:
             "model_version",
             sa.String(length=30),
             nullable=False,
-            server_default="contextual-risk-additive-0.1.0",
+            server_default=sa.text("'contextual-risk-additive-0.1.0'"),
         ),
     )
     op.alter_column("risk_scores", "model_version", server_default=None)
