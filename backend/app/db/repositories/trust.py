@@ -6,10 +6,18 @@ Append only. There is no update function for either table.
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import AgentOutput, TrustScore
 from app.trust_engine.consensus import WEIGHTS, AgentScore, TrustScoreResult
+
+
+def get_trust_score(session: Session, trust_score_id: UUID) -> TrustScore | None:
+    """Return one consensus row, or ``None`` if it was never written."""
+    return session.scalars(
+        select(TrustScore).where(TrustScore.id == trust_score_id)
+    ).one_or_none()
 
 
 def append_agent_outputs(
