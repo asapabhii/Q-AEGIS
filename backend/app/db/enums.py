@@ -1,12 +1,12 @@
-"""Enumerated domain values, mirroring the native Postgres enum types.
+﻿"""Enumerated domain values, mirroring the native Postgres enum types.
 
 Each class here corresponds to one Postgres enum type named in
-``docs/data-dictionary.md``. Adding a value requires a migration, which is the
-point: an unconstrained ``varchar`` lets a typo become a silently distinct
+`docs/data-dictionary.md`. Adding a value requires a migration, which is the
+point: an unconstrained `varchar` lets a typo become a silently distinct
 category, and these columns feed security decisions.
 
-``SensitivityLabel`` is deliberately not redefined here. It already exists in
-:mod:`app.classifier.labels`, where its ordering defines what "more sensitive"
+`SensitivityLabel` is deliberately not redefined here. It already exists in
+:mod:pp.classifier.labels, where its ordering defines what "more sensitive"
 means for the classifier's fail-safe. Two copies of that enum would be two
 places to get the ordering wrong.
 """
@@ -29,25 +29,25 @@ __all__ = [
 
 
 def enum_values(enum_class: type[Enum]) -> list[str]:
-    """Return an enum's values for SQLAlchemy's ``values_callable``.
+    """Return an enum's values for SQLAlchemy's `values_callable`.
 
     Without this, SQLAlchemy persists enum *names* rather than *values*, so
-    ``UserRole.DATA_OWNER`` would be stored as ``DATA_OWNER`` while the API and
-    the data dictionary both say ``data_owner``. Passing this to every
-    ``Enum(...)`` column keeps the stored value identical to the documented one.
+    `UserRole.DATA_OWNER` would be stored as `DATA_OWNER` while the API and
+    the data dictionary both say `data_owner`. Passing this to every
+    `Enum(...)` column keeps the stored value identical to the documented one.
     """
     return [member.value for member in enum_class]
 
 
 class UserRole(str, Enum):
-    """A user's role, ``users.role``.
+    """A user's role, `users.role`.
 
-    The authorization guard in :mod:`app.api.deps` checks against this enum, so
+    The authorization guard in :mod:pp.api.deps checks against this enum, so
     a role that can be stored is a role that can be reasoned about, and there is
     no second list to keep in step.
 
-    ``CISO`` and ``ENGINEER`` exist here because the data dictionary defines
-    them. ``PRD.md`` Section 5 lists six personas and folds the CISO into the
+    `CISO` and `ENGINEER` exist here because the data dictionary defines
+    them. `PRD.md` Section 5 lists six personas and folds the CISO into the
     Security Admin row, so the two documents disagree; the schema keeps the
     wider set, since a role that exists in the data but not in the enum is the
     worse failure.
@@ -63,12 +63,12 @@ class UserRole(str, Enum):
 
 
 class DocumentStatus(str, Enum):
-    """Lifecycle stage of a document, ``documents.current_status``.
+    """Lifecycle stage of a document, `documents.current_status`.
 
-    ``REGISTERED`` means the document's metadata row exists but no file has been
-    stored yet. It is separate from ``UPLOADED`` because calling a document
+    `REGISTERED` means the document's metadata row exists but no file has been
+    stored yet. It is separate from `UPLOADED` because calling a document
     uploaded when nothing was uploaded puts a false statement in the lifecycle
-    field, and this build has no object storage (``PRD.md`` FR-1's upload screen
+    field, and this build has no object storage (`PRD.md` FR-1's upload screen
     is unbuilt).
     """
 
@@ -80,9 +80,9 @@ class DocumentStatus(str, Enum):
 
 
 class AgentType(str, Enum):
-    """Which of the five risk agents produced an output, ``agent_outputs.agent_type``.
+    """Which of the five risk agents produced an output, `agent_outputs.agent_type`.
 
-    Five agents per assessment, per ``SPEC.md`` 3.4 and ``PRD.md`` FR-3.
+    Five agents per assessment, per `SPEC.md` 3.4 and `PRD.md` FR-3.
     """
 
     SECURITY = "security"
@@ -95,9 +95,9 @@ class AgentType(str, Enum):
 class PolicyAction(str, Enum):
     """An action a policy rule can take, and the domain of a policy decision.
 
-    Used by ``policy_rules.action``, ``policy_decisions.ai_recommendation``, and
-    ``policy_decisions.final_decision``. All three share one domain because a
-    matching rule's action *becomes* the final decision (``SPEC.md`` 3.6), so a
+    Used by `policy_rules.action`, `policy_decisions.ai_recommendation`, and
+    `policy_decisions.final_decision`. All three share one domain because a
+    matching rule's action *becomes* the final decision (`SPEC.md` 3.6), so a
     recommendation and a decision have to be comparable.
     """
 
@@ -108,10 +108,10 @@ class PolicyAction(str, Enum):
 
 
 class CryptoProfileType(str, Enum):
-    """Protection profile selected for a document, ``crypto_profiles.profile_type``.
+    """Protection profile selected for a document, `crypto_profiles.profile_type`.
 
-    Parameter sets are in ``SPEC.md`` Section 6 and are not restated here.
-    ``HYBRID`` is ``X25519MLKEM768``; ``POST_QUANTUM`` is ML-KEM-1024 with
+    Parameter sets are in `SPEC.md` Section 6 and are not restated here.
+    `HYBRID` is `X25519MLKEM768`; `POST_QUANTUM` is ML-KEM-1024 with
     ML-DSA-87.
     """
 
@@ -121,7 +121,7 @@ class CryptoProfileType(str, Enum):
 
 
 class MigrationStatus(str, Enum):
-    """Progress of a scheduled post-quantum upgrade, ``migration_schedule.status``."""
+    """Progress of a scheduled post-quantum upgrade, `migration_schedule.status`."""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -129,10 +129,10 @@ class MigrationStatus(str, Enum):
 
 
 class AuditEventType(str, Enum):
-    """Known ``audit_log.event_type`` values.
+    """Known `audit_log.event_type` values.
 
     Unlike every other enum here this is NOT a Postgres enum type. The column is
-    ``varchar(60)`` on purpose: every module in ``SPEC.md`` Section 3 will add
+    `varchar(60)` on purpose: every module in `SPEC.md` Section 3 will add
     event types as it lands, and gating each one behind a migration would make
     the audit log the thing that slows down writing to the audit log.
 
@@ -148,3 +148,4 @@ class AuditEventType(str, Enum):
     TRUST_SCORE_UPDATED = "trust_score_updated"
     POLICY_DECISION_RECORDED = "policy_decision_recorded"
     CRYPTO_PROFILE_SELECTED = "crypto_profile_selected"
+    ERASURE_REQUESTED = "erasure_requested"

@@ -1,10 +1,10 @@
-"""Crypto-agile protection engine, ``SPEC.md`` 3.7, implements ``PRD.md`` FR-6.
+﻿"""Crypto-agile protection engine, ``SPEC.md`` 3.7, implements ``PRD.md`` FR-6.
 
 NOT IMPLEMENTED. Scheduled for Phase 3 (``SPEC.md`` Section 7). This package
 exists so the module boundary is fixed before code is written; it contains no
 logic, stubbed or otherwise.
 
-SECURITY CAVEAT, restate this in every docstring in this package: liboqs is NOT
+SECURITY CAVEAT: liboqs is NOT independently audited, restate this in every docstring in this package: liboqs is NOT
 independently audited, and OQS-OpenSSL is documented by its own maintainers as
 development and interop-testing only, not production-supported. Do not claim
 audited-grade or FIPS-certified guarantees that the library does not back up.
