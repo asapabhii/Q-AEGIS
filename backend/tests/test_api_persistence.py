@@ -3,9 +3,9 @@
 Closes a known defect: before the data model existed, ``POST /classify`` computed
 a classification and stored nothing, and ``PRD.md`` Section 7 treats a decision
 with no corresponding audit entry as a defect rather than an edge case. The same
-atomicity applies to ``POST /risk-scores`` and the policy gate. What these tests
-assert is that the decision and its audit entry are written together, or not at
-all.
+atomicity applies to ``POST /risk-scores``, the policy gate, and trust-score
+consensus. What these tests assert is that the decision and its audit entry are
+written together, or not at all.
 """
 
 from datetime import datetime
@@ -21,23 +21,27 @@ from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
 from app.db.enums import AuditEventType, PolicyAction, UserRole
 from app.db.models import (
+    AgentOutput,
     AuditLog,
     ClassificationMetadata,
     Document,
     PolicyDecision,
     PolicyRule,
     RiskScore,
+    TrustScore,
     User,
 )
 from app.db.repositories import audit as audit_repo
 from app.policy.engine import POLICY_VERSION
 from app.risk_engine.scorer import MODEL_VERSION as RISK_MODEL_VERSION
+from app.trust_engine.consensus import CONSENSUS_VERSION
 
 DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
 RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
+TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
 
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
 ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
@@ -895,3 +899,124 @@ def test_a_failed_audit_write_rolls_back_the_new_rule(
     assert response.status_code == 500
     db_session.expire_all()
     assert rows(db_session, PolicyRule, rule_name="Never committed") == []
+
+
+# --------------------------------------------------------------------------
+# POST /trust-scores, SPEC.md 3.5, PRD.md FR-4
+# --------------------------------------------------------------------------
+
+
+def five_agent_outputs() -> list[dict[str, object]]:
+    return [
+        {
+            "agent_type": agent,
+            "score": "0.50",
+            "rationale": f"{agent} assessed this snapshot.",
+        }
+        for agent in (
+            "security",
+            "compliance",
+            "contextual",
+            "quantum",
+            "sustainability",
+        )
+    ]
+
+
+def test_computing_trust_persists_outputs_the_row_and_the_audit_entry(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+
+    response = client.post(
+        TRUST_URL,
+        json={"risk_score_id": risk_id, "outputs": five_agent_outputs()},
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["consensus_value"] == "0.500"
+    assert payload["consensus_version"] == CONSENSUS_VERSION
+    assert payload["document_id"] == document_id
+    assert payload["risk_score_id"] == risk_id
+    assert len(payload["outputs"]) == 5
+
+    assert len(rows(db_session, TrustScore, document_id=document_id)) == 1
+    assert len(rows(db_session, AgentOutput, risk_score_id=risk_id)) == 5
+    events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.TRUST_SCORE_UPDATED.value
+    ]
+    assert len(events) == 1
+    assert events[0].payload["consensus_version"] == CONSENSUS_VERSION
+    assert events[0].payload["trust_score_id"] == payload["id"]
+    assert len(events[0].payload["agent_output_ids"]) == 5
+
+
+def test_a_second_consensus_on_the_same_risk_score_is_a_conflict(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    body = {"risk_score_id": risk_id, "outputs": five_agent_outputs()}
+    assert client.post(TRUST_URL, json=body, headers=ANALYST_HEADERS).status_code == 201
+    response = client.post(TRUST_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 409
+    assert len(rows(db_session, TrustScore, document_id=document_id)) == 1
+
+
+def test_trust_evaluation_does_not_change_document_status(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    before = db_session.get(Document, document_id).current_status
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    response = client.post(
+        TRUST_URL,
+        json={"risk_score_id": risk_id, "outputs": five_agent_outputs()},
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 201, response.text
+    db_session.expire_all()
+    assert db_session.get(Document, document_id).current_status == before
+
+
+def test_an_unknown_risk_score_leaves_no_trust_rows(
+    client: TestClient, db_session: Session
+) -> None:
+    unknown = str(uuid4())
+    response = client.post(
+        TRUST_URL,
+        json={"risk_score_id": unknown, "outputs": five_agent_outputs()},
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 404
+    assert rows(db_session, TrustScore) == []
+    assert rows(db_session, AgentOutput) == []
+
+
+def test_a_failed_audit_write_rolls_back_the_trust_score(
+    raising_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = register(raising_client)["id"]
+    risk_id = score_risk(raising_client, document_id, owner_user_id(db_session)).json()[
+        "id"
+    ]
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated audit log failure")
+
+    monkeypatch.setattr(audit_repo, "append_entry", explode)
+    response = raising_client.post(
+        TRUST_URL,
+        json={"risk_score_id": risk_id, "outputs": five_agent_outputs()},
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 500
+    db_session.expire_all()
+    assert rows(db_session, TrustScore, document_id=document_id) == []
+    assert rows(db_session, AgentOutput, risk_score_id=risk_id) == []

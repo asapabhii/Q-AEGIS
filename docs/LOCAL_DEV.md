@@ -270,13 +270,43 @@ curl -X POST http://127.0.0.1:8000/api/v1/risk-scores \
 `after_hours` is whatever the caller asserts, not something the server derives
 from `accessed_at`. Re-scoring appends a new row; prior scores stay.
 
+### Compute a trust score
+
+`POST /api/v1/trust-scores` combines exactly five agent outputs into one
+`consensus_value`. The server computes that number; the client cannot supply it.
+Roles: `security_analyst` and `security_admin`. The five scores are
+caller-asserted until 3.4 exists to produce them. A missing or duplicate agent
+type is 422. An unknown `risk_score_id` is a 404. A second call on the same
+risk score is 409 — score a new contextual risk row first.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/trust-scores \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{
+    "risk_score_id": "<the id from the risk-score call>",
+    "outputs": [
+      {"agent_type": "security", "score": 0.50, "rationale": "No malware indicators."},
+      {"agent_type": "compliance", "score": 0.50, "rationale": "Retention policy holds."},
+      {"agent_type": "contextual", "score": 0.50, "rationale": "Known device, business hours."},
+      {"agent_type": "quantum", "score": 0.50, "rationale": "Hybrid already sufficient."},
+      {"agent_type": "sustainability", "score": 0.50, "rationale": "No extra PQC cost needed."}
+    ]
+  }'
+```
+
+Each call writes five `agent_outputs` rows, one `trust_scores` row, and one
+`audit_log` entry in the same transaction. It does not change
+`documents.current_status` and it does not select a crypto profile (FR-6 is
+after the policy gate).
+
 ### Policy gate
 
 `POST /api/v1/policy-rules` authors a rule. Role: `compliance_officer` only.
 `POST /api/v1/policy-decisions` evaluates active rules in priority order. Roles:
 `compliance_officer` and `security_admin`. The server computes `final_decision`;
 the client cannot supply it. `trust_score` and `ai_recommendation` are
-caller-asserted until 3.5 and 3.7 exist.
+still caller-asserted on this endpoint; it does not read `trust_scores`.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/policy-rules \

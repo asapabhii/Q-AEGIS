@@ -65,8 +65,7 @@ class LeafCondition(BaseModel):
                 raise ValueError(
                     f"{self.op} is only valid on numeric fields, not {self.field}"
                 )
-            if not _is_number(self.value):
-                raise ValueError(f"{self.op} requires a numeric value")
+            _assert_value_fits_field(self.field, self.value)
         elif self.op == "in":
             if not isinstance(self.value, list) or len(self.value) < 1:
                 raise ValueError("in requires a non-empty list")

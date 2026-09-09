@@ -184,3 +184,12 @@ PolicyDecisionCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.COMPLIANCE_OFFICER, UserRole.SECURITY_ADMIN)),
 ]
+
+#: Roles allowed to trigger a trust-score consensus, ``PRD.md`` FR-4.
+#: Same allow-list as contextual risk: analysts recompute the assessment,
+#: admins recompute for the dashboard. 3.4 has not landed, so this is the
+#: write path for the five caller-asserted agent scores as well.
+TrustScoreCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
+]
