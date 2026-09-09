@@ -17,8 +17,15 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser.
 
 - `npm run dev`: Starts the local Next.js development server.
 - `npm run lint`: Runs ESLint over all source files.
-- `npm test`: Runs the Vitest test suite (`src/**/*.test.ts`).
+- `npm test`: Runs Vitest test suite with v8 coverage and enforces a 70% coverage floor.
 - `npm run build`: Compiles the production build.
+
+## Testing & Coverage
+
+Component and API client unit tests are written in TypeScript (`src/**/*.test.{ts,tsx}`) using:
+- **Runner**: Vitest with `@vitejs/plugin-react` and `jsdom` environment.
+- **Testing Library**: `@testing-library/react`, `@testing-library/user-event`, and `@testing-library/jest-dom` for user-visible component assertion.
+- **Coverage Gate**: 70% floor enforced across lines, functions, branches, and statements (`@vitest/coverage-v8`), matching `AGENTS.md`. `npm test` fails locally and in CI if coverage drops below 70%.
 
 ## Environment Variables
 
