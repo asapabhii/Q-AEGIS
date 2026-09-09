@@ -156,7 +156,7 @@ ML-DSA's signing algorithm uses randomized, hedged signing with a rejection-samp
 Status markers below describe what is actually merged to `main`, not what was planned. Update them in the pull request that lands the work, never ahead of it.
 
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
-2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening, branch protection, and the data model are complete; the crypto-selector stub is not started.
+2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening, branch protection, the data model, and the crypto-selector stub are complete. The stub maps a trust score to a profile; it does not persist and does not take a ``trust_score_id`` until Phase 3.
 3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked.
 4. Crypto-shredding (3.9), agentic RAG (3.12), knowledge graph (3.11).
 5. Full LangGraph multi-agent orchestration (3.4), migration scheduler with real baseline benchmark (3.10).
