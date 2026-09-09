@@ -7,7 +7,7 @@ is a history of evaluations; there is no update function for it.
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.db.enums import PolicyAction
@@ -76,6 +76,20 @@ def append_decision(
     session.add(row)
     session.flush()
     return row
+
+
+def document_has_policy_decision(session: Session, document_id: UUID) -> bool:
+    """True when at least one gate evaluation exists for this document.
+
+    FR-6 selects protection after the policy gate. v1 enforces that by requiring
+    a ``policy_decisions`` row for the same ``document_id``, not by re-running
+    the evaluator here. A ``deny`` still counts: the gate already recorded.
+    """
+    return bool(
+        session.scalar(
+            select(exists().where(PolicyDecision.document_id == document_id))
+        )
+    )
 
 
 def rule_created_audit_payload(*, rule: PolicyRule) -> dict[str, Any]:

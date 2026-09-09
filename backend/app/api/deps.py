@@ -193,3 +193,12 @@ TrustScoreCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
+
+#: Roles allowed to persist a crypto-profile selection, ``PRD.md`` FR-6.
+#: Same allow-list as the assessment chain (3.3, 3.5): analysts select after
+#: scoring; admins select for the dashboard. This is the mapping, not
+#: encryption of bytes.
+CryptoProfileCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
+]
