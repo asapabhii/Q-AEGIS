@@ -82,6 +82,16 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
 
+      # Determinism gate for SPEC.md 3.6. opa eval does not honour
+      # capabilities.json; opa check does. Pin matches the WASM compile.
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: 1.8.0
+
+      - name: Check policy (capabilities)
+        run: opa check --capabilities app/policy/rego/capabilities.json app/policy/rego/policy.rego
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

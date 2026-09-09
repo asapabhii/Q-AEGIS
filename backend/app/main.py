@@ -33,9 +33,9 @@ def create_app() -> FastAPI:
         ),
         description=(
             "Phase 3 start. Live endpoints are the health check, document "
-            "registration, the classifier stub, audit-chain verification, and "
-            "contextual risk scoring. See SPEC.md Section 7 for the full "
-            "build order."
+            "registration, the classifier stub, audit-chain verification, "
+            "contextual risk scoring, and the policy gate. See SPEC.md "
+            "Section 7 for the full build order."
         ),
     )
     application.include_router(api_router)

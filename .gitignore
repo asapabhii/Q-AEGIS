@@ -30,3 +30,10 @@ Thumbs.db
 
 # Local infra state
 infra/data/
+
+# OPA CLI and extract leftovers from compiling the policy WASM bundle.
+# Commit policy.rego, policy.wasm, and capabilities.json only.
+backend/app/policy/rego/opa.exe
+backend/app/policy/rego/bundle.tar.gz
+backend/app/policy/rego/data.json
+backend/app/policy/rego/.manifest
