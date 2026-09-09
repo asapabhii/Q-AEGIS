@@ -6,7 +6,7 @@ Routers are collected here rather than registered ad hoc in
 
 from fastapi import APIRouter
 
-from app.api.routes import audit, classify, documents, health
+from app.api.routes import audit, classify, documents, health, risk
 
 #: Version prefix for the whole API. Present from the first endpoint so that a
 #: future breaking change can ship as ``/v2`` instead of requiring every client
@@ -18,3 +18,4 @@ api_router.include_router(health.router)
 api_router.include_router(documents.router)
 api_router.include_router(classify.router)
 api_router.include_router(audit.router)
+api_router.include_router(risk.router)
