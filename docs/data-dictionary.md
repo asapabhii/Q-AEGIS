@@ -245,7 +245,7 @@ Append-only. One row per recomputation. The Trust Engine's output
 |---|---|---|---|
 | `id` | `uuid` PK | no | |
 | `rule_name` | `varchar(150)` unique | no | |
-| `condition_expr` | `jsonb` | no | Serialised condition tree from the rule builder (`PRD.md` FR-13) |
+| `condition_expr` | `jsonb` | no | Closed v1 tree: combinators `all`/`any`/`not`, leaf ops `eq`/`neq`/`gt`/`gte`/`lt`/`lte`/`in`, fields `sensitivity_label`/`risk_value`/`trust_score`/`ai_recommendation`. Extra keys forbidden at the API. Max combinator depth 8 |
 | `action` | `policy_action` | no | `allow`, `deny`, `require_mfa`, `force_pqc` |
 | `priority` | `int` | no | `CHECK` enforces a positive integer. Lower value is evaluated first |
 | `active` | `boolean` | no | Defaults true |

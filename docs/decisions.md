@@ -13,6 +13,27 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-09: Policy v1 condition language, depth-unrolled Rego, caller-supplied facts
+
+Decided by: Abhinav, implementing 3.6.
+
+Closed v1 `condition_expr`:
+
+- Combinators: `all`, `any`, `not`. Empty `all`/`any` rejected (vacuous `all` would be fail-open).
+- Leaf operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`.
+- Fields: `sensitivity_label`, `risk_value`, `trust_score`, `ai_recommendation`.
+- Extra keys forbidden. Max combinator depth 8.
+
+Rego forbids recursive rules (evaluation must terminate). The interpreter is therefore unrolled to depth 8 in `policy.rego`; Python rejects a deeper tree at 422 so the WASM module never sees one.
+
+`trust_score` and `ai_recommendation` on `POST /policy-decisions` are caller-asserted until 3.5 and 3.7 exist to produce them. Same treatment as 3.3's `after_hours`.
+
+Host builtins provided to `opa-wasmtime`: `object.get` and `count` only, in-process. Network builtins are not implemented and are stripped from `capabilities.json`. Compile with OPA 1.8.0.
+
+Rejected: interpreting the tree in Python and using OPA only for first-match. That would make the engine a fig leaf. Rejected: unbounded recursion in Rego; the compiler refuses it.
+
+Roles: `POST /policy-rules` is `compliance_officer` only (FR-13). `POST /policy-decisions` is `compliance_officer` and `security_admin`.
+
 ### 2026-09-09: Contextual risk weights are placeholders, additive, versioned
 
 Decided by: Abhinav.

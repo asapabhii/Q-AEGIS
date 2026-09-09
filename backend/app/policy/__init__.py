@@ -1,21 +1,12 @@
 """Deterministic policy engine, ``SPEC.md`` 3.6, implements ``PRD.md`` FR-5.
 
-NOT IMPLEMENTED. Scheduled for Phase 3 (``SPEC.md`` Section 7). This package
-exists so the module boundary is fixed before code is written; it contains no
-logic, stubbed or otherwise.
+Evaluates a closed condition tree against caller-supplied document facts and
+returns the first matching active rule's action, or the AI recommendation when
+nothing matches. Evaluation is in-process WASM (``opa-wasmtime``) over one
+reviewed Rego module. Rules are data on ``input``, never compiled into Rego.
 
-The highest-consequence module in the system (``PRD.md`` Risk R2): it sits
-directly between an AI recommendation and a real security decision.
+``after_hours``-style derivation is not this module's job. ``trust_score`` and
+``ai_recommendation`` are facts the caller sends until 3.5 and 3.7 exist.
 
-When built:
-- Tool choice between Cedar and OPA is an open decision (``SPEC.md`` 2.2). It
-  must be made against real constraints and logged to ``docs/decisions.md``, not
-  defaulted to silently.
-- ``policy_decisions.rule_id`` is nullable. "No rule fired, the AI
-  recommendation stood" is the common case and is modeled as such, not worked
-  around with a placeholder rule.
-- Testing floor is one test per rule type and per condition operator, not a
-  single happy-path test (``AGENTS.md``).
-
-Owner: Udhav. Required reviewer on any change here, regardless of author.
+Owner: Udhav (``WORK_DIVISION.md``). Required reviewer on any change here.
 """
