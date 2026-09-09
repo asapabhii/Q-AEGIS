@@ -270,6 +270,55 @@ curl -X POST http://127.0.0.1:8000/api/v1/risk-scores \
 `after_hours` is whatever the caller asserts, not something the server derives
 from `accessed_at`. Re-scoring appends a new row; prior scores stay.
 
+### Policy gate
+
+`POST /api/v1/policy-rules` authors a rule. Role: `compliance_officer` only.
+`POST /api/v1/policy-decisions` evaluates active rules in priority order. Roles:
+`compliance_officer` and `security_admin`. The server computes `final_decision`;
+the client cannot supply it. `trust_score` and `ai_recommendation` are
+caller-asserted until 3.5 and 3.7 exist.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/policy-rules \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
+  -d '{
+    "rule_name": "Deny restricted",
+    "condition_expr": {
+      "field": "sensitivity_label",
+      "op": "eq",
+      "value": "RESTRICTED"
+    },
+    "action": "deny",
+    "priority": 10
+  }'
+
+curl -X POST http://127.0.0.1:8000/api/v1/policy-decisions \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
+  -d '{
+    "document_id": "<the id from step 1>",
+    "ai_recommendation": "allow",
+    "sensitivity_label": "RESTRICTED",
+    "risk_value": 0.20,
+    "trust_score": 0.30
+  }'
+```
+
+Each call writes the decision (or the rule) and one `audit_log` entry in the
+same transaction. An unknown `document_id` is a 404. Evaluation does not change
+`documents.current_status`.
+
+The API loads the committed `backend/app/policy/rego/policy.wasm`. You do not
+need the OPA CLI to run it. Rebuild the WASM only after editing `policy.rego`,
+with OPA 1.8.0, and extract `/policy.wasm` from the bundle — not `/policy.rego`,
+which the bundle rewrites:
+
+```bash
+opa build -t wasm -e q_aegis/policy/first_match \
+  -o bundle.tar.gz backend/app/policy/rego/policy.rego
+```
+
 ### Test and lint
 
 Run all three before every pull request. CI runs exactly these and the coverage

@@ -171,11 +171,17 @@ def make_policy_rule(
     priority: int = 10,
     active: bool = True,
     action: PolicyAction = PolicyAction.DENY,
+    condition_expr: dict | None = None,
 ) -> PolicyRule:
     """Create one ``policy_rules`` row."""
     row = PolicyRule(
         rule_name=rule_name,
-        condition_expr={"all": [{"field": "label", "op": "eq", "value": "RESTRICTED"}]},
+        condition_expr=condition_expr
+        or {
+            "field": "sensitivity_label",
+            "op": "eq",
+            "value": "RESTRICTED",
+        },
         action=action,
         priority=priority,
         active=active,

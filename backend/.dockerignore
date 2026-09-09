@@ -19,6 +19,10 @@ tests/
 requirements-dev.txt
 .flake8
 
+# Local OPA CLI used only to rebuild policy.wasm. The committed WASM ships.
+app/policy/rego/opa.exe
+app/policy/rego/bundle.tar.gz
+
 .git/
 .gitignore
 Dockerfile
