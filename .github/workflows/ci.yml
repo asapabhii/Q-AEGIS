@@ -139,3 +139,39 @@ jobs:
       - name: Clean up
         if: always()
         run: docker rm --force qaegis-ci || true
+
+  # ---------------------------------------------------------------------------
+  # Frontend: lint, test, build.
+  #
+  # NEW JOB — not wired into branch protection yet. Call it out for Abhinav so
+  # he can add it as a required check once it has been green for a few runs.
+  # The existing lint-test and build jobs above are untouched; their IDs are
+  # what branch protection references.
+  # ---------------------------------------------------------------------------
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # The 70% floor is enforced by vitest.config.ts coverage thresholds
+      - name: Test with coverage gate
+        run: npm test
+
+      - name: Build
+        run: npm run build
