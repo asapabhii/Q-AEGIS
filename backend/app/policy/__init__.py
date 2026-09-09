@@ -1,21 +1,23 @@
-"""Deterministic policy engine, ``SPEC.md`` 3.6, implements ``PRD.md`` FR-5.
+﻿"""Policy engine for deterministic rule-based overrides, `SPEC.md` 3.6, `PRD.md` FR-5.
 
-NOT IMPLEMENTED. Scheduled for Phase 3 (``SPEC.md`` Section 7). This package
-exists so the module boundary is fixed before code is written; it contains no
-logic, stubbed or otherwise.
+This module evaluates policy rules against document context to determine whether
+an AI recommendation should be overridden. Rules are data (jsonb condition trees),
+not generated Rego code - they are interpreted by a fixed Rego module.
 
-The highest-consequence module in the system (``PRD.md`` Risk R2): it sits
-directly between an AI recommendation and a real security decision.
+Four constraints (per SPEC.md 3.6):
+1. Rules are data, not policy source - condition_expr holds serialized condition trees
+2. Evaluation is in-process via WebAssembly bundle (no sidecar, no network)
+3. Determinism enforced by capabilities file in CI (opa check --capabilities)
+4. Priority-ordered first match - lowest priority value wins
 
-When built:
-- Tool choice between Cedar and OPA is an open decision (``SPEC.md`` 2.2). It
-  must be made against real constraints and logged to ``docs/decisions.md``, not
-  defaulted to silently.
-- ``policy_decisions.rule_id`` is nullable. "No rule fired, the AI
-  recommendation stood" is the common case and is modeled as such, not worked
-  around with a placeholder rule.
-- Testing floor is one test per rule type and per condition operator, not a
-  single happy-path test (``AGENTS.md``).
-
-Owner: Udhav. Required reviewer on any change here, regardless of author.
+SECURITY: This module sits directly between an AI recommendation and a real
+security decision. Errors here have worse consequences than elsewhere.
 """
+
+from app.policy.engine import PolicyEngine, evaluate_policy_decision, get_policy_engine
+
+__all__ = [
+    "PolicyEngine",
+    "evaluate_policy_decision",
+    "get_policy_engine",
+]

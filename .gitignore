@@ -1,4 +1,4 @@
-# Secrets. Never commit these. See AGENTS.md security rules.
+﻿# Secrets. Never commit these. See AGENTS.md security rules.
 .env
 .env.*
 !.env.example
@@ -28,5 +28,14 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Tools
+opa.exe
+
 # Local infra state
 infra/data/
+
+# Roadmap
+ROADMAP.md
+
+# Policy engine (will be implemented)
+backend/app/policy/rego/
