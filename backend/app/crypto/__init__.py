@@ -1,8 +1,9 @@
 ﻿"""Crypto-agile protection engine, ``SPEC.md`` 3.7, implements ``PRD.md`` FR-6.
 
-NOT IMPLEMENTED. Scheduled for Phase 3 (``SPEC.md`` Section 7). This package
-exists so the module boundary is fixed before code is written; it contains no
-logic, stubbed or otherwise.
+``POST /api/v1/crypto-profiles`` persists a ``crypto_profiles`` row and an
+audit entry from a real ``trust_score_id``. The score-to-profile map in
+:mod:`app.crypto.selector` is still a stub: its thresholds are uncalibrated
+placeholders. This package does not encrypt or decrypt bytes.
 
 SECURITY CAVEAT: liboqs is NOT independently audited, restate this in every docstring in this package: liboqs is NOT
 independently audited, and OQS-OpenSSL is documented by its own maintainers as
@@ -14,8 +15,8 @@ security module (``PRD.md`` NG5). Document that as the current limitation
 wherever this module's guarantees are described; never imply hardware-backed
 protection that does not exist.
 
-Three protection profiles, when built (parameter tables: ``SPEC.md`` Section 6,
-do not guess these values):
+Three protection profiles (parameter tables: ``SPEC.md`` Section 6, do not
+guess these values):
 
 - AES-256: AES-256-GCM, classical baseline.
 - Hybrid: ``X25519MLKEM768`` exactly, the named group already deployed in

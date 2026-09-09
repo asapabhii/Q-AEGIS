@@ -1,0 +1,309 @@
+{
+  "builtins": [
+    {
+      "name": "assign",
+      "decl": {
+        "args": [
+          {
+            "type": "any"
+          },
+          {
+            "type": "any"
+          }
+        ],
+        "result": {
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": ":="
+    },
+    {
+      "name": "count",
+      "description": "Count takes a collection or string and returns the number of elements (or characters) in it.",
+      "categories": [
+        "aggregates"
+      ],
+      "decl": {
+        "args": [
+          {
+            "description": "the set/array/object/string to be counted",
+            "name": "collection",
+            "of": [
+              {
+                "type": "string"
+              },
+              {
+                "dynamic": {
+                  "type": "any"
+                },
+                "type": "array"
+              },
+              {
+                "dynamic": {
+                  "key": {
+                    "type": "any"
+                  },
+                  "value": {
+                    "type": "any"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "of": {
+                  "type": "any"
+                },
+                "type": "set"
+              }
+            ],
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "the count of elements, key/val pairs, or characters, respectively.",
+          "name": "n",
+          "type": "number"
+        },
+        "type": "function"
+      }
+    },
+    {
+      "name": "eq",
+      "decl": {
+        "args": [
+          {
+            "type": "any"
+          },
+          {
+            "type": "any"
+          }
+        ],
+        "result": {
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": "="
+    },
+    {
+      "name": "equal",
+      "categories": [
+        "comparison"
+      ],
+      "decl": {
+        "args": [
+          {
+            "name": "x",
+            "type": "any"
+          },
+          {
+            "name": "y",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "true if `x` is equal to `y`; false otherwise",
+          "name": "result",
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": "=="
+    },
+    {
+      "name": "gt",
+      "categories": [
+        "comparison"
+      ],
+      "decl": {
+        "args": [
+          {
+            "name": "x",
+            "type": "any"
+          },
+          {
+            "name": "y",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "true if `x` is greater than `y`; false otherwise",
+          "name": "result",
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": ">"
+    },
+    {
+      "name": "gte",
+      "categories": [
+        "comparison"
+      ],
+      "decl": {
+        "args": [
+          {
+            "name": "x",
+            "type": "any"
+          },
+          {
+            "name": "y",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "true if `x` is greater or equal to `y`; false otherwise",
+          "name": "result",
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": ">="
+    },
+    {
+      "name": "internal.member_2",
+      "decl": {
+        "args": [
+          {
+            "type": "any"
+          },
+          {
+            "type": "any"
+          }
+        ],
+        "result": {
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": "in"
+    },
+    {
+      "name": "lt",
+      "categories": [
+        "comparison"
+      ],
+      "decl": {
+        "args": [
+          {
+            "name": "x",
+            "type": "any"
+          },
+          {
+            "name": "y",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "true if `x` is less than `y`; false otherwise",
+          "name": "result",
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": "<"
+    },
+    {
+      "name": "lte",
+      "categories": [
+        "comparison"
+      ],
+      "decl": {
+        "args": [
+          {
+            "name": "x",
+            "type": "any"
+          },
+          {
+            "name": "y",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "true if `x` is less than or equal to `y`; false otherwise",
+          "name": "result",
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": "<="
+    },
+    {
+      "name": "neq",
+      "categories": [
+        "comparison"
+      ],
+      "decl": {
+        "args": [
+          {
+            "name": "x",
+            "type": "any"
+          },
+          {
+            "name": "y",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "true if `x` is not equal to `y`; false otherwise",
+          "name": "result",
+          "type": "boolean"
+        },
+        "type": "function"
+      },
+      "infix": "!="
+    },
+    {
+      "name": "object.get",
+      "description": "Returns value of an object's key if present, otherwise a default. If the supplied `key` is an `array`, then `object.get` will search through a nested object or array using each key in turn. For example: `object.get({\"a\": [{ \"b\": true }]}, [\"a\", 0, \"b\"], false)` results in `true`.",
+      "decl": {
+        "args": [
+          {
+            "description": "object to get `key` from",
+            "dynamic": {
+              "key": {
+                "type": "any"
+              },
+              "value": {
+                "type": "any"
+              }
+            },
+            "name": "object",
+            "type": "object"
+          },
+          {
+            "description": "key to lookup in `object`",
+            "name": "key",
+            "type": "any"
+          },
+          {
+            "description": "default to use when lookup fails",
+            "name": "default",
+            "type": "any"
+          }
+        ],
+        "result": {
+          "description": "`object[key]` if present, otherwise `default`",
+          "name": "value",
+          "type": "any"
+        },
+        "type": "function"
+      }
+    }
+  ],
+  "wasm_abi_versions": [
+    {
+      "version": 1,
+      "minor_version": 1
+    },
+    {
+      "version": 1,
+      "minor_version": 2
+    }
+  ],
+  "features": [
+    "keywords_in_refs",
+    "rego_v1"
+  ]
+}

@@ -1,126 +1,123 @@
-﻿"""Pydantic schemas for the policy engine.
+"""Pydantic models for the policy API, ``SPEC.md`` 3.6.
 
-These models define the data structures for policy rules, decisions,
-and the context passed to OPA for evaluation.
+No raw dicts cross this boundary. ``final_decision`` and ``overridden`` are
+computed by the engine; the client cannot supply them. Extra keys are forbidden.
 """
 
-from dataclasses import dataclass
+from datetime import datetime
+import math
 from typing import Any
 from uuid import UUID
 
-# Use the PolicyAction from db.enums directly (no duplication)
-from app.db.enums import PolicyAction as PolicyActionEnum
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.classifier.labels import SensitivityLabel
+from app.db.enums import PolicyAction
+from app.policy.conditions import condition_as_json, parse_condition
+from app.policy.engine import DocumentFacts, PolicyEvalResult
+
+MAX_RULE_NAME_CHARS = 150
 
 
-# Type alias for clarity
-PolicyAction = PolicyActionEnum
+class PolicyRuleCreateRequest(BaseModel):
+    """Author one override rule. ``PRD.md`` FR-13."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_name: str = Field(min_length=1, max_length=MAX_RULE_NAME_CHARS)
+    condition_expr: dict[str, Any]
+    action: PolicyAction
+    priority: int = Field(gt=0)
+
+    @field_validator("rule_name")
+    @classmethod
+    def rule_name_must_not_be_blank(cls, value: str) -> str:
+        """Whitespace-only is not a unique name."""
+        if not value.strip():
+            raise ValueError("rule_name must contain non-whitespace characters")
+        return value.strip()
+
+    @field_validator("condition_expr")
+    @classmethod
+    def condition_must_be_v1_tree(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Reject unknown operators/fields before the row is stored."""
+        return condition_as_json(parse_condition(value))
 
 
-@dataclass(frozen=True)
-class PolicyRule:
-    """A single policy rule from the database.
-
-    Attributes:
-        id: UUID of the policy rule.
-        rule_name: Unique name for the rule.
-        condition_expr: Serialized condition tree from FR-13's rule builder.
-        action: The action to take when this rule matches.
-        priority: Lower value = evaluated first.
-        active: Whether the rule is currently active.
-    """
+class PolicyRuleResponse(BaseModel):
+    """One stored rule."""
 
     id: UUID
     rule_name: str
     condition_expr: dict[str, Any]
     action: PolicyAction
     priority: int
-    active: bool = True
+    active: bool
+    created_at: datetime
 
 
-@dataclass(frozen=True)
-class PolicyContext:
-    """Context about a document for policy evaluation.
+class PolicyDecisionRequest(BaseModel):
+    """Evaluate the gate for one registered document."""
 
-    This is what gets passed to OPA alongside the rules.
-    Contains the document's current state including sensitivity,
-    trust score, and other relevant fields.
-    """
+    model_config = ConfigDict(extra="forbid")
 
     document_id: UUID
-    sensitivity: str
-    trust_score: float
-    owner_id: UUID | None = None
-    document_status: str | None = None
-    access_count: int | None = None
-    last_accessed_at: str | None = None
-    tags: list[str] | None = None
+    ai_recommendation: PolicyAction
+    sensitivity_label: SensitivityLabel
+    risk_value: float = Field(ge=0.0, le=1.0)
+    trust_score: float = Field(ge=0.0, le=1.0)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for OPA input."""
-        result = {
-            "document_id": str(self.document_id),
-            "sensitivity": self.sensitivity,
-            "trust_score": self.trust_score,
-        }
-        if self.owner_id:
-            result["owner_id"] = str(self.owner_id)
-        if self.document_status:
-            result["document_status"] = self.document_status
-        if self.access_count is not None:
-            result["access_count"] = self.access_count
-        if self.last_accessed_at:
-            result["last_accessed_at"] = self.last_accessed_at
-        if self.tags:
-            result["tags"] = self.tags
-        return result
+    @field_validator("risk_value", "trust_score", mode="before")
+    @classmethod
+    def scores_must_be_real_numbers(cls, value: object) -> object:
+        """Booleans are ints in Python; rejecting them avoids True meaning 1.0."""
+        if isinstance(value, bool):
+            raise ValueError("must be a finite number")
+        if isinstance(value, (int, float)) and not math.isfinite(value):
+            raise ValueError("must be a finite number")
+        return value
+
+    def facts(self) -> DocumentFacts:
+        """Closed evaluation snapshot, excluding ``document_id``."""
+        return DocumentFacts(
+            sensitivity_label=self.sensitivity_label.value,
+            risk_value=self.risk_value,
+            trust_score=self.trust_score,
+            ai_recommendation=self.ai_recommendation,
+        )
 
 
-@dataclass(frozen=True)
-class PolicyDecision:
-    """Result of policy evaluation.
+class PolicyDecisionResponse(BaseModel):
+    """One persisted pass through the gate."""
 
-    Attributes:
-        matched: Whether any rule matched.
-        rule_id: UUID of the matching rule, or None if no match.
-        rule_name: Name of the matching rule, or None.
-        action: The action to take (from the rule), or None.
-        rationale: Human-readable explanation of the decision.
-        ai_recommendation: The original AI recommendation (passed through).
-        final_decision: The final decision after policy gate.
-    """
-
-    matched: bool
+    id: UUID
+    document_id: UUID
     rule_id: UUID | None
     rule_name: str | None
-    action: PolicyAction | None
-    rationale: str
     ai_recommendation: PolicyAction
     final_decision: PolicyAction
+    overridden: bool
+    policy_version: str
+    decided_at: datetime
 
-
-def build_policy_input(
-    rules: list[PolicyRule],
-    context: PolicyContext,
-) -> dict[str, Any]:
-    """Build the input structure for OPA evaluation.
-
-    Args:
-        rules: Active policy rules to evaluate.
-        context: Document context for evaluation.
-
-    Returns:
-        Dictionary structured for the Rego evaluator module.
-    """
-    return {
-        "rules": [
-            {
-                "id": str(rule.id),
-                "rule_name": rule.rule_name,
-                "condition_expr": rule.condition_expr,
-                "action": rule.action.value,
-                "priority": rule.priority,
-            }
-            for rule in rules
-        ],
-        "context": context.to_dict(),
-    }
+    @classmethod
+    def from_row(
+        cls,
+        *,
+        decision_id: UUID,
+        document_id: UUID,
+        result: PolicyEvalResult,
+        decided_at: datetime,
+    ) -> "PolicyDecisionResponse":
+        """Build a response from the persisted row and the engine result."""
+        return cls(
+            id=decision_id,
+            document_id=document_id,
+            rule_id=result.rule_id,
+            rule_name=result.rule_name,
+            ai_recommendation=result.ai_recommendation,
+            final_decision=result.final_decision,
+            overridden=result.overridden,
+            policy_version=result.policy_version,
+            decided_at=decided_at,
+        )

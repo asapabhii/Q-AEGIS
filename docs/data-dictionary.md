@@ -197,9 +197,15 @@ Append-only. One row per recomputation.
 |---|---|---|---|
 | `id` | `uuid` PK | no | |
 | `document_id` | `uuid` FK → `documents.id` | no | Indexed |
-| `risk_value` | `numeric(4,3)` | no | `0.000` to `1.000`, `CHECK` enforced. Aggregate across `agent_outputs` |
-| `context_snapshot` | `jsonb` | no | User, device, network, and behaviour signals as they were at computation time |
+| `risk_value` | `numeric(5,4)` | no | `0.0000` to `1.0000`, `CHECK` enforced. The contextual engine's own score (`SPEC.md` 3.3), not the five-agent aggregate |
+| `model_version` | `varchar(30)` | no | Formula that produced `risk_value`. Bumped when any weight changes |
+| `context_snapshot` | `jsonb` | no | Closed v1 set: `actor_user_id`, `device_id`, `device_is_new`, `accessed_at`, `after_hours`. Extra keys forbidden at the API. Caller-asserted facts, not derived |
 | `computed_at` | `timestamptz` | no | Indexed; dashboard queries filter by recency |
+
+`risk_value` is **not** an aggregate of `agent_outputs`. That aggregate is
+`trust_scores.consensus_value` (`SPEC.md` 3.5). 3.3 writes this table before
+3.4 exists; treating the column as a five-agent rollup would require inventing
+agent rows this phase does not have.
 
 ## `agent_outputs`
 
@@ -213,7 +219,8 @@ Append-only. One row per recomputation.
 
 Unique on `(risk_score_id, agent_type)`: one output per agent per assessment. A
 duplicate means an agent ran twice and the consensus function would double-count
-it.
+it. The Trust Engine (`SPEC.md` 3.5) refuses to compute from anything other than
+exactly these five types; a partial set is 422, not a silently short mean.
 
 A separate child table rather than five nullable columns on `risk_scores`, so a
 sixth agent type needs no migration and the one-to-five relationship is
@@ -230,7 +237,7 @@ Append-only. One row per recomputation. The Trust Engine's output
 | `document_id` | `uuid` FK → `documents.id` | no | Indexed |
 | `risk_score_id` | `uuid` FK → `risk_scores.id` | no | Indexed. The assessment whose `agent_outputs` produced this score |
 | `consensus_value` | `numeric(4,3)` | no | `0.000` to `1.000`, `CHECK` enforced |
-| `consensus_version` | `varchar(30)` | no | Version of the consensus function that produced this value |
+| `consensus_version` | `varchar(30)` | no | Version of the consensus function that produced this value. v1 is `trust-weighted-mean-0.1.0` |
 | `computed_at` | `timestamptz` | no | Indexed, defaults to `now()` |
 
 ## `policy_rules`
@@ -239,7 +246,7 @@ Append-only. One row per recomputation. The Trust Engine's output
 |---|---|---|---|
 | `id` | `uuid` PK | no | |
 | `rule_name` | `varchar(150)` unique | no | |
-| `condition_expr` | `jsonb` | no | Serialised condition tree from the rule builder (`PRD.md` FR-13) |
+| `condition_expr` | `jsonb` | no | Closed v1 tree: combinators `all`/`any`/`not`, leaf ops `eq`/`neq`/`gt`/`gte`/`lt`/`lte`/`in`, fields `sensitivity_label`/`risk_value`/`trust_score`/`ai_recommendation`. Extra keys forbidden at the API. Max combinator depth 8 |
 | `action` | `policy_action` | no | `allow`, `deny`, `require_mfa`, `force_pqc` |
 | `priority` | `int` | no | `CHECK` enforces a positive integer. Lower value is evaluated first |
 | `active` | `boolean` | no | Defaults true |
@@ -285,6 +292,11 @@ Append-only. One row per selection or reselection.
 Parameter sets behind each profile are in `SPEC.md` Section 6 and are not
 duplicated here. `hybrid` means `X25519MLKEM768`; `post_quantum` means ML-KEM-1024
 with ML-DSA-87.
+
+v1 persist: `POST /api/v1/crypto-profiles` writes one row per call from a
+`trust_score_id`. A `policy_decisions` row must already exist for the same
+`document_id` (FR-6). Reselection is a new row. The endpoint does not encrypt
+bytes.
 
 ## `migration_schedule`
 
@@ -410,6 +422,14 @@ Each of these differs from the CIA-I Section 4 dictionary on purpose.
     `policy_action`.** CIA-I says "enum" for both without listing values. Sprint 3
     describes a matching rule's `action` becoming the `final_decision`, so all
     three share one domain.
+11. **`risk_scores.risk_value` is the contextual engine's score, not an
+    aggregate of `agent_outputs`.** The five-agent number is
+    `trust_scores.consensus_value`. The original sentence here was wrong: 3.3
+    writes `risk_scores` before 3.4 exists.
+12. **`risk_scores.risk_value` is `numeric(5,4)`**, not `numeric(4,3)`, and
+    **`model_version` is a required column.** The scorer rounds to four decimal
+    places, same reason as `confidence_score`. The version column is what makes a
+    stored score attributable after the placeholder weights change.
 
 ## Why Neo4j and the vector store are not here
 

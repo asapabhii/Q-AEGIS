@@ -242,6 +242,134 @@ replacing them; the history tables are append-only and a trigger enforces it.
 There is no read endpoint for that history yet. If you need one, say so rather
 than querying the tables directly from the frontend.
 
+### Compute contextual risk
+
+`POST /api/v1/risk-scores` scores a closed snapshot. The server computes
+`risk_value`; the client cannot supply it. Roles: `security_analyst` and
+`security_admin` only. All five snapshot fields are required; extra keys are
+rejected. An unknown `document_id` is a 404.
+
+There is no scheduler and no event bus on this endpoint. Each call writes one
+`risk_scores` row and one `audit_log` entry in the same transaction. It does
+not change `documents.current_status`.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/risk-scores \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{
+    "document_id": "<the id from step 1>",
+    "actor_user_id": "<a users.id from python -m app.db.seed>",
+    "device_id": "laptop-12",
+    "device_is_new": true,
+    "accessed_at": "2026-09-09T22:15:00+00:00",
+    "after_hours": true
+  }'
+```
+
+`after_hours` is whatever the caller asserts, not something the server derives
+from `accessed_at`. Re-scoring appends a new row; prior scores stay.
+
+### Compute a trust score
+
+`POST /api/v1/trust-scores` combines exactly five agent outputs into one
+`consensus_value`. The server computes that number; the client cannot supply it.
+Roles: `security_analyst` and `security_admin`. The five scores are
+caller-asserted until 3.4 exists to produce them. A missing or duplicate agent
+type is 422. An unknown `risk_score_id` is a 404. A second call on the same
+risk score is 409 — score a new contextual risk row first.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/trust-scores \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{
+    "risk_score_id": "<the id from the risk-score call>",
+    "outputs": [
+      {"agent_type": "security", "score": 0.50, "rationale": "No malware indicators."},
+      {"agent_type": "compliance", "score": 0.50, "rationale": "Retention policy holds."},
+      {"agent_type": "contextual", "score": 0.50, "rationale": "Known device, business hours."},
+      {"agent_type": "quantum", "score": 0.50, "rationale": "Hybrid already sufficient."},
+      {"agent_type": "sustainability", "score": 0.50, "rationale": "No extra PQC cost needed."}
+    ]
+  }'
+```
+
+Each call writes five `agent_outputs` rows, one `trust_scores` row, and one
+`audit_log` entry in the same transaction. It does not change
+`documents.current_status` and it does not select a crypto profile (FR-6 is
+after the policy gate).
+
+### Policy gate
+
+`POST /api/v1/policy-rules` authors a rule. Role: `compliance_officer` only.
+`POST /api/v1/policy-decisions` evaluates active rules in priority order. Roles:
+`compliance_officer` and `security_admin`. The server computes `final_decision`;
+the client cannot supply it. `trust_score` and `ai_recommendation` are
+still caller-asserted on this endpoint; it does not read `trust_scores`.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/policy-rules \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
+  -d '{
+    "rule_name": "Deny restricted",
+    "condition_expr": {
+      "field": "sensitivity_label",
+      "op": "eq",
+      "value": "RESTRICTED"
+    },
+    "action": "deny",
+    "priority": 10
+  }'
+
+curl -X POST http://127.0.0.1:8000/api/v1/policy-decisions \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
+  -d '{
+    "document_id": "<the id from step 1>",
+    "ai_recommendation": "allow",
+    "sensitivity_label": "RESTRICTED",
+    "risk_value": 0.20,
+    "trust_score": 0.30
+  }'
+```
+
+Each call writes the decision (or the rule) and one `audit_log` entry in the
+same transaction. An unknown `document_id` is a 404. Evaluation does not change
+`documents.current_status`.
+
+The API loads the committed `backend/app/policy/rego/policy.wasm`. You do not
+need the OPA CLI to run it. Rebuild the WASM only after editing `policy.rego`,
+with OPA 1.8.0, and extract `/policy.wasm` from the bundle — not `/policy.rego`,
+which the bundle rewrites:
+
+```bash
+opa build -t wasm -e q_aegis/policy/first_match \
+  -o bundle.tar.gz backend/app/policy/rego/policy.rego
+```
+
+### Select a crypto profile
+
+`POST /api/v1/crypto-profiles` maps a persisted trust score onto AES-256,
+hybrid (`X25519MLKEM768`), or full post-quantum. The server computes
+`profile_type`; the client cannot supply it. Roles: `security_analyst` and
+`security_admin`. An unknown `trust_score_id` is a 404. If this document has
+no `policy_decisions` row yet, the call is 422 — run the policy gate first
+(FR-6). A `deny` still counts. Thresholds are placeholders (`<= 0.4`
+post-quantum, `<= 0.8` hybrid, else AES-256). This does not encrypt bytes.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/crypto-profiles \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{"trust_score_id": "<the id from the trust-score call>"}'
+```
+
+Each call writes one `crypto_profiles` row and one `audit_log` entry in the
+same transaction. It does not change `documents.current_status`. Reselection
+is a new row.
+
 ### Test and lint
 
 Run all three before every pull request. CI runs exactly these and the coverage
@@ -277,21 +405,58 @@ docker run --rm -p 127.0.0.1:8000:8000 q-aegis-backend:local
 
 ## 6. Frontend
 
-`frontend/src/` is an empty placeholder, the Next.js application is not scaffolded
-yet, and there is no frontend job in CI. Both are Sukhmani's to land
-(`SPEC.md` 3.13). Once it exists:
+The frontend application (`SPEC.md` 3.13) is scaffolded as a Next.js (App Router)
+project using TypeScript and Tailwind CSS in `frontend/`. It includes:
+
+- A centralized, strictly typed API client in `frontend/src/lib/api/client.ts`
+  that models backend Pydantic schemas and DB enums (`types.ts`), handling the
+  `X-Q-AEGIS-Actor-Role` header plumbing and formatting FastAPI error details.
+- The interactive classification workbench in `frontend/src/app/page.tsx`
+  demonstrating the two-step register-then-classify flow (`POST /api/v1/documents`
+  followed by `POST /api/v1/classify`).
+- A Vitest unit and component test suite (`src/**/*.test.{ts,tsx}`) using `jsdom`,
+  Testing Library (`@testing-library/react`, `@testing-library/user-event`,
+  `@testing-library/jest-dom`), and
+  `@vitejs/plugin-react`. Validates API client request construction, FastAPI error
+  formatting, and component workbench rendering.
+- A 70% coverage floor matching the backend requirement (`AGENTS.md`), enforced locally
+  via `npm test` (`@vitest/coverage-v8`) and in CI.
+- A `frontend` job in `.github/workflows/ci.yml` running `npm ci`, `npm run lint`,
+  `npm test` (with coverage gate), and `npm run build` on pull requests targeting
+  `main` and pushes to `main`. (Note: this job is not yet wired as a required branch
+  protection check; Abhinav is adding it separately once runs are established).
+
+### Development commands
 
 ```bash
 cd frontend
 npm install
-npm run dev
-npm run lint
+npm run dev        # start Next.js dev server at http://127.0.0.1:3000
+npm run lint       # run ESLint
+npm test           # run Vitest suite
+npm run build      # production build
 ```
 
-Constraints from `AGENTS.md`, worth knowing before the first file is written:
-TypeScript only, no plain `.js` files; Tailwind for styling; every API call goes
-through `frontend/src/lib/api/`, no inline `fetch()` scattered through
-components. UI that hides a control is never access control, the server decides.
+### Environment variables
+
+The frontend reads a single environment variable:
+
+- `NEXT_PUBLIC_API_URL`: Base URL for the backend API.
+  - **Default**: `http://127.0.0.1:8000`
+  - **Why `127.0.0.1` rather than `localhost`**: On Windows, `localhost` resolves
+    to IPv6 (`::1`) first while local services and containers publish on IPv4 only.
+    This leads to connection hangs rather than clean, fast connections. Always use
+    explicit `127.0.0.1`.
+  - To override for custom configurations, set `NEXT_PUBLIC_API_URL` in
+    `frontend/.env.local` or your shell. Next.js only reads environment files
+    from `frontend/`, so the root `.env` used by Docker Compose and the backend
+    will not be picked up. `frontend/.env.local` is gitignored by `frontend/.gitignore`
+    (`.env*`) and must never be committed (`AGENTS.md`).
+
+Constraints from `AGENTS.md`: TypeScript only, no plain `.js` files; Tailwind for
+styling; every API call goes through `frontend/src/lib/api/`, no inline `fetch()`
+scattered through components. UI that hides a control is never access control, the
+server decides.
 
 ---
 

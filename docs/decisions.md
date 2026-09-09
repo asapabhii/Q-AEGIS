@@ -13,6 +13,110 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-09: Crypto v1 persist is trust_score_id only, after a policy row
+
+Decided by: Abhinav, implementing 3.7 persist.
+
+v1 selection, `SPEC.md` 3.7, `PRD.md` FR-6:
+
+- `POST /api/v1/crypto-profiles` body is `{ "trust_score_id": "<uuid>" }` only. Extra keys forbidden. The client cannot supply `profile_type` or `document_id`.
+- The stored `consensus_value` is mapped with the existing `select_crypto_profile` stub. Thresholds stay `POST_QUANTUM_MAX = 0.4` inclusive and `HYBRID_MAX = 0.8` inclusive; they remain uncalibrated placeholders.
+- Persist writes one `crypto_profiles` row and `CRYPTO_PROFILE_SELECTED` in the same transaction. Reselection is a new row. `documents.current_status` is not changed.
+- FR-6 is after the policy gate. v1 enforces that by requiring at least one `policy_decisions` row for the same `document_id`. The endpoint does not re-run OPA. A `deny` still counts; this table is separate history.
+- Roles: `security_analyst` and `security_admin`, same allow-list as 3.3 and 3.5.
+
+This endpoint does not encrypt or decrypt bytes. liboqs is not independently audited.
+
+Rejected: selecting from `POST /trust-scores` (would skip the gate). Rejected: a new FK from `crypto_profiles` to `policy_decisions` (would need a data-dictionary change and a migration). Rejected: refusing persist when `final_decision` is `deny` (the gate already recorded; the profile history is independent).
+
+### 2026-09-09: Trust v1 is an equal-weight mean over a complete agent set
+
+Decided by: Abhinav, implementing 3.5.
+
+v1 consensus, `SPEC.md` 3.5:
+
+- Weighted arithmetic mean of the five `AgentType` scores.
+- Each weight is `0.200`. They sum to `1.000`.
+- Scores are quantized to three decimal places (half-even) before weighting, matching `agent_outputs.score` `numeric(4,3)`.
+- `consensus_version = trust-weighted-mean-0.1.0`.
+- A missing or duplicate type is 422. The function does not invent a score for an absent agent.
+
+These weights have no calibration against real incident data. Equal fifths exist so the function is deterministic and reviewable, not because security and sustainability are known to contribute the same amount. Changing any weight bumps the version.
+
+The five scores on `POST /trust-scores` are caller-asserted until 3.4 exists to produce them. Same treatment as 3.3's `after_hours`. LangGraph is Phase 5 and is not imported here.
+
+Rejected: filling a missing agent with 0.0 or 1.0. Either default fabricates a number the audit log would then treat as real. Rejected: an opaque model call; FR-4 requires the method to be documented.
+
+Roles: `POST /trust-scores` is `security_analyst` and `security_admin`, the same allow-list as 3.3.
+
+### 2026-09-09: Policy v1 condition language, depth-unrolled Rego, caller-supplied facts
+
+Decided by: Abhinav, implementing 3.6.
+
+Closed v1 `condition_expr`:
+
+- Combinators: `all`, `any`, `not`. Empty `all`/`any` rejected (vacuous `all` would be fail-open).
+- Leaf operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`.
+- Fields: `sensitivity_label`, `risk_value`, `trust_score`, `ai_recommendation`.
+- Extra keys forbidden. Max combinator depth 8.
+
+Rego forbids recursive rules (evaluation must terminate). The interpreter is therefore unrolled to depth 8 in `policy.rego`; Python rejects a deeper tree at 422 so the WASM module never sees one.
+
+`trust_score` and `ai_recommendation` on `POST /policy-decisions` are caller-asserted until 3.5 and 3.7 exist to produce them. Same treatment as 3.3's `after_hours`.
+
+Host builtins provided to `opa-wasmtime`: `object.get` and `count` only, in-process. `capabilities.json` is an allowlist of the eleven builtins `policy.rego` actually uses (`assign`, `count`, `eq`, `equal`, `gt`, `gte`, `lt`, `lte`, `neq`, `object.get`, `internal.member_2`). It is not OPA `--current` minus a few names. `io.jwt.*`, `providers.aws.sign_req`, `http.*`, `net.*`, and `time.now_ns` are absent, so `opa check --capabilities` fails if they appear in the interpreter. Compile with OPA 1.8.0.
+
+Inequality operators (`gt`/`gte`/`lt`/`lte`) are numeric-only and the comparison value must lie in `[0, 1]`, same as `eq`/`neq` on those fields. A threshold of `1.5` is 422, not a rule that never matches.
+
+Rejected: interpreting the tree in Python and using OPA only for first-match. That would make the engine a fig leaf. Rejected: unbounded recursion in Rego; the compiler refuses it.
+
+Roles: `POST /policy-rules` is `compliance_officer` only (FR-13). `POST /policy-decisions` is `compliance_officer` and `security_admin`.
+
+### 2026-09-09: Contextual risk weights are placeholders, additive, versioned
+
+Decided by: Abhinav.
+
+v1 formula, `SPEC.md` 3.3:
+
+- `BASE_RISK = 0.20`
+- `+ NEW_DEVICE_WEIGHT (0.35)` if `device_is_new`
+- `+ AFTER_HOURS_WEIGHT (0.25)` if `after_hours`
+- clamp to `[0, 1]`, round half-even to four decimal places
+- `model_version = contextual-risk-additive-0.1.0`
+
+These three constants have no calibration against real incident data. They exist
+so the engine is deterministic and reviewable, not because 0.35 is an empirically
+justified new-device penalty. Changing any weight requires bumping
+`model_version`; silent edits would make historical `risk_scores` rows
+uninterpretable.
+
+Rejected: interaction terms (e.g. new device after hours scoring higher than the
+sum). v1 has no incident dataset to justify a cross term. Headroom under 1.0
+(max 0.80) is intentional so later signals can join the same scale.
+
+Rejected: treating `risk_value` as a five-agent aggregate. That number is
+`trust_scores.consensus_value` (3.5). The data dictionary's original sentence
+is corrected in this PR.
+
+### 2026-09-09: after_hours is caller-asserted, not derived
+
+Decided by: Abhinav.
+
+`context_snapshot.after_hours` is a fact the caller sends, same as
+`device_is_new`. The server does not derive it from `accessed_at`, a timezone,
+or a business-hours window.
+
+Rejected: hardcoding 09:00–17:00 UTC (or any other window) inside the scorer.
+Working hours are an org policy that does not exist in this repository, and
+baking one in would be a product claim disguised as a default. Server-side
+derivation waits until that policy exists.
+
+v1 snapshot is exactly five required fields, `extra="forbid"`, no nulls. An
+incomplete snapshot is a 422 and never reaches the scorer.
+
+This PR does not wire a scheduler or an event bus. Redis Streams vs Kafka stays
+in Pending until recompute-on-schedule is actually built.
+
 ### 2026-09-05: Policy engine, chose OPA with Rego
 
 Decided by: Abhinav, as integration owner. Replaces the Pending entry and

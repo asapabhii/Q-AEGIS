@@ -20,6 +20,10 @@ sqlalchemy==2.0.52
 alembic==1.19.2
 psycopg[binary]==3.3.5
 
+# Policy engine, SPEC.md 3.6. opa-wasmtime is the in-process WASM host logged
+# in docs/decisions.md. Do not swap it for opa-wasm (wasmer, no 3.13 wheels).
+opa-wasmtime==0.1.1
+
 # --- Deliberately NOT yet included ---
 # The full dependency set in SPEC.md Section 8 is not installed at Phase 1,
 # because no module imports any of it and several carry heavy or native build

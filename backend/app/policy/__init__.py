@@ -1,5 +1,13 @@
 ﻿"""Policy engine for deterministic rule-based overrides, `SPEC.md` 3.6, `PRD.md` FR-5.
 
+Evaluates a closed condition tree against caller-supplied document facts and
+returns the first matching active rule's action, or the AI recommendation when
+nothing matches. Evaluation is in-process WASM (`opa-wasmtime`) over one
+reviewed Rego module. Rules are data on `input`, never compiled into Rego.
+
+`after_hours`-style derivation is not this module's job. `trust_score` and
+`ai_recommendation` are facts the caller sends until 3.5 and 3.7 exist.
+
 This module evaluates policy rules against document context to determine whether
 an AI recommendation should be overridden. Rules are data (jsonb condition trees),
 not generated Rego code - they are interpreted by a fixed Rego module.
@@ -12,6 +20,8 @@ Four constraints (per SPEC.md 3.6):
 
 SECURITY: This module sits directly between an AI recommendation and a real
 security decision. Errors here have worse consequences than elsewhere.
+
+Owner: Udhav (`WORK_DIVISION.md`). Required reviewer on any change here.
 """
 
 from app.policy.engine import PolicyEngine, evaluate_policy_decision, get_policy_engine

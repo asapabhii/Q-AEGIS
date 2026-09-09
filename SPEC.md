@@ -72,11 +72,15 @@ Implements PRD FR-1. Build order: a rule/keyword-based stub with a confidence he
 ### 3.3 Contextual Risk Engine
 Implements PRD FR-2. Recomputes on a defined schedule and on trigger events (new device login, after-hours access), not once at upload. Writes to `risk_scores`, with a `context_snapshot` jsonb column since the signal set will grow over time without requiring schema migrations for each new signal.
 
+v1 is caller-triggered via `POST /api/v1/risk-scores`; scheduled recomputes and the event bus are later work (the Redis Streams vs Kafka choice in 2.3 stays open until then). The v1 snapshot is a closed five-field set (`actor_user_id`, `device_id`, `device_is_new`, `accessed_at`, `after_hours`); `risk_value` is this engine's own score, not the five-agent aggregate (`trust_scores.consensus_value`).
+
 ### 3.4 Multi-Agent Risk Assessment
 Implements PRD FR-3. Five agents (security, compliance, contextual, quantum-readiness, sustainability) as parallel LangGraph nodes, not sequential calls. Each agent writes one row to `agent_outputs` including a `rationale` field, not only a numeric score, this is what powers the risk breakdown shown in the document summary report (PRD FR-16).
 
 ### 3.5 Trust Score Computation
 Implements PRD FR-4. The consensus function combining the five agent outputs must be explicit, documented, and versioned, either a weighted average with published weights or a small explainable aggregator, never an opaque model call producing a number with no traceable reasoning. `trust_scores` is append-only; every row references the exact `agent_outputs` rows that produced it. If this function is ever replaced by a learned model, it inherits the same fail-safe defaulting rule as 3.2: ambiguity resolves toward less trust, never more.
+
+v1 ships `POST /api/v1/trust-scores` (security analyst, security admin). The function is an equal-weight mean over exactly the five `AgentType` values; a partial set is 422. The five scores are caller-asserted until 3.4 exists to produce them. See `docs/decisions.md`.
 
 ### 3.6 Policy Engine
 Implements PRD FR-5. Engine is OPA with Rego per Section 2.2. `policy_decisions.rule_id` is nullable, "no rule fired, AI recommendation stood" is the common case and must be modeled as such, not worked around with a placeholder rule. Testing requirement: one test per rule type and per condition operator (see `AGENTS.md`), this module sits directly between an AI recommendation and a real security decision.
@@ -88,12 +92,16 @@ Four constraints the 2.2 decision commits this module to:
 - **Determinism is enforced by the build, not by review.** Ship a capabilities file listing only the built-ins the interpreter needs, and run `opa check --capabilities` in CI. A policy referencing anything outside it fails to compile. Note that `opa eval` does not honour capabilities for parsing, so the gate has to be `opa check`, and note that compiling to WebAssembly does not remove the network built-ins by itself, since availability depends on what the host runtime implements. The capabilities file is the control.
 - **Priority-ordered first match.** `policy_rules.priority` is ascending, unique among active rules, and the first matching rule wins and is the single value written to `policy_decisions.rule_id`. Evaluating all matches and merging them is not equivalent and is not what FR-5 asks for.
 
+v1 ships `POST /api/v1/policy-rules` (compliance officer) and `POST /api/v1/policy-decisions` (compliance officer, security admin). The condition language and evaluation input are closed; combinator depth is capped at 8 because Rego cannot recurse. See `docs/decisions.md`.
+
 ### 3.7 Crypto-Agile Protection Engine
 Implements PRD FR-6. Three profiles:
 - **AES-256**: AES-256-GCM, classical baseline.
 - **Hybrid**: `X25519MLKEM768` exactly, the named group already deployed in production TLS 1.3 by Chrome, Edge, and Cloudflare. Classical X25519 ECDH and ML-KEM-768 run in parallel and combine into one shared secret, so security holds even if only one of the two algorithms is ever broken. This defends against "harvest now, decrypt later" today while hedging against either algorithm individually failing, which is why this system defaults to hybrid rather than jumping straight to full post-quantum everywhere.
 - **Full post-quantum**: ML-KEM-1024 (NIST security level 5) for key encapsulation, ML-DSA-87 for signatures, via `liboqs-python`.
 Full parameter tables: Section 6. Security caveat, state this plainly anywhere this module's guarantees are described: liboqs is not independently audited, and OQS-OpenSSL is explicitly documented as development and interop-testing only, not production-supported. Every protection selection references the specific `trust_score_id` that drove it.
+
+v1 ships `POST /api/v1/crypto-profiles` (security analyst, security admin). The body is a `trust_score_id` only; `profile_type` is computed from the stored `consensus_value`. A prior `policy_decisions` row for the same document is required (FR-6); the endpoint does not re-evaluate the gate and does not refuse persist because `final_decision` is `deny`. Selector thresholds remain uncalibrated placeholders. This endpoint does not encrypt or decrypt bytes. See `docs/decisions.md`.
 
 ### 3.8 Tamper-Evident Audit Log
 Implements PRD FR-7. `build()` and `verify()` are pure functions with no side effects; verification must be independently re-runnable by a party that does not trust a stored "valid" flag. Enforce append-only behavior at the database level with a Postgres trigger rejecting UPDATE and DELETE on `audit_log`, do not rely on application-code discipline alone for a guarantee this central.
@@ -156,8 +164,8 @@ ML-DSA's signing algorithm uses randomized, hedged signing with a rejection-samp
 Status markers below describe what is actually merged to `main`, not what was planned. Update them in the pull request that lands the work, never ahead of it.
 
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
-2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening, branch protection, and the data model are complete; the crypto-selector stub is not started.
-3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked.
+2. **Current phase**: the data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. CI hardening, branch protection, the data model, and the crypto-selector stub are complete. The stub maps a trust score to a profile; it does not persist and does not take a ``trust_score_id`` until Phase 3.
+3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked. 3.3's scoring function and `POST /api/v1/risk-scores` are complete; recomputes are still caller-triggered, not scheduled, and no event bus is wired. 3.6's in-process WASM evaluator, `POST /api/v1/policy-rules`, and `POST /api/v1/policy-decisions` are complete. 3.5's equal-weight consensus and `POST /api/v1/trust-scores` are complete; the five agent scores are still caller-supplied until 3.4. 3.7 persist is complete: `POST /api/v1/crypto-profiles` writes a `crypto_profiles` row from a `trust_score_id` after a policy decision exists for that document. Selector thresholds are still uncalibrated placeholders. This endpoint does not encrypt bytes. Policy still takes `trust_score` as a caller-asserted fact.
 4. Crypto-shredding (3.9), agentic RAG (3.12), knowledge graph (3.11).
 5. Full LangGraph multi-agent orchestration (3.4), migration scheduler with real baseline benchmark (3.10).
 6. Full evaluation against PRD Section 8's success metrics.

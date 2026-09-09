@@ -37,8 +37,15 @@ infra/data/
 # Roadmap
 ROADMAP.md
 
-# Policy engine (will be implemented)
+# Policy engine
 backend/app/policy/rego/
 
 # Build tools
 cmake-4.4.3/
+
+# OPA CLI and extract leftovers from compiling the policy WASM bundle.
+# Commit policy.rego, policy.wasm, and capabilities.json only.
+backend/app/policy/rego/opa.exe
+backend/app/policy/rego/bundle.tar.gz
+backend/app/policy/rego/data.json
+backend/app/policy/rego/.manifest

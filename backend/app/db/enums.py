@@ -147,5 +147,6 @@ class AuditEventType(str, Enum):
     RISK_SCORE_COMPUTED = "risk_score_computed"
     TRUST_SCORE_UPDATED = "trust_score_updated"
     POLICY_DECISION_RECORDED = "policy_decision_recorded"
+    POLICY_RULE_CREATED = "policy_rule_created"
     CRYPTO_PROFILE_SELECTED = "crypto_profile_selected"
     ERASURE_REQUESTED = "erasure_requested"
