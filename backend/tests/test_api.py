@@ -1,13 +1,15 @@
 """Tests for the HTTP API surface.
 
 Covers the health check, the ``POST /classify`` contract from ``SPEC.md`` 3.2,
-and the authorization guard. The guard's identity source is a stub, but its
-fail-closed behavior is not, so it is tested as real behavior: a missing or
-unrecognized role must be refused rather than defaulted to some permitted value.
+the ``POST /risk-scores`` contract from ``SPEC.md`` 3.3, and the authorization
+guard. The guard's identity source is a stub, but its fail-closed behavior is
+not, so it is tested as real behavior: a missing or unrecognized role must be
+refused rather than defaulted to some permitted value.
 
-What ``/classify`` *persists* is tested separately in ``test_api_persistence.py``.
+What those endpoints *persist* is tested separately in ``test_api_persistence.py``.
 """
 
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,14 +19,19 @@ from app.api.deps import ACTOR_ROLE_HEADER
 from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
 from app.db.enums import UserRole
-from app.db.models import Document
+from app.db.models import Document, User
+from app.risk_engine.scorer import MODEL_VERSION as RISK_MODEL_VERSION
 
 HEALTH_URL = f"{API_V1_PREFIX}/health"
 DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
+RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 
 #: A role permitted to call /classify.
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
+
+#: A role permitted to call /risk-scores.
+ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
 
 
 @pytest.fixture
@@ -42,6 +49,24 @@ def classify_body(content: str, document_id: UUID | str | None = None) -> dict:
     """Build a valid request body around ``content``."""
     reference = document_id if document_id is not None else uuid4()
     return {"document_id": str(reference), "content": content}
+
+
+def risk_body(
+    document_id: UUID | str,
+    actor_user_id: UUID | str,
+    **overrides: object,
+) -> dict[str, object]:
+    """Build a valid contextual-risk request body."""
+    body: dict[str, object] = {
+        "document_id": str(document_id),
+        "actor_user_id": str(actor_user_id),
+        "device_id": "laptop-12",
+        "device_is_new": False,
+        "accessed_at": "2026-09-09T12:00:00+00:00",
+        "after_hours": False,
+    }
+    body.update(overrides)
+    return body
 
 
 # --------------------------------------------------------------------------
@@ -298,3 +323,186 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
     assert HEALTH_URL in paths
     assert DOCUMENTS_URL in paths
     assert CLASSIFY_URL in paths
+    assert RISK_URL in paths
+
+
+# --------------------------------------------------------------------------
+# POST /risk-scores authorization, SPEC.md 3.3
+# --------------------------------------------------------------------------
+
+
+def test_risk_score_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    """No identity presented means refusal, not a permissive default."""
+    response = client.post(
+        RISK_URL,
+        json=risk_body(uuid4(), uuid4()),
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.SECURITY_ANALYST,
+        UserRole.SECURITY_ADMIN,
+    ],
+)
+def test_risk_score_admits_permitted_roles(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    role: UserRole,
+) -> None:
+    """Analysts recompute before an override; admins recompute for the dashboard."""
+    response = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_risk_score_refuses_roles_outside_the_allow_list(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    role: UserRole,
+) -> None:
+    """FR-13 and FR-9 do not require these personas to trigger a recompute."""
+    response = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+# --------------------------------------------------------------------------
+# POST /risk-scores contract, SPEC.md 3.3
+# --------------------------------------------------------------------------
+
+
+def test_risk_score_returns_the_computed_value_not_a_client_value(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    """The server owns ``risk_value``. Both signals fire: 0.20 + 0.35 + 0.25."""
+    response = client.post(
+        RISK_URL,
+        json=risk_body(
+            document_id,
+            seeded_users[UserRole.DATA_OWNER].id,
+            device_is_new=True,
+            after_hours=True,
+        ),
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert {
+        "id",
+        "document_id",
+        "risk_value",
+        "model_version",
+        "context_snapshot",
+        "computed_at",
+    } <= set(payload)
+    assert payload["document_id"] == str(document_id)
+    assert payload["model_version"] == RISK_MODEL_VERSION
+    assert Decimal(str(payload["risk_value"])) == Decimal("0.8000")
+    snapshot = payload["context_snapshot"]
+    assert snapshot["device_is_new"] is True
+    assert snapshot["after_hours"] is True
+    assert snapshot["device_id"] == "laptop-12"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"document_id": str(uuid4())},
+        {
+            "document_id": str(uuid4()),
+            "actor_user_id": str(uuid4()),
+            "device_id": "laptop-12",
+            "device_is_new": True,
+            "accessed_at": "2026-09-09T12:00:00+00:00",
+        },
+        {
+            "document_id": "not-a-uuid",
+            "actor_user_id": str(uuid4()),
+            "device_id": "laptop-12",
+            "device_is_new": False,
+            "accessed_at": "2026-09-09T12:00:00+00:00",
+            "after_hours": False,
+        },
+        {
+            "document_id": str(uuid4()),
+            "actor_user_id": str(uuid4()),
+            "device_id": "   ",
+            "device_is_new": False,
+            "accessed_at": "2026-09-09T12:00:00+00:00",
+            "after_hours": False,
+        },
+        {
+            "document_id": str(uuid4()),
+            "actor_user_id": str(uuid4()),
+            "device_id": "laptop-12",
+            "device_is_new": False,
+            "accessed_at": "2026-09-09T12:00:00",
+            "after_hours": False,
+        },
+    ],
+    ids=[
+        "empty-body",
+        "only-document-id",
+        "missing-after-hours",
+        "malformed-uuid",
+        "blank-device-id",
+        "naive-accessed-at",
+    ],
+)
+def test_risk_score_rejects_incomplete_or_invalid_bodies(
+    client: TestClient, body: dict[str, object]
+) -> None:
+    """An incomplete snapshot is a 422. It never reaches the scorer."""
+    response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_risk_score_rejects_a_client_supplied_risk_value(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    """``extra="forbid"`` plus no ``risk_value`` field: the server computes it."""
+    body = risk_body(
+        document_id, seeded_users[UserRole.DATA_OWNER].id, risk_value="0.99"
+    )
+    response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_risk_score_rejects_unknown_snapshot_fields(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    body = risk_body(
+        document_id,
+        seeded_users[UserRole.DATA_OWNER].id,
+        geo_country="IN",
+    )
+    response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422

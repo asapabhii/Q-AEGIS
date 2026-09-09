@@ -13,6 +13,51 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-09: Contextual risk weights are placeholders, additive, versioned
+
+Decided by: Abhinav.
+
+v1 formula, `SPEC.md` 3.3:
+
+- `BASE_RISK = 0.20`
+- `+ NEW_DEVICE_WEIGHT (0.35)` if `device_is_new`
+- `+ AFTER_HOURS_WEIGHT (0.25)` if `after_hours`
+- clamp to `[0, 1]`, round half-even to four decimal places
+- `model_version = contextual-risk-additive-0.1.0`
+
+These three constants have no calibration against real incident data. They exist
+so the engine is deterministic and reviewable, not because 0.35 is an empirically
+justified new-device penalty. Changing any weight requires bumping
+`model_version`; silent edits would make historical `risk_scores` rows
+uninterpretable.
+
+Rejected: interaction terms (e.g. new device after hours scoring higher than the
+sum). v1 has no incident dataset to justify a cross term. Headroom under 1.0
+(max 0.80) is intentional so later signals can join the same scale.
+
+Rejected: treating `risk_value` as a five-agent aggregate. That number is
+`trust_scores.consensus_value` (3.5). The data dictionary's original sentence
+is corrected in this PR.
+
+### 2026-09-09: after_hours is caller-asserted, not derived
+
+Decided by: Abhinav.
+
+`context_snapshot.after_hours` is a fact the caller sends, same as
+`device_is_new`. The server does not derive it from `accessed_at`, a timezone,
+or a business-hours window.
+
+Rejected: hardcoding 09:00–17:00 UTC (or any other window) inside the scorer.
+Working hours are an org policy that does not exist in this repository, and
+baking one in would be a product claim disguised as a default. Server-side
+derivation waits until that policy exists.
+
+v1 snapshot is exactly five required fields, `extra="forbid"`, no nulls. An
+incomplete snapshot is a 422 and never reaches the scorer.
+
+This PR does not wire a scheduler or an event bus. Redis Streams vs Kafka stays
+in Pending until recompute-on-schedule is actually built.
+
 ### 2026-09-05: Policy engine, chose OPA with Rego
 
 Decided by: Abhinav, as integration owner. Replaces the Pending entry and

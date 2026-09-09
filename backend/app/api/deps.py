@@ -160,3 +160,12 @@ ClassifyCaller = Annotated[
         )
     ),
 ]
+
+#: Roles allowed to trigger a contextual risk recompute, ``PRD.md`` FR-2.
+#: Security Analysts recompute before an override (FR-12); Security Admins
+#: recompute for the dashboard (FR-14). Compliance, CISO, data owners, and
+#: auditors are excluded: their stated needs do not include firing this engine.
+RiskScoreCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
+]
