@@ -1,4 +1,4 @@
-﻿"""AES-256-GCM encryption for the Crypto Engine, `SPEC.md` 3.7.
+"""AES-256-GCM encryption for the Crypto Engine, `SPEC.md` 3.7.
 
 This is the 'aes256' profile for high-trust-score documents.
 Uses the Python cryptography library (already in requirements).
@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.backends import default_backend
 
 #: AES-256 key size in bytes (32 bytes = 256 bits)
 AES_256_KEY_SIZE = 32

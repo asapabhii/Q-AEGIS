@@ -1,14 +1,15 @@
-﻿"""Crypto-agile protection engine, ``SPEC.md`` 3.7, implements ``PRD.md`` FR-6.
+"""Crypto-agile protection engine, ``SPEC.md`` 3.7, implements ``PRD.md`` FR-6.
 
 ``POST /api/v1/crypto-profiles`` persists a ``crypto_profiles`` row and an
 audit entry from a real ``trust_score_id``. The score-to-profile map in
 :mod:`app.crypto.selector` is still a stub: its thresholds are uncalibrated
 placeholders. This package does not encrypt or decrypt bytes.
 
-SECURITY CAVEAT: liboqs is NOT independently audited, restate this in every docstring in this package: liboqs is NOT
-independently audited, and OQS-OpenSSL is documented by its own maintainers as
-development and interop-testing only, not production-supported. Do not claim
-audited-grade or FIPS-certified guarantees that the library does not back up.
+SECURITY CAVEAT: liboqs is NOT independently audited, restate this in every
+docstring in this package: liboqs is NOT independently audited, and OQS-OpenSSL
+is documented by its own maintainers as development and interop-testing only,
+not production-supported. Do not claim audited-grade or FIPS-certified
+guarantees that the library does not back up.
 
 Key management this phase is environment-configured secrets, NOT a hardware
 security module (``PRD.md`` NG5). Document that as the current limitation

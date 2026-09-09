@@ -12,6 +12,10 @@ IMPORTANT: Never use retired names (CRYSTALS-Kyber, CRYSTALS-Dilithium) in code.
 Use ML-KEM and ML-DSA per SPEC.md.
 """
 
+import faulthandler
+
+faulthandler.enable()
+
 #: KEM algorithms we use (per SPEC.md 3.7)
 HYBRID_KEM = "ML-KEM-768"  # For hybrid profile
 PQ_KEM = "ML-KEM-1024"  # For full post-quantum profile
@@ -20,11 +24,39 @@ PQ_KEM = "ML-KEM-1024"  # For full post-quantum profile
 PQ_SIG = "ML-DSA-87"  # For full post-quantum profile
 
 #: Whether liboqs native library is available
-# Set this to True only when liboqs is properly installed with native binaries
 OQS_AVAILABLE = False
 
 #: liboqs version string
-OQS_VERSION = None
+OQS_VERSION: str | None = None
+
+
+def _load_oqs() -> bool:
+    """Internal: try to load liboqs. Returns True if successful."""
+    global OQS_AVAILABLE, OQS_VERSION
+
+    if OQS_AVAILABLE:
+        return True
+
+    try:
+        import oqs
+
+        # Test if library actually works - try a simple KEM operation
+        kem = oqs.KeyEncapsulation(HYBRID_KEM)
+        _ = kem.generate_keypair()
+
+        OQS_AVAILABLE = True
+        # Get version - handle different API versions
+        if hasattr(oqs, "oqs_version") and callable(oqs.oqs_version):
+            OQS_VERSION = oqs.oqs_version()
+        elif hasattr(oqs, "oqs_python_version") and callable(oqs.oqs_python_version):
+            OQS_VERSION = oqs.oqs_python_version()
+        else:
+            OQS_VERSION = "unknown"
+
+        return True
+    except Exception:
+        OQS_AVAILABLE = False
+        return False
 
 
 def is_available() -> bool:
@@ -33,7 +65,7 @@ def is_available() -> bool:
     Returns:
         True if liboqs native library is available, False otherwise.
     """
-    return OQS_AVAILABLE
+    return _load_oqs()
 
 
 def get_version() -> str | None:
@@ -42,24 +74,8 @@ def get_version() -> str | None:
     Returns:
         Version string or None if not available.
     """
+    _load_oqs()
     return OQS_VERSION
-
-
-def _load_oqs():
-    """Internal: try to load liboqs. Returns True if successful."""
-    global OQS_AVAILABLE, OQS_VERSION
-    if OQS_AVAILABLE:
-        return True
-    
-    try:
-        import oqs
-        # Test if library actually loads
-        _ = oqs.KEM.alg_names()
-        OQS_AVAILABLE = True
-        OQS_VERSION = oqs.__version__
-        return True
-    except Exception:
-        return False
 
 
 def list_kem_algorithms() -> list[str]:
@@ -72,7 +88,8 @@ def list_kem_algorithms() -> list[str]:
         return []
     try:
         import oqs
-        return oqs.KEM.alg_names()
+
+        return list(oqs.get_enabled_kem_mechanisms())
     except Exception:
         return []
 
@@ -87,7 +104,8 @@ def list_sig_algorithms() -> list[str]:
         return []
     try:
         import oqs
-        return oqs.SIG.alg_names()
+
+        return list(oqs.get_enabled_sig_mechanisms())
     except Exception:
         return []
 
@@ -105,13 +123,14 @@ def generate_kem_keypair(algorithm: str = HYBRID_KEM) -> tuple[bytes, bytes]:
         RuntimeError: If liboqs is not available.
     """
     if not _load_oqs():
-        raise RuntimeError(
-            "liboqs is not available. Native library must be installed "
-            "or set OQS_AVAILABLE=True after manual installation."
-        )
+        raise RuntimeError("liboqs is not available.")
+
     import oqs
-    with oqs.KEM(algorithm) as kem:
-        return kem.generate_keypair()
+
+    with oqs.KeyEncapsulation(algorithm) as kem:
+        public_key = kem.generate_keypair()
+        secret_key = kem.secret_key
+        return public_key, bytes(secret_key)
 
 
 def encapsulate(public_key: bytes, algorithm: str = HYBRID_KEM) -> tuple[bytes, bytes]:
@@ -128,15 +147,19 @@ def encapsulate(public_key: bytes, algorithm: str = HYBRID_KEM) -> tuple[bytes, 
         RuntimeError: If liboqs is not available.
     """
     if not _load_oqs():
-        raise RuntimeError(
-            "liboqs is not available. Native library must be installed."
-        )
+        raise RuntimeError("liboqs is not available.")
+
     import oqs
-    with oqs.KEM(algorithm) as kem:
-        return kem.encapsulate(public_key)
+
+    with oqs.KeyEncapsulation(algorithm) as kem:
+        # encap_secret returns (ciphertext, shared_secret)
+        ciphertext, shared_secret = kem.encap_secret(public_key)
+        return ciphertext, shared_secret
 
 
-def decapsulate(secret_key: bytes, ciphertext: bytes, algorithm: str = HYBRID_KEM) -> bytes:
+def decapsulate(
+    secret_key: bytes, ciphertext: bytes, algorithm: str = HYBRID_KEM
+) -> bytes:
     """Decapsulate a shared secret using a secret key.
 
     Args:
@@ -151,12 +174,12 @@ def decapsulate(secret_key: bytes, ciphertext: bytes, algorithm: str = HYBRID_KE
         RuntimeError: If liboqs is not available.
     """
     if not _load_oqs():
-        raise RuntimeError(
-            "liboqs is not available. Native library must be installed."
-        )
+        raise RuntimeError("liboqs is not available.")
+
     import oqs
-    with oqs.KEM(algorithm) as kem:
-        return kem.decapsulate(secret_key, ciphertext)
+
+    with oqs.KeyEncapsulation(algorithm, secret_key) as kem:
+        return kem.decap_secret(ciphertext)
 
 
 def generate_sig_keypair(algorithm: str = PQ_SIG) -> tuple[bytes, bytes]:
@@ -172,12 +195,14 @@ def generate_sig_keypair(algorithm: str = PQ_SIG) -> tuple[bytes, bytes]:
         RuntimeError: If liboqs is not available.
     """
     if not _load_oqs():
-        raise RuntimeError(
-            "liboqs is not available. Native library must be installed."
-        )
+        raise RuntimeError("liboqs is not available.")
+
     import oqs
-    with oqs.SIG(algorithm) as sig:
-        return sig.generate_keypair()
+
+    with oqs.Signature(algorithm) as sig:
+        public_key = sig.generate_keypair()
+        secret_key = sig.secret_key
+        return public_key, bytes(secret_key)
 
 
 def sign(message: bytes, secret_key: bytes, algorithm: str = PQ_SIG) -> bytes:
@@ -195,15 +220,17 @@ def sign(message: bytes, secret_key: bytes, algorithm: str = PQ_SIG) -> bytes:
         RuntimeError: If liboqs is not available.
     """
     if not _load_oqs():
-        raise RuntimeError(
-            "liboqs is not available. Native library must be installed."
-        )
+        raise RuntimeError("liboqs is not available.")
+
     import oqs
-    with oqs.SIG(algorithm) as sig:
-        return sig.sign(message, secret_key)
+
+    with oqs.Signature(algorithm, secret_key) as sig:
+        return sig.sign(message)
 
 
-def verify(message: bytes, signature: bytes, public_key: bytes, algorithm: str = PQ_SIG) -> bool:
+def verify(
+    message: bytes, signature: bytes, public_key: bytes, algorithm: str = PQ_SIG
+) -> bool:
     """Verify a signature.
 
     Args:
@@ -219,9 +246,9 @@ def verify(message: bytes, signature: bytes, public_key: bytes, algorithm: str =
         RuntimeError: If liboqs is not available.
     """
     if not _load_oqs():
-        raise RuntimeError(
-            "liboqs is not available. Native library must be installed."
-        )
+        raise RuntimeError("liboqs is not available.")
+
     import oqs
-    with oqs.SIG(algorithm) as sig:
+
+    with oqs.Signature(algorithm) as sig:
         return sig.verify(message, signature, public_key)

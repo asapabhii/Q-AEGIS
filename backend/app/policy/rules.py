@@ -1,4 +1,4 @@
-﻿"""Rule condition tree parsing and validation.
+"""Rule condition tree parsing and validation.
 
 This module handles the condition_expr jsonb field from policy_rules,
 which contains a serialized condition tree from FR-13's rule builder.
@@ -18,7 +18,6 @@ SUPPORTED_FIELDS: document_id, sensitivity, trust_score, owner_id, document_stat
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-from uuid import UUID
 
 
 class ConditionOperator(str, Enum):
@@ -41,19 +40,21 @@ class ConditionOperator(str, Enum):
 
 
 # Fields that can be used in policy conditions
-VALID_FIELDS = frozenset([
-    "document_id",
-    "sensitivity",
-    "trust_score",
-    "owner_id",
-    "document_status",
-    "access_count",
-    "last_accessed_at",
-    "tags",
-    "file_type",
-    "created_at",
-    "classification_confidence",
-])
+VALID_FIELDS = frozenset(
+    [
+        "document_id",
+        "sensitivity",
+        "trust_score",
+        "owner_id",
+        "document_status",
+        "access_count",
+        "last_accessed_at",
+        "tags",
+        "file_type",
+        "created_at",
+        "classification_confidence",
+    ]
+)
 
 
 class InvalidConditionError(ValueError):
@@ -108,9 +109,15 @@ def validate_condition_tree(tree: dict[str, Any], path: str = "root") -> None:
         )
 
     # Binary operators require field and value
-    if operator in (ConditionOperator.EQ, ConditionOperator.NEQ, ConditionOperator.GT,
-                    ConditionOperator.GTE, ConditionOperator.LT, ConditionOperator.LTE,
-                    ConditionOperator.IN):
+    if operator in (
+        ConditionOperator.EQ,
+        ConditionOperator.NEQ,
+        ConditionOperator.GT,
+        ConditionOperator.GTE,
+        ConditionOperator.LT,
+        ConditionOperator.LTE,
+        ConditionOperator.IN,
+    ):
         if "field" not in tree:
             raise InvalidConditionError(
                 f"Binary operator '{op}' at {path} requires 'field'"
@@ -170,9 +177,15 @@ def parse_condition_tree(tree: dict[str, Any]) -> ConditionNode:
     op = ConditionOperator(tree["op"])
 
     # Base case: binary operator
-    if op in (ConditionOperator.EQ, ConditionOperator.NEQ, ConditionOperator.GT,
-              ConditionOperator.GTE, ConditionOperator.LT, ConditionOperator.LTE,
-              ConditionOperator.IN):
+    if op in (
+        ConditionOperator.EQ,
+        ConditionOperator.NEQ,
+        ConditionOperator.GT,
+        ConditionOperator.GTE,
+        ConditionOperator.LT,
+        ConditionOperator.LTE,
+        ConditionOperator.IN,
+    ):
         return ConditionNode(
             operator=op,
             field=tree["field"],
@@ -192,7 +205,9 @@ def parse_condition_tree(tree: dict[str, Any]) -> ConditionNode:
     raise InvalidConditionError(f"Unknown operator: {op}")
 
 
-def prepare_rego_input(rules: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+def prepare_rego_input(
+    rules: list[dict[str, Any]], context: dict[str, Any]
+) -> dict[str, Any]:
     """Prepare input for OPA Rego evaluation.
 
     This converts the database representation to what the Rego

@@ -1,4 +1,4 @@
-﻿"""Crypto-shredding endpoint, `SPEC.md` 3.9, `PRD.md` FR-8.
+"""Crypto-shredding endpoint, `SPEC.md` 3.9, `PRD.md` FR-8.
 
 STUB IMPLEMENTATION: Key destruction is simulated as no real key material
 exists in this phase (`PRD.md` NG4/NG5). The endpoint writes an
@@ -36,7 +36,7 @@ class ShredResponse(BaseModel):
     "/documents/{document_id}/key",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ShredResponse,
-    summary="Request cryptographic erasure (crypto-shredding) of a document's encryption key",
+    summary="Cryptographic erasure (crypto-shredding) of a document key",
 )
 def shred_key(
     document_id: UUID,
@@ -44,7 +44,9 @@ def shred_key(
     caller: CryptoShredCaller,
     confirm: bool = Query(
         ...,
-        description="Explicit confirmation flag required for irreversible crypto-shredding.",
+        description=(
+            "Explicit confirmation flag required for irreversible " "crypto-shredding."
+        ),
     ),
 ) -> ShredResponse:
     if not confirm:
@@ -99,5 +101,7 @@ def shred_key(
     return ShredResponse(
         document_id=result.document_id,
         shredded_at=result.shredded_at,
-        message="Document encryption key destroyed. Data is now permanently unreadable.",
+        message=(
+            "Document encryption key destroyed. Data is now permanently unreadable."
+        ),
     )

@@ -1,4 +1,4 @@
-﻿"""Policy engine for deterministic rule-based overrides, `SPEC.md` 3.6, `PRD.md` FR-5.
+"""Policy engine for deterministic rule-based overrides, `SPEC.md` 3.6, `PRD.md` FR-5.
 
 Evaluates a closed condition tree against caller-supplied document facts and
 returns the first matching active rule's action, or the AI recommendation when
@@ -24,10 +24,18 @@ security decision. Errors here have worse consequences than elsewhere.
 Owner: Udhav (`WORK_DIVISION.md`). Required reviewer on any change here.
 """
 
-from app.policy.engine import PolicyEngine, evaluate_policy_decision, get_policy_engine
+from app.policy.engine import (
+    DocumentFacts,
+    EvaluableRule,
+    PolicyEngineError,
+    PolicyEvalResult,
+    evaluate,
+)
 
 __all__ = [
-    "PolicyEngine",
-    "evaluate_policy_decision",
-    "get_policy_engine",
+    "DocumentFacts",
+    "EvaluableRule",
+    "PolicyEngineError",
+    "PolicyEvalResult",
+    "evaluate",
 ]

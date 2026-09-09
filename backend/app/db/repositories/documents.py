@@ -58,17 +58,19 @@ def mark_classified(session: Session, document: Document) -> Document:
     return document
 
 
-def update_status(session: Session, document_id: UUID, new_status: DocumentStatus) -> Document:
+def update_status(
+    session: Session, document_id: UUID, new_status: DocumentStatus
+) -> Document:
     """Update a document's current status.
-    
+
     Args:
         session: Active database session.
         document_id: UUID of the document to update.
         new_status: The new status to set.
-        
+
     Returns:
         The updated document.
-        
+
     Raises:
         ValueError: If the document doesn't exist.
     """

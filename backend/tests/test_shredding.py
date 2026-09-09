@@ -10,15 +10,12 @@ guarantees that the library does not back up.
 
 from uuid import uuid4
 
-import pytest
-from fastapi import status
-
 from app.crypto.shredding import ShredResult, shred_document_key
-from app.db.enums import AuditEventType, DocumentStatus
 
 
 def test_shredding_is_stub():
     import app.crypto.shredding as mod
+
     assert "stub" in mod.__doc__.lower()
 
 
