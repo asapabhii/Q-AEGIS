@@ -1,8 +1,9 @@
 """Crypto-agile protection engine, ``SPEC.md`` 3.7, implements ``PRD.md`` FR-6.
 
-Phase 2 ships a score-to-profile stub in :mod:`app.crypto.selector`. It does
-not persist, does not take a ``trust_score_id``, and does not write an audit
-entry. Real trust-score-driven selection, with those three, is Phase 3.
+``POST /api/v1/crypto-profiles`` persists a ``crypto_profiles`` row and an
+audit entry from a real ``trust_score_id``. The score-to-profile map in
+:mod:`app.crypto.selector` is still a stub: its thresholds are uncalibrated
+placeholders. This package does not encrypt or decrypt bytes.
 
 SECURITY CAVEAT, restate this in every docstring in this package: liboqs is NOT
 independently audited, and OQS-OpenSSL is documented by its own maintainers as

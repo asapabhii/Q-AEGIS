@@ -13,6 +13,22 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-09: Crypto v1 persist is trust_score_id only, after a policy row
+
+Decided by: Abhinav, implementing 3.7 persist.
+
+v1 selection, `SPEC.md` 3.7, `PRD.md` FR-6:
+
+- `POST /api/v1/crypto-profiles` body is `{ "trust_score_id": "<uuid>" }` only. Extra keys forbidden. The client cannot supply `profile_type` or `document_id`.
+- The stored `consensus_value` is mapped with the existing `select_crypto_profile` stub. Thresholds stay `POST_QUANTUM_MAX = 0.4` inclusive and `HYBRID_MAX = 0.8` inclusive; they remain uncalibrated placeholders.
+- Persist writes one `crypto_profiles` row and `CRYPTO_PROFILE_SELECTED` in the same transaction. Reselection is a new row. `documents.current_status` is not changed.
+- FR-6 is after the policy gate. v1 enforces that by requiring at least one `policy_decisions` row for the same `document_id`. The endpoint does not re-run OPA. A `deny` still counts; this table is separate history.
+- Roles: `security_analyst` and `security_admin`, same allow-list as 3.3 and 3.5.
+
+This endpoint does not encrypt or decrypt bytes. liboqs is not independently audited.
+
+Rejected: selecting from `POST /trust-scores` (would skip the gate). Rejected: a new FK from `crypto_profiles` to `policy_decisions` (would need a data-dictionary change and a migration). Rejected: refusing persist when `final_decision` is `deny` (the gate already recorded; the profile history is independent).
+
 ### 2026-09-09: Trust v1 is an equal-weight mean over a complete agent set
 
 Decided by: Abhinav, implementing 3.5.

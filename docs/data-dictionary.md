@@ -293,6 +293,11 @@ Parameter sets behind each profile are in `SPEC.md` Section 6 and are not
 duplicated here. `hybrid` means `X25519MLKEM768`; `post_quantum` means ML-KEM-1024
 with ML-DSA-87.
 
+v1 persist: `POST /api/v1/crypto-profiles` writes one row per call from a
+`trust_score_id`. A `policy_decisions` row must already exist for the same
+`document_id` (FR-6). Reselection is a new row. The endpoint does not encrypt
+bytes.
+
 ## `migration_schedule`
 
 | Column | Type | Null | Notes |

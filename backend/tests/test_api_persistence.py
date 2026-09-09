@@ -3,9 +3,9 @@
 Closes a known defect: before the data model existed, ``POST /classify`` computed
 a classification and stored nothing, and ``PRD.md`` Section 7 treats a decision
 with no corresponding audit entry as a defect rather than an edge case. The same
-atomicity applies to ``POST /risk-scores``, the policy gate, and trust-score
-consensus. What these tests assert is that the decision and its audit entry are
-written together, or not at all.
+atomicity applies to ``POST /risk-scores``, the policy gate, trust-score
+consensus, and crypto-profile persist. What these tests assert is that the
+decision and its audit entry are written together, or not at all.
 """
 
 from datetime import datetime
@@ -24,6 +24,7 @@ from app.db.models import (
     AgentOutput,
     AuditLog,
     ClassificationMetadata,
+    CryptoProfile,
     Document,
     PolicyDecision,
     PolicyRule,
@@ -42,6 +43,7 @@ RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
+CRYPTO_URL = f"{API_V1_PREFIX}/crypto-profiles"
 
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
 ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
@@ -906,11 +908,11 @@ def test_a_failed_audit_write_rolls_back_the_new_rule(
 # --------------------------------------------------------------------------
 
 
-def five_agent_outputs() -> list[dict[str, object]]:
+def five_agent_outputs(score: str = "0.50") -> list[dict[str, object]]:
     return [
         {
             "agent_type": agent,
-            "score": "0.50",
+            "score": score,
             "rationale": f"{agent} assessed this snapshot.",
         }
         for agent in (
@@ -921,6 +923,52 @@ def five_agent_outputs() -> list[dict[str, object]]:
             "sustainability",
         )
     ]
+
+
+def compute_trust(client: TestClient, risk_id: str, score: str = "0.50"):
+    """Submit a trust-score request for ``risk_id``."""
+    return client.post(
+        TRUST_URL,
+        json={"risk_score_id": risk_id, "outputs": five_agent_outputs(score)},
+        headers=ANALYST_HEADERS,
+    )
+
+
+def evaluate_policy_gate(client: TestClient, document_id: str):
+    """Evaluate the gate with no matching rule so the AI allow stands."""
+    return client.post(
+        POLICY_DECISIONS_URL,
+        json={
+            "document_id": document_id,
+            "ai_recommendation": "allow",
+            "sensitivity_label": "PUBLIC",
+            "risk_value": 0.1,
+            "trust_score": 0.9,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+
+
+def select_crypto(client: TestClient, trust_score_id: str):
+    """Persist a protection profile from ``trust_score_id``."""
+    return client.post(
+        CRYPTO_URL,
+        json={"trust_score_id": trust_score_id},
+        headers=ANALYST_HEADERS,
+    )
+
+
+def gated_trust(
+    client: TestClient, db_session: Session, score: str = "0.50"
+) -> tuple[str, str]:
+    """Register → risk → trust → policy. Returns ``(document_id, trust_id)``."""
+    document_id = register(client)["id"]
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    trust = compute_trust(client, risk_id, score)
+    assert trust.status_code == 201, trust.text
+    gate = evaluate_policy_gate(client, document_id)
+    assert gate.status_code == 201, gate.text
+    return document_id, trust.json()["id"]
 
 
 def test_computing_trust_persists_outputs_the_row_and_the_audit_entry(
@@ -1020,3 +1068,150 @@ def test_a_failed_audit_write_rolls_back_the_trust_score(
     db_session.expire_all()
     assert rows(db_session, TrustScore, document_id=document_id) == []
     assert rows(db_session, AgentOutput, risk_score_id=risk_id) == []
+
+
+# --------------------------------------------------------------------------
+# POST /crypto-profiles, SPEC.md 3.7, PRD.md FR-6
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "score, expected",
+    [
+        ("0.20", "post_quantum"),
+        ("0.40", "post_quantum"),
+        ("0.50", "hybrid"),
+        ("0.80", "hybrid"),
+        ("0.90", "aes256"),
+    ],
+)
+def test_selecting_a_crypto_profile_persists_the_row_and_the_audit_entry(
+    client: TestClient, db_session: Session, score: str, expected: str
+) -> None:
+    document_id, trust_id = gated_trust(client, db_session, score)
+
+    response = select_crypto(client, trust_id)
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["document_id"] == document_id
+    assert payload["trust_score_id"] == trust_id
+    assert payload["profile_type"] == expected
+    assert Decimal(str(payload["consensus_value"])) == Decimal(score)
+
+    profiles = rows(db_session, CryptoProfile, document_id=document_id)
+    assert len(profiles) == 1
+    assert profiles[0].profile_type.value == expected
+    assert str(profiles[0].trust_score_id) == trust_id
+    events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.CRYPTO_PROFILE_SELECTED.value
+    ]
+    assert len(events) == 1
+    assert events[0].payload["profile_type"] == expected
+    assert events[0].payload["trust_score_id"] == trust_id
+    assert Decimal(str(events[0].payload["consensus_value"])) == Decimal(score)
+    assert events[0].payload["post_quantum_max"] == "0.4"
+    assert events[0].payload["hybrid_max"] == "0.8"
+
+
+def test_reselecting_a_crypto_profile_appends_a_new_row(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, trust_id = gated_trust(client, db_session)
+    first = select_crypto(client, trust_id)
+    second = select_crypto(client, trust_id)
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["id"] != second.json()["id"]
+    assert len(rows(db_session, CryptoProfile, document_id=document_id)) == 2
+
+
+def test_a_deny_policy_decision_still_allows_crypto_persist(
+    client: TestClient, db_session: Session
+) -> None:
+    """The gate already recorded; this table is separate history."""
+    document_id = register(client)["id"]
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    trust = compute_trust(client, risk_id)
+    assert trust.status_code == 201, trust.text
+    rule = client.post(
+        POLICY_RULES_URL,
+        json={
+            "rule_name": "Deny public for crypto persist",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "PUBLIC",
+            },
+            "action": "deny",
+            "priority": 3,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert rule.status_code == 201, rule.text
+    gate = evaluate_policy_gate(client, document_id)
+    assert gate.status_code == 201, gate.text
+    assert gate.json()["final_decision"] == "deny"
+    response = select_crypto(client, trust.json()["id"])
+    assert response.status_code == 201, response.text
+
+
+def test_selecting_a_crypto_profile_does_not_change_document_status(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, trust_id = gated_trust(client, db_session)
+    before = db_session.get(Document, document_id).current_status
+    response = select_crypto(client, trust_id)
+    assert response.status_code == 201, response.text
+    db_session.expire_all()
+    assert db_session.get(Document, document_id).current_status == before
+
+
+def test_an_unknown_trust_score_leaves_no_crypto_rows(
+    client: TestClient, db_session: Session
+) -> None:
+    unknown = str(uuid4())
+    response = select_crypto(client, unknown)
+    assert response.status_code == 404
+    assert rows(db_session, CryptoProfile) == []
+    assert rows(db_session, AuditLog, document_id=unknown) == []
+
+
+def test_trust_without_a_policy_decision_leaves_no_crypto_rows(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    trust = compute_trust(client, risk_id)
+    assert trust.status_code == 201, trust.text
+    response = select_crypto(client, trust.json()["id"])
+    assert response.status_code == 422
+    assert rows(db_session, CryptoProfile, document_id=document_id) == []
+    events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.CRYPTO_PROFILE_SELECTED.value
+    ]
+    assert events == []
+
+
+def test_a_failed_audit_write_rolls_back_the_crypto_profile(
+    raising_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id, trust_id = gated_trust(raising_client, db_session)
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated audit log failure")
+
+    monkeypatch.setattr(audit_repo, "append_entry", explode)
+    response = raising_client.post(
+        CRYPTO_URL,
+        json={"trust_score_id": trust_id},
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 500
+    db_session.expire_all()
+    assert rows(db_session, CryptoProfile, document_id=document_id) == []
