@@ -3,7 +3,9 @@ import {
   MAX_RULE_NAME_CHARS,
   buildConditionExpr,
   canAuthorRule,
+  clampRuleName,
   parseLeafValue,
+  strippedRuleNameLength,
   toRuleRequest,
 } from "./rules";
 
@@ -35,6 +37,28 @@ describe("canAuthorRule", () => {
     expect(
       canAuthorRule({ ...ready, ruleName: "x".repeat(MAX_RULE_NAME_CHARS + 1) })
     ).toBe(false);
+  });
+
+  it("counts Unicode code points so emoji names match Python len()", () => {
+    const hundredEmoji = "👍".repeat(100);
+    expect(hundredEmoji.length).toBe(200);
+    expect(strippedRuleNameLength(hundredEmoji)).toBe(100);
+    expect(canAuthorRule({ ...ready, ruleName: hundredEmoji })).toBe(true);
+    expect(
+      canAuthorRule({
+        ...ready,
+        ruleName: "👍".repeat(MAX_RULE_NAME_CHARS + 1),
+      })
+    ).toBe(false);
+  });
+
+  it("clamps raw input to 150 code points, not UTF-16 units", () => {
+    expect(clampRuleName("👍".repeat(MAX_RULE_NAME_CHARS + 10))).toBe(
+      "👍".repeat(MAX_RULE_NAME_CHARS)
+    );
+    expect(clampRuleName("x".repeat(MAX_RULE_NAME_CHARS + 10))).toBe(
+      "x".repeat(MAX_RULE_NAME_CHARS)
+    );
   });
 
   it("refuses when there is no complete condition", () => {

@@ -3,6 +3,16 @@ import type { PolicyAction, PolicyRuleRequest } from "@/lib/api/types";
 /** Matches ``policy_rules.rule_name`` and ``PolicyRuleCreateRequest``. */
 export const MAX_RULE_NAME_CHARS = 150;
 
+/** Code points after trim, matching Python ``len()`` on the persist API. */
+export function strippedRuleNameLength(value: string): number {
+  return Array.from(value.trim()).length;
+}
+
+/** Cap raw input to the API's code-point max. HTML ``maxLength`` is UTF-16. */
+export function clampRuleName(value: string): string {
+  return Array.from(value).slice(0, MAX_RULE_NAME_CHARS).join("");
+}
+
 export const CONDITION_FIELDS = [
   "sensitivity_label",
   "risk_value",
@@ -140,7 +150,9 @@ export function canAuthorRule(options: {
 }): boolean {
   if (options.loading) return false;
   const name = options.ruleName.trim();
-  if (!name || name.length > MAX_RULE_NAME_CHARS) return false;
+  if (!name || strippedRuleNameLength(options.ruleName) > MAX_RULE_NAME_CHARS) {
+    return false;
+  }
   if (!(POLICY_ACTIONS as readonly string[]).includes(options.action)) {
     return false;
   }

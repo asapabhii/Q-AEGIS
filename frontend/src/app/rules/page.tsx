@@ -20,8 +20,10 @@ import {
   POLICY_ACTIONS,
   SENSITIVITY_LABELS,
   canAuthorRule,
+  clampRuleName,
   emptyConditionDraft,
   operatorsForField,
+  strippedRuleNameLength,
   toRuleRequest,
   type ConditionDraft,
   type ConditionField,
@@ -197,15 +199,14 @@ export function RuleBuilderScreen() {
                 >
                   Rule name
                   <span className="ml-1 text-[var(--color-text-muted)]">
-                    ({ruleName.trim().length}/{MAX_RULE_NAME_CHARS} after trim)
+                    ({strippedRuleNameLength(ruleName)}/{MAX_RULE_NAME_CHARS} after trim)
                   </span>
                 </label>
                 <input
                   id="rule-name"
                   type="text"
                   value={ruleName}
-                  onChange={(event) => setRuleName(event.target.value)}
-                  maxLength={MAX_RULE_NAME_CHARS}
+                  onChange={(event) => setRuleName(clampRuleName(event.target.value))}
                   className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
                   placeholder="Deny restricted"
                 />
