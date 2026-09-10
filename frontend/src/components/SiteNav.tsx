@@ -3,9 +3,12 @@ import Link from "next/link";
 const LINKS = [
   { href: "/", label: "Classify" },
   { href: "/override", label: "Override" },
+  { href: "/rules", label: "Rules" },
 ] as const;
 
-export function SiteNav({ active }: { active: "/" | "/override" }) {
+export type SiteNavHref = (typeof LINKS)[number]["href"];
+
+export function SiteNav({ active }: { active: SiteNavHref }) {
   return (
     <nav aria-label="Screens" className="flex items-center gap-4 text-sm">
       {LINKS.map((link) => (
