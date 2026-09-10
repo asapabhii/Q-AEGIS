@@ -44,6 +44,9 @@ OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
 #: A role permitted to call /risk-scores.
 ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
 
+ADMIN_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ADMIN.value}
+AUDITOR_HEADERS = {ACTOR_ROLE_HEADER: UserRole.AUDITOR.value}
+
 
 @pytest.fixture
 def document_id(registered_document: Document) -> UUID:
@@ -339,6 +342,55 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
     assert POLICY_DECISIONS_URL in paths
     assert TRUST_URL in paths
     assert CRYPTO_URL in paths
+    assert f"{DOCUMENTS_URL}/{{document_id}}" in paths
+
+
+# --------------------------------------------------------------------------
+# GET /documents, PRD.md FR-14
+# --------------------------------------------------------------------------
+
+
+def test_document_inventory_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    assert client.get(DOCUMENTS_URL).status_code == 401
+
+
+def test_document_inventory_admits_admin_analyst_and_auditor(
+    client: TestClient,
+) -> None:
+    for headers in (ADMIN_HEADERS, ANALYST_HEADERS, AUDITOR_HEADERS):
+        response = client.get(DOCUMENTS_URL, headers=headers)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["count"] == 0
+        assert payload["documents"] == []
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_document_inventory_refuses_roles_outside_the_allow_list(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.get(DOCUMENTS_URL, headers={ACTOR_ROLE_HEADER: role.value})
+    assert response.status_code == 403
+
+
+def test_document_inventory_item_rejects_a_caller_with_no_role(
+    client: TestClient,
+) -> None:
+    response = client.get(f"{DOCUMENTS_URL}/{uuid4()}")
+    assert response.status_code == 401
+
+
+def test_document_inventory_item_unknown_id_is_404(client: TestClient) -> None:
+    response = client.get(f"{DOCUMENTS_URL}/{uuid4()}", headers=ADMIN_HEADERS)
+    assert response.status_code == 404
 
 
 # --------------------------------------------------------------------------

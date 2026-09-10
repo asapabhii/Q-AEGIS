@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   checkHealth,
   registerDocument,
+  listDocuments,
+  getDocument,
   classifyDocument,
   overrideClassification,
   testPolicyRule,
@@ -274,6 +276,65 @@ describe("overrideClassification", () => {
       new_label: "INTERNAL",
       justification: "Reviewed with the data owner and reclassified.",
     });
+  });
+});
+
+describe("listDocuments", () => {
+  it("sends GET to /api/v1/documents with the role header and no body", async () => {
+    const responseBody = { count: 0, documents: [] };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody));
+
+    const result = await listDocuments("security_admin");
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/documents");
+    expect(options.method).toBe("GET");
+    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+      "security_admin"
+    );
+    expect(options.body).toBeUndefined();
+  });
+});
+
+describe("getDocument", () => {
+  it("sends GET to /api/v1/documents/{id} with the role header", async () => {
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const responseBody = {
+      id,
+      filename: "report.pdf",
+      storage_path: null,
+      current_status: "registered",
+      uploaded_by: "11111111-2222-3333-4444-555555555555",
+      uploaded_at: "2026-09-10T00:00:00Z",
+      sensitivity_label: null,
+      label_source: null,
+      override_id: null,
+      classification_id: null,
+      risk_score_id: null,
+      risk_value: null,
+      risk_computed_at: null,
+      trust_score_id: null,
+      trust_score: null,
+      trust_computed_at: null,
+      policy_decision_id: null,
+      final_decision: null,
+      decided_at: null,
+      crypto_profile_id: null,
+      profile_type: null,
+      selected_at: null,
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody));
+
+    const result = await getDocument(id, "auditor");
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`http://127.0.0.1:8000/api/v1/documents/${id}`);
+    expect(options.method).toBe("GET");
+    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+      "auditor"
+    );
   });
 });
 

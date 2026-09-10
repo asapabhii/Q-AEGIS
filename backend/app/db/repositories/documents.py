@@ -58,6 +58,19 @@ def mark_classified(session: Session, document: Document) -> Document:
     return document
 
 
+def list_documents(session: Session) -> list[Document]:
+    """Every document, newest ``uploaded_at`` first, then ``id``.
+
+    No caller limit. FR-14 is the whole monitored set. Pagination is later,
+    when volume makes an unbounded read a real problem.
+    """
+    return list(
+        session.scalars(
+            select(Document).order_by(Document.uploaded_at.desc(), Document.id.desc())
+        ).all()
+    )
+
+
 def get_document(
     session: Session, document_id: UUID, *, for_update: bool = False
 ) -> Document | None:

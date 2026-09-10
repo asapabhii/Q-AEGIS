@@ -102,6 +102,19 @@ def list_recent_decision_audits(
     )
 
 
+def latest_for_document(session: Session, document_id: UUID) -> PolicyDecision | None:
+    """Return the most recent gate evaluation for a document, if any.
+
+    Ordered by ``decided_at`` then ``id``.
+    """
+    return session.scalars(
+        select(PolicyDecision)
+        .where(PolicyDecision.document_id == document_id)
+        .order_by(PolicyDecision.decided_at.desc(), PolicyDecision.id.desc())
+        .limit(1)
+    ).one_or_none()
+
+
 def document_has_policy_decision(session: Session, document_id: UUID) -> bool:
     """True when at least one gate evaluation exists for this document.
 

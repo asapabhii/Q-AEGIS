@@ -211,3 +211,19 @@ OverrideCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
+
+#: Roles allowed to read the document inventory, ``PRD.md`` FR-14.
+#: Security Admins own the aggregate view. Analysts pick a document to
+#: override (FR-12). Auditors pick a document for the chain viewer (FR-15).
+#: Data owners see one document's summary (FR-16), not the whole set.
+#: Compliance authors rules; they do not list documents.
+DocumentInventoryCaller = Annotated[
+    UserRole,
+    Depends(
+        require_role(
+            UserRole.SECURITY_ADMIN,
+            UserRole.SECURITY_ANALYST,
+            UserRole.AUDITOR,
+        )
+    ),
+]

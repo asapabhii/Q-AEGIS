@@ -12,11 +12,26 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.crypto.selector import HYBRID_MAX, POST_QUANTUM_MAX
 from app.db.enums import CryptoProfileType
 from app.db.models import CryptoProfile
+
+
+def latest_for_document(session: Session, document_id: UUID) -> CryptoProfile | None:
+    """Return the most recent protection selection for a document, if any.
+
+    Ordered by ``selected_at`` then ``id``. SECURITY CAVEAT: liboqs is not
+    independently audited; this function only reads a stored profile type.
+    """
+    return session.scalars(
+        select(CryptoProfile)
+        .where(CryptoProfile.document_id == document_id)
+        .order_by(CryptoProfile.selected_at.desc(), CryptoProfile.id.desc())
+        .limit(1)
+    ).one_or_none()
 
 
 def append_profile(
