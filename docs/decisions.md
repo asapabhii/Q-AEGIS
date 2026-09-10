@@ -13,6 +13,19 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Policy rule screen authors a flat condition list; test writes nothing
+
+Decided by: Abhinav, implementing `PRD.md` FR-13's screen.
+
+`/rules` is a separate App Router page. Default role is `compliance_officer`.
+
+- Save and Test share one body: `{ rule_name, condition_expr, action, priority }`. Extra keys, including `window`, are not sent.
+- Save is disabled until the name is non-blank after trim (max 150), priority is an integer greater than 0, and every visible condition row is a valid v1 leaf. One leaf is sent as itself; two or more are `{ "all": [...] }`.
+- Test calls `POST /policy-rules/test` and persists nothing. Save calls `POST /policy-rules`. Unique name and unique active priority are 409 from the server; there is no list endpoint to pre-check.
+- Nested `any` / `not` trees are still valid on the API. This screen does not author them.
+
+Rejected: a panel on classify (FR-13 says dedicated). Rejected: requiring a successful test before save (the PRD says test is available before live, not a gate). Rejected: inventing field layout from a CIA spec that is not in this repository — same tokens as the other screens.
+
 ### 2026-09-10: Manual override screen is dedicated; confirmation stays in the browser
 
 Decided by: Abhinav, implementing `PRD.md` FR-12's screen.

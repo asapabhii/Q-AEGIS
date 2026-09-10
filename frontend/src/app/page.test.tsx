@@ -88,6 +88,10 @@ describe("DashboardPage workbench", () => {
       "href",
       "/override"
     );
+    expect(screen.getByRole("link", { name: /^rules$/i })).toHaveAttribute(
+      "href",
+      "/rules"
+    );
 
     expect(mockRegisterAndClassify).toHaveBeenCalledTimes(1);
     expect(mockRegisterAndClassify).toHaveBeenCalledWith(

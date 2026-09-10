@@ -175,6 +175,17 @@ export interface PolicyRuleRequest {
   priority: number;
 }
 
+/** POST /api/v1/policy-rules — persisted rule. */
+export interface PolicyRuleResponse {
+  id: string;
+  rule_name: string;
+  condition_expr: Record<string, unknown>;
+  action: PolicyAction;
+  priority: number;
+  active: boolean;
+  created_at: string;
+}
+
 /** POST /api/v1/policy-rules/test — one historical replay. */
 export interface PolicyRuleTestReplay {
   decision_id: string;
