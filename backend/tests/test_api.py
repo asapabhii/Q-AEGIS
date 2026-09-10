@@ -7,9 +7,9 @@ not, so it is tested as real behavior: a missing or unrecognized role must be
 refused rather than defaulted to some permitted value.
 
 What those endpoints *persist* is tested separately in ``test_api_persistence.py``.
-The policy gate (``SPEC.md`` 3.6), trust consensus (``SPEC.md`` 3.5), and
-crypto-profile persist (``SPEC.md`` 3.7) are covered here for auth and request
-validation.
+The policy gate (``SPEC.md`` 3.6), trust consensus (``SPEC.md`` 3.5),
+crypto-profile persist (``SPEC.md`` 3.7), and manual overrides (``PRD.md``
+FR-12) are covered here for auth and request validation.
 """
 
 from decimal import Decimal
@@ -23,6 +23,7 @@ from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
 from app.db.enums import UserRole
 from app.db.models import Document, User
+from app.db.models.classification import MIN_JUSTIFICATION_CHARS
 from app.risk_engine.scorer import MODEL_VERSION as RISK_MODEL_VERSION
 
 HEALTH_URL = f"{API_V1_PREFIX}/health"
@@ -33,6 +34,7 @@ POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
 CRYPTO_URL = f"{API_V1_PREFIX}/crypto-profiles"
+OVERRIDE_URL = f"{API_V1_PREFIX}/manual-overrides"
 
 #: A role permitted to call /classify.
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
@@ -1199,3 +1201,137 @@ def test_crypto_profile_maps_a_selector_refusal_to_422(
         CRYPTO_URL, json=crypto_body(trust_id), headers=ANALYST_HEADERS
     )
     assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------
+# POST /manual-overrides, PRD.md FR-12
+# --------------------------------------------------------------------------
+
+
+def override_body(document_id: UUID | str, **overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "document_id": str(document_id),
+        "new_label": "INTERNAL",
+        "justification": "Reviewed with the data owner and reclassified.",
+    }
+    body.update(overrides)
+    return body
+
+
+def test_override_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    response = client.post(OVERRIDE_URL, json=override_body(uuid4()))
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "role",
+    [UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN],
+)
+def test_override_admits_permitted_roles(
+    client: TestClient, document_id: UUID, role: UserRole
+) -> None:
+    classified = client.post(
+        CLASSIFY_URL,
+        json=classify_body(RESTRICTED_CONTENT, document_id),
+        headers=OWNER_HEADERS,
+    )
+    assert classified.status_code == 200, classified.text
+    response = client.post(
+        OVERRIDE_URL,
+        json=override_body(document_id),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["original_label"] == "RESTRICTED"
+    assert response.json()["new_label"] == "INTERNAL"
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_override_refuses_roles_outside_the_allow_list(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.post(
+        OVERRIDE_URL,
+        json=override_body(uuid4()),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+def test_override_rejects_a_client_supplied_original_label(
+    client: TestClient, document_id: UUID
+) -> None:
+    body = override_body(document_id, original_label="PUBLIC")
+    response = client.post(OVERRIDE_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_override_rejects_a_confirmation_boolean(
+    client: TestClient, document_id: UUID
+) -> None:
+    """A forgeable checkbox is not evidence the analyst confirmed."""
+    body = override_body(document_id, confirmed=True)
+    response = client.post(OVERRIDE_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_override_rejects_a_short_justification(
+    client: TestClient, document_id: UUID
+) -> None:
+    body = override_body(document_id, justification="x" * (MIN_JUSTIFICATION_CHARS - 1))
+    response = client.post(OVERRIDE_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_override_rejects_whitespace_padding_as_the_justification_floor(
+    client: TestClient, document_id: UUID
+) -> None:
+    padded = " " + ("x" * (MIN_JUSTIFICATION_CHARS - 1)) + " "
+    body = override_body(document_id, justification=padded)
+    response = client.post(OVERRIDE_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 422
+
+
+def test_override_unknown_document_is_404(client: TestClient) -> None:
+    response = client.post(
+        OVERRIDE_URL, json=override_body(uuid4()), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 404
+    assert "POST /api/v1/documents" in response.json()["detail"]
+
+
+def test_override_without_classification_is_422(
+    client: TestClient, document_id: UUID
+) -> None:
+    response = client.post(
+        OVERRIDE_URL, json=override_body(document_id), headers=ANALYST_HEADERS
+    )
+    assert response.status_code == 422
+    assert "POST /api/v1/classify" in response.json()["detail"]
+
+
+def test_override_to_the_current_label_is_422(
+    client: TestClient, document_id: UUID
+) -> None:
+    classified = client.post(
+        CLASSIFY_URL,
+        json=classify_body(RESTRICTED_CONTENT, document_id),
+        headers=OWNER_HEADERS,
+    )
+    assert classified.status_code == 200, classified.text
+    response = client.post(
+        OVERRIDE_URL,
+        json=override_body(document_id, new_label="RESTRICTED"),
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 422
+    assert "RESTRICTED" in response.json()["detail"]

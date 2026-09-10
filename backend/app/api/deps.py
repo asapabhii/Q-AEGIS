@@ -202,3 +202,12 @@ CryptoProfileCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
+
+#: Roles allowed to persist a manual classification override, ``PRD.md`` FR-12.
+#: Security Analysts own the override screen; Security Admins act across the
+#: document set. Data Owners see the outcome (FR-16) but do not relabel.
+#: Compliance authors rules (FR-13); they do not write this table.
+OverrideCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
+]

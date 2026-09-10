@@ -15,7 +15,7 @@ from app.api.deps import (
 )
 from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
-from app.db.repositories import classification as classification_repo
+from app.db.repositories import overrides as override_repo
 from app.db.repositories import policy as policy_repo
 from app.db.repositories import risk as risk_repo
 from app.db.repositories import trust as trust_repo
@@ -91,10 +91,10 @@ def evaluate_policy(
     """Evaluate active rules, persist the decision, and write the audit entry.
 
     ``final_decision`` is computed here. It is not accepted from the client.
-    ``sensitivity_label``, ``risk_value``, and ``trust_score`` are read from
-    the latest classification, the risk row behind this trust score, and the
-    trust row itself. ``ai_recommendation`` is still caller-supplied until
-    3.4 exists to produce it.
+    ``sensitivity_label`` is the effective label (latest override, else latest
+    classification). ``risk_value`` and ``trust_score`` come from the risk row
+    behind this trust score and the trust row itself. ``ai_recommendation`` is
+    still caller-supplied until 3.4 exists to produce it.
 
     Raises:
         HTTPException: 404 if the trust score is unknown, 422 if classification
@@ -126,10 +126,8 @@ def evaluate_policy(
             ),
         )
 
-    classification = classification_repo.latest_for_document(
-        session, trust_row.document_id
-    )
-    if classification is None:
+    effective = override_repo.effective_for_document(session, trust_row.document_id)
+    if effective is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
@@ -139,7 +137,7 @@ def evaluate_policy(
         )
 
     facts = facts_from_persisted(
-        classification=classification,
+        sensitivity_label=effective.label,
         risk=risk_row,
         trust=trust_row,
         ai_recommendation=request.ai_recommendation,
@@ -184,7 +182,9 @@ def evaluate_policy(
             facts=facts.as_json(),
             trust_score_id=trust_row.id,
             risk_score_id=risk_row.id,
-            classification_id=classification.id,
+            classification_id=effective.classification.id,
+            override_id=effective.override_id,
+            label_source=effective.source,
         ),
     )
     return PolicyDecisionResponse.from_row(
@@ -192,7 +192,9 @@ def evaluate_policy(
         document_id=trust_row.document_id,
         trust_score_id=trust_row.id,
         risk_score_id=risk_row.id,
-        classification_id=classification.id,
+        classification_id=effective.classification.id,
+        override_id=effective.override_id,
+        label_source=effective.source,
         facts=facts,
         result=result,
         decided_at=row.decided_at,

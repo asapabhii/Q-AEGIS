@@ -4,8 +4,10 @@ No raw dicts cross this boundary. ``final_decision`` and ``overridden`` are
 computed by the engine; the client cannot supply them. Extra keys are forbidden.
 
 ``sensitivity_label``, ``risk_value``, and ``trust_score`` are read from
-persisted rows. The client cannot supply them. ``ai_recommendation`` is still
-caller-asserted until 3.4 exists to produce it.
+persisted rows. ``sensitivity_label`` is the effective label (latest override
+``new_label``, else latest classification). The client cannot supply those
+three. ``ai_recommendation`` is still caller-asserted until 3.4 exists to
+produce it.
 """
 
 from datetime import datetime
@@ -15,9 +17,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.classifier.labels import SensitivityLabel
+from app.classifier.labels import SensitivityLabel, SensitivitySource
 from app.db.enums import PolicyAction
-from app.db.models import ClassificationMetadata, RiskScore, TrustScore
+from app.db.models import RiskScore, TrustScore
 from app.policy.conditions import condition_as_json, parse_condition
 from app.policy.engine import DocumentFacts, PolicyEvalResult
 
@@ -82,6 +84,8 @@ class PolicyDecisionResponse(BaseModel):
     trust_score_id: UUID
     risk_score_id: UUID
     classification_id: UUID
+    override_id: UUID | None
+    label_source: SensitivitySource
     sensitivity_label: SensitivityLabel
     risk_value: Decimal
     trust_score: Decimal
@@ -102,6 +106,8 @@ class PolicyDecisionResponse(BaseModel):
         trust_score_id: UUID,
         risk_score_id: UUID,
         classification_id: UUID,
+        override_id: UUID | None,
+        label_source: SensitivitySource,
         facts: DocumentFacts,
         result: PolicyEvalResult,
         decided_at: datetime,
@@ -115,6 +121,8 @@ class PolicyDecisionResponse(BaseModel):
             trust_score_id=trust_score_id,
             risk_score_id=risk_score_id,
             classification_id=classification_id,
+            override_id=override_id,
+            label_source=label_source,
             sensitivity_label=SensitivityLabel(facts.sensitivity_label),
             risk_value=risk_value,
             trust_score=trust_score,
@@ -130,14 +138,19 @@ class PolicyDecisionResponse(BaseModel):
 
 def facts_from_persisted(
     *,
-    classification: ClassificationMetadata,
+    sensitivity_label: SensitivityLabel,
     risk: RiskScore,
     trust: TrustScore,
     ai_recommendation: PolicyAction,
 ) -> DocumentFacts:
-    """Closed evaluation snapshot from stored rows, not from the client."""
+    """Closed evaluation snapshot from stored rows, not from the client.
+
+    ``sensitivity_label`` is the effective label the caller already resolved.
+    This function does not re-read ``classification_metadata`` so an override
+    cannot be silently dropped by passing the classification row again.
+    """
     return DocumentFacts(
-        sensitivity_label=classification.sensitivity_label.value,
+        sensitivity_label=sensitivity_label.value,
         risk_value=float(Decimal(str(risk.risk_value))),
         trust_score=float(Decimal(str(trust.consensus_value))),
         ai_recommendation=ai_recommendation,

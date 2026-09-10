@@ -108,6 +108,27 @@ export interface ClassificationResponse {
   classified_at: string;
 }
 
+/** Where the effective sensitivity label was read from. */
+export type SensitivitySource = "classification" | "manual_override";
+
+/** POST /api/v1/manual-overrides — request body. */
+export interface ManualOverrideRequest {
+  document_id: string;
+  new_label: SensitivityLabel;
+  justification: string;
+}
+
+/** POST /api/v1/manual-overrides — response body. */
+export interface ManualOverrideResponse {
+  id: string;
+  document_id: string;
+  overridden_by: string;
+  original_label: SensitivityLabel;
+  new_label: SensitivityLabel;
+  justification: string;
+  overridden_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
