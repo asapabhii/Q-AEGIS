@@ -12,6 +12,7 @@ import {
   registerDocument,
   classifyDocument,
   overrideClassification,
+  testPolicyRule,
   ApiError,
 } from "./client";
 
@@ -273,5 +274,38 @@ describe("overrideClassification", () => {
       new_label: "INTERNAL",
       justification: "Reviewed with the data owner and reclassified.",
     });
+  });
+});
+
+describe("testPolicyRule", () => {
+  it("sends POST to /api/v1/policy-rules/test without a window", async () => {
+    const responseBody = {
+      rule_name: "Deny restricted",
+      action: "deny",
+      priority: 10,
+      condition_expr: { field: "sensitivity_label", op: "eq", value: "RESTRICTED" },
+      window: 20,
+      considered: 0,
+      skipped: 0,
+      replays: [],
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody));
+
+    const body = {
+      rule_name: "Deny restricted",
+      condition_expr: { field: "sensitivity_label", op: "eq", value: "RESTRICTED" },
+      action: "deny" as const,
+      priority: 10,
+    };
+    const result = await testPolicyRule(body, "compliance_officer");
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/policy-rules/test");
+    expect(options.method).toBe("POST");
+    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+      "compliance_officer"
+    );
+    expect(JSON.parse(options.body as string)).toEqual(body);
   });
 });

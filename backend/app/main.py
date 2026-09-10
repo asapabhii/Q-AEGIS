@@ -35,8 +35,9 @@ def create_app() -> FastAPI:
             "Phase 3 start. Live endpoints are the health check, document "
             "registration, the classifier stub, manual overrides, "
             "audit-chain verification, contextual risk scoring, the policy "
-            "gate (persisted facts), trust-score consensus, and "
-            "crypto-profile persist. See SPEC.md Section 7 for the full "
+            "gate (persisted facts), policy-rule dry-run, trust-score "
+            "consensus, and crypto-profile persist. See SPEC.md Section 7 "
+            "for the full "
             "build order."
         ),
     )

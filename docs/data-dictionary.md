@@ -290,6 +290,9 @@ latest `classification_metadata`). Risk and consensus come from the linked
 `ai_recommendation` is still caller-asserted until 3.4. The decision response
 and audit payload record `override_id` (nullable) and `label_source`.
 
+v1 dry-run: `POST /api/v1/policy-rules/test` reads the last 20
+`policy_decision_recorded` payloads and persists nothing.
+
 ## `crypto_profiles`
 
 Append-only. One row per selection or reselection.
