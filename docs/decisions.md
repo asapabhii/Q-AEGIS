@@ -13,6 +13,22 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Audit viewer lists one document's chain, does not judge it
+
+Decided by: Abhinav, implementing `PRD.md` FR-15's read surface.
+
+`GET /api/v1/audit/entries?document_id=` returns `{ document_id, count, entries }`. HTTP 200. `document_id` is required. Unknown document is 404. Existing document with no entries is an empty list.
+
+- Order follows `prev_hash` links, genesis first. `created_at` is not the order: entries written in one transaction share `now()`.
+- Each entry is `id`, zero-based `index`, `actor_id`, `event_type`, `payload`, `payload_hash`, `prev_hash`, `merkle_root_at_time`, `created_at`.
+- `frontier` is omitted. It is write-path Merkle state. Verification recomputes from payloads.
+- No `is_valid`. That is `GET /audit/verify`. Putting a verdict on the same response as the rows would ask the auditor to trust this system.
+- Roles: same as verify (`auditor`, `security_admin`, `security_analyst`). Data owners are refused (FR-16 is a summary).
+- The system chain (null `document_id`) is not this endpoint. FR-15 is one document. Verify still accepts an omitted id.
+- Reads write nothing. A broken chain is 409.
+
+Rejected: omitting `document_id` (this is not the system-chain viewer). Rejected: newest-first (the links are the authority). Rejected: a validity flag on the list. Rejected: exposing `frontier`. Rejected: pagination (FR-15 is the full chain).
+
 ### 2026-09-10: Document inventory reads latest rows, does not invent scores
 
 Decided by: Abhinav, implementing `PRD.md` FR-14's read surface.
