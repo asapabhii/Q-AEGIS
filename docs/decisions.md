@@ -13,6 +13,16 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Dashboard and audit viewer are separate screens; verify is its own call
+
+Decided by: Abhinav, implementing `PRD.md` FR-14 and FR-15 screens together. The APIs were already on `main`; the screens share nav, role plumbing, and the same inventory/audit types.
+
+- `/dashboard` reads `GET /documents` only. It sums how many rows already have a label. It does not invent a risk, trust, or profile for a stage that has not run. Null stages render as an em dash.
+- `/audit` loads `GET /audit/entries?document_id=` and verifies with `GET /audit/verify?document_id=`. The list card has no validity flag. Verify can run without loading first. `document_id` is always sent; this is not the system-chain viewer. `end_index` is omitted so the server verifies through the tail.
+- Dashboard rows link to `/audit?document_id=` and `/override?document_id=`.
+
+Rejected: putting `is_valid` on the chain list (already decided on the API). Rejected: omitting `document_id` on verify from this screen. Rejected: averaging null scores on the dashboard.
+
 ### 2026-09-10: Policy rule screen authors a flat condition list; test writes nothing
 
 Decided by: Abhinav, implementing `PRD.md` FR-13's screen.
