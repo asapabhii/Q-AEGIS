@@ -490,6 +490,10 @@ project using TypeScript and Tailwind CSS in `frontend/`. It includes:
   justification}` only after a trimmed justification of at least 20 characters
   and a confirmation checkbox. The checkbox is not sent. A classify result
   links to `/override?document_id=`.
+- The dedicated policy-rule screen at `/rules` (`PRD.md` FR-13). Save posts
+  `{rule_name, condition_expr, action, priority}` after a non-blank name and
+  at least one condition. Test uses the same body on `POST /policy-rules/test`
+  and writes nothing. Multiple conditions are a flat `all`.
 - A Vitest unit and component test suite (`src/**/*.test.{ts,tsx}`) using `jsdom`,
   Testing Library (`@testing-library/react`, `@testing-library/user-event`,
   `@testing-library/jest-dom`), and

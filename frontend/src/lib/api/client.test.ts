@@ -15,6 +15,7 @@ import {
   listAuditEntries,
   classifyDocument,
   overrideClassification,
+  createPolicyRule,
   testPolicyRule,
   ApiError,
 } from "./client";
@@ -357,6 +358,46 @@ describe("listAuditEntries", () => {
       "auditor"
     );
     expect(options.body).toBeUndefined();
+  });
+});
+
+describe("createPolicyRule", () => {
+  it("sends POST to /api/v1/policy-rules", async () => {
+    const responseBody = {
+      id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      rule_name: "Deny restricted",
+      condition_expr: {
+        field: "sensitivity_label",
+        op: "eq",
+        value: "RESTRICTED",
+      },
+      action: "deny",
+      priority: 10,
+      active: true,
+      created_at: "2026-09-10T12:00:00Z",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody, 201));
+
+    const body = {
+      rule_name: "Deny restricted",
+      condition_expr: {
+        field: "sensitivity_label",
+        op: "eq",
+        value: "RESTRICTED",
+      },
+      action: "deny" as const,
+      priority: 10,
+    };
+    const result = await createPolicyRule(body, "compliance_officer");
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/policy-rules");
+    expect(options.method).toBe("POST");
+    expect(
+      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+    ).toBe("compliance_officer");
+    expect(JSON.parse(options.body as string)).toEqual(body);
   });
 });
 
