@@ -247,6 +247,30 @@ def test_facts_from_persisted_uses_the_supplied_label_and_stored_decimals() -> N
     }
 
 
+def test_facts_from_audit_payload_rebuilds_a_v1_snapshot() -> None:
+    from app.db.enums import PolicyAction
+    from app.policy.schemas import facts_from_audit_payload
+
+    facts = facts_from_audit_payload(
+        {
+            "sensitivity_label": "RESTRICTED",
+            "risk_value": 0.2,
+            "trust_score": 0.5,
+            "ai_recommendation": "allow",
+            "policy_decision_id": "ignored",
+        }
+    )
+    assert facts is not None
+    assert facts.sensitivity_label == "RESTRICTED"
+    assert facts.ai_recommendation is PolicyAction.ALLOW
+
+
+def test_facts_from_audit_payload_returns_none_when_keys_are_missing() -> None:
+    from app.policy.schemas import facts_from_audit_payload
+
+    assert facts_from_audit_payload({"sensitivity_label": "PUBLIC"}) is None
+
+
 def test_tree_deeper_than_the_unrolled_rego_is_rejected() -> None:
     tree: dict = {"field": "trust_score", "op": "lt", "value": 0.5}
     for _ in range(MAX_TREE_DEPTH + 1):

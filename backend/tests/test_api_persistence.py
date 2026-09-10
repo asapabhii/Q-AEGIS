@@ -42,6 +42,7 @@ DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
 RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
+POLICY_RULE_TEST_URL = f"{API_V1_PREFIX}/policy-rules/test"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
 CRYPTO_URL = f"{API_V1_PREFIX}/crypto-profiles"
@@ -564,6 +565,71 @@ def test_a_failed_audit_write_rolls_back_the_risk_score(
 # --------------------------------------------------------------------------
 # POST /policy-rules and /policy-decisions, SPEC.md 3.6, PRD.md FR-5
 # --------------------------------------------------------------------------
+
+
+def test_testing_a_rule_writes_nothing(client: TestClient, db_session: Session) -> None:
+    """FR-13: evaluate against history without applying the action."""
+    document_id, trust_id = assess(client, db_session)
+    evaluate_policy_gate(client, trust_id)
+    rules_before = len(rows(db_session, PolicyRule))
+    decisions_before = len(rows(db_session, PolicyDecision))
+    audit_before = len(rows(db_session, AuditLog))
+
+    response = client.post(
+        POLICY_RULE_TEST_URL,
+        json={
+            "rule_name": "Would deny restricted",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "RESTRICTED",
+            },
+            "action": "deny",
+            "priority": 99,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["considered"] == 1
+    assert payload["skipped"] == 0
+    assert len(payload["replays"]) == 1
+    replay = payload["replays"][0]
+    assert replay["document_id"] == document_id
+    assert replay["would_match"] is True
+    assert replay["hypothetical_final_decision"] == "deny"
+    assert replay["would_change_outcome"] is True
+    assert replay["recorded_final_decision"] == "allow"
+
+    assert len(rows(db_session, PolicyRule)) == rules_before
+    assert len(rows(db_session, PolicyDecision)) == decisions_before
+    assert len(rows(db_session, AuditLog)) == audit_before
+
+
+def test_a_miss_on_history_does_not_claim_a_match(
+    client: TestClient, db_session: Session
+) -> None:
+    _document_id, trust_id = assess(client, db_session)
+    evaluate_policy_gate(client, trust_id)
+    response = client.post(
+        POLICY_RULE_TEST_URL,
+        json={
+            "rule_name": "Deny public only",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "PUBLIC",
+            },
+            "action": "deny",
+            "priority": 99,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+    replay = response.json()["replays"][0]
+    assert replay["would_match"] is False
+    assert replay["hypothetical_final_decision"] == "allow"
+    assert replay["would_change_outcome"] is False
 
 
 def test_authoring_a_rule_persists_it_and_an_audit_entry(

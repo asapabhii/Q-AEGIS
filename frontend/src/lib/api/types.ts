@@ -129,6 +129,41 @@ export interface ManualOverrideResponse {
   overridden_at: string;
 }
 
+/** An action a policy rule can take. */
+export type PolicyAction = "allow" | "deny" | "require_mfa" | "force_pqc";
+
+/** POST /api/v1/policy-rules and /policy-rules/test — request body. */
+export interface PolicyRuleRequest {
+  rule_name: string;
+  condition_expr: Record<string, unknown>;
+  action: PolicyAction;
+  priority: number;
+}
+
+/** POST /api/v1/policy-rules/test — one historical replay. */
+export interface PolicyRuleTestReplay {
+  decision_id: string;
+  document_id: string;
+  decided_at: string;
+  sensitivity_label: SensitivityLabel;
+  recorded_final_decision: PolicyAction;
+  would_match: boolean;
+  hypothetical_final_decision: PolicyAction;
+  would_change_outcome: boolean;
+}
+
+/** POST /api/v1/policy-rules/test — response body. Nothing is persisted. */
+export interface PolicyRuleTestResponse {
+  rule_name: string;
+  action: PolicyAction;
+  priority: number;
+  condition_expr: Record<string, unknown>;
+  window: number;
+  considered: number;
+  skipped: number;
+  replays: PolicyRuleTestReplay[];
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------

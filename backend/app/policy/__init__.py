@@ -11,5 +11,8 @@ effective sensitivity: latest override ``new_label``, else latest
 classification. ``ai_recommendation`` is still caller-asserted until 3.4
 exists to produce it.
 
+``POST /policy-rules/test`` dry-runs a candidate against the last 20
+``policy_decision_recorded`` audit snapshots. It persists nothing.
+
 Owner: Udhav (``WORK_DIVISION.md``). Required reviewer on any change here.
 """
