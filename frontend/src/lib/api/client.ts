@@ -24,6 +24,7 @@ import type {
   ManualOverrideRequest,
   ManualOverrideResponse,
   PolicyRuleRequest,
+  PolicyRuleResponse,
   PolicyRuleTestResponse,
   UserRole,
 } from "./types";
@@ -244,6 +245,23 @@ export async function overrideClassification(
   role: UserRole
 ): Promise<ManualOverrideResponse> {
   return request<ManualOverrideResponse>("/api/v1/manual-overrides", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST /api/v1/policy-rules — persist one override rule.
+ *
+ * Name must be unique. Priority must be unique among active rules. Extra
+ * keys are forbidden. Role: compliance_officer.
+ */
+export async function createPolicyRule(
+  body: PolicyRuleRequest,
+  role: UserRole
+): Promise<PolicyRuleResponse> {
+  return request<PolicyRuleResponse>("/api/v1/policy-rules", {
     method: "POST",
     headers: roleHeaders(role),
     body: JSON.stringify(body),
