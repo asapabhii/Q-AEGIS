@@ -20,6 +20,20 @@ def get_risk_score(session: Session, risk_score_id: UUID) -> RiskScore | None:
     ).one_or_none()
 
 
+def latest_for_document(session: Session, document_id: UUID) -> RiskScore | None:
+    """Return the most recent contextual score for a document, if any.
+
+    Ordered by ``computed_at`` then ``id``. Same tiebreak as classification:
+    two rows in one transaction share a timestamp and still need an order.
+    """
+    return session.scalars(
+        select(RiskScore)
+        .where(RiskScore.document_id == document_id)
+        .order_by(RiskScore.computed_at.desc(), RiskScore.id.desc())
+        .limit(1)
+    ).one_or_none()
+
+
 def append_risk_score(
     session: Session,
     *,

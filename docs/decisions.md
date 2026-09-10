@@ -13,6 +13,22 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Document inventory reads latest rows, does not invent scores
+
+Decided by: Abhinav, implementing `PRD.md` FR-14's read surface.
+
+`GET /api/v1/documents` returns `{ count, documents }`. `GET /api/v1/documents/{document_id}` returns one row of the same shape. HTTP 200. Unknown id is 404.
+
+- Each row is document identity plus the latest effective label, contextual risk, trust consensus, policy decision, and crypto profile.
+- A stage that has not run is null. The API does not invent a label, score, or profile.
+- The effective label is the latest override `new_label`, else the latest classification. A later classification does not retract an override. Same rule as the policy gate.
+- Latest in each history table is timestamp desc, then `id`. Classification, risk, trust, policy, and crypto use transaction-scoped `now()`, so two rows written in one transaction share a timestamp and `id` is the tiebreak. Overrides do not: `overridden_at` is `clock_timestamp()`, so two overrides in one transaction have distinct times, and that clock order is what determines the effective label.
+- No query params. No pagination. The list is the whole set, newest `uploaded_at` first.
+- Roles: `security_admin` (FR-14), `security_analyst` (FR-12 pick a document), `auditor` (FR-15 pick a document). Data owners are refused: FR-16 is one document's summary, not the fleet.
+- Reads write nothing. No audit entry for a GET.
+
+Rejected: a caller-supplied filter or limit (FR-14 is the monitored set). Rejected: aggregating counts in the API (the screen can sum). Rejected: showing a data owner every document. Rejected: writing an audit row for a read (FR-7 is decisions).
+
 ### 2026-09-10: Policy rule dry-run reads historical audit snapshots
 
 Decided by: Abhinav, implementing `PRD.md` FR-13's "test rule" action.

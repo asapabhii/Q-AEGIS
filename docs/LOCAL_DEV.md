@@ -232,15 +232,29 @@ curl -X POST http://127.0.0.1:8000/api/v1/classify \
 Roles accepted on `/classify`: `data_owner`, `security_analyst`,
 `security_admin`. `compliance_officer` and `auditor` are refused with a 403 on
 purpose, neither persona's stated need involves submitting documents.
-`/documents` accepts `data_owner` and `security_admin`.
+`POST /documents` accepts `data_owner` and `security_admin`.
 
 Each classify call writes one `classification_metadata` row and one `audit_log`
 entry in the same transaction as the document's status change, so a failure
 anywhere leaves none of it behind. Reclassifying appends rows rather than
 replacing them; the history tables are append-only and a trigger enforces it.
 
-There is no read endpoint for that history yet. If you need one, say so rather
-than querying the tables directly from the frontend.
+### Read the document inventory
+
+`GET /api/v1/documents` lists every document with its current risk and
+protection snapshot. `GET /api/v1/documents/{id}` is one row of the same
+shape. Roles: `security_admin`, `security_analyst`, `auditor`. `data_owner`
+can register a document and is refused on the list — the fleet view is not
+theirs. Stage fields are null until that step has run. These calls write
+nothing.
+
+```bash
+curl http://127.0.0.1:8000/api/v1/documents \
+  -H "X-Q-AEGIS-Actor-Role: security_admin"
+
+curl http://127.0.0.1:8000/api/v1/documents/<the id from step 1> \
+  -H "X-Q-AEGIS-Actor-Role: security_admin"
+```
 
 ### Override a classification
 
