@@ -485,6 +485,11 @@ project using TypeScript and Tailwind CSS in `frontend/`. It includes:
 - The interactive classification workbench in `frontend/src/app/page.tsx`
   demonstrating the two-step register-then-classify flow (`POST /api/v1/documents`
   followed by `POST /api/v1/classify`).
+- The dedicated manual-override screen at `/override` (`PRD.md` FR-12). Load
+  uses `GET /api/v1/documents/{id}`. Submit posts `{document_id, new_label,
+  justification}` only after a trimmed justification of at least 20 characters
+  and a confirmation checkbox. The checkbox is not sent. A classify result
+  links to `/override?document_id=`.
 - A Vitest unit and component test suite (`src/**/*.test.{ts,tsx}`) using `jsdom`,
   Testing Library (`@testing-library/react`, `@testing-library/user-event`,
   `@testing-library/jest-dom`), and
