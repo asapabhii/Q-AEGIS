@@ -31,7 +31,9 @@ The policy gate now uses that same effective label. A later classification does 
 
 This supersedes the "manual overrides are not applied" sentence in "Policy v1 reads persisted facts from a trust_score_id" below.
 
-Rejected: accepting `original_label` from the client (the snapshot would be caller-asserted). Rejected: a `confirmed` boolean. Rejected: writing the human label into `classification_metadata` (that table is AI history). Rejected: latest-event-wins between `classified_at` and `overridden_at` (the stub classifier would silently undo an analyst).
+Concurrent writes take a `documents` row lock (`SELECT … FOR UPDATE`) before reading the effective label and hold it through the insert and audit append. `overridden_at` on that write path is `clock_timestamp()`, not transaction-scoped `now()`, so a writer that started earlier but inserted later cannot sort as current. The UUID is only a last-resort tiebreak.
+
+Rejected: accepting `original_label` from the client (the snapshot would be caller-asserted). Rejected: a `confirmed` boolean. Rejected: writing the human label into `classification_metadata` (that table is AI history). Rejected: latest-event-wins between `classified_at` and `overridden_at` (the stub classifier would silently undo an analyst). Rejected: relying on `now()` plus `id` under concurrency — two transactions can start in one order and commit in the other.
 
 ### 2026-09-09: Policy v1 reads persisted facts from a trust_score_id
 

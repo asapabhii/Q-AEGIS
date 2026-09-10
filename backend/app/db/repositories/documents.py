@@ -58,13 +58,20 @@ def mark_classified(session: Session, document: Document) -> Document:
     return document
 
 
-def get_document(session: Session, document_id: UUID) -> Document | None:
+def get_document(
+    session: Session, document_id: UUID, *, for_update: bool = False
+) -> Document | None:
     """Return one document, or ``None`` if no such row exists.
 
     Returns ``None`` rather than raising so the caller decides what absence means.
     The API layer turns it into a 404; a background consumer might reasonably
     treat it as an event arriving out of order.
+
+    ``for_update`` takes a row lock for the rest of the transaction. Override
+    writes use it so two concurrent relabels cannot snapshot the same
+    predecessor. Released on commit or rollback.
     """
-    return session.scalars(
-        select(Document).where(Document.id == document_id)
-    ).one_or_none()
+    statement = select(Document).where(Document.id == document_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return session.scalars(statement).one_or_none()

@@ -11,7 +11,6 @@ from app.classifier.override_schemas import (
 )
 from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
-from app.db.repositories import documents as documents_repo
 from app.db.repositories import overrides as override_repo
 
 router = APIRouter(tags=["overrides"])
@@ -33,7 +32,9 @@ def create_manual_override(
     ``original_label`` is the current effective sensitivity: the latest
     override's ``new_label``, or the latest classification if none exists.
     The client cannot supply it. A later classification does not change that
-    snapshot after this row is written. This handler does not change
+    snapshot after this row is written. The document row is locked before
+    that read and held through the audit write so a concurrent override
+    cannot snapshot the same predecessor. This handler does not change
     ``documents.current_status``.
 
     FR-12's confirmation checkbox is enforced in the frontend. It is not an
@@ -43,7 +44,7 @@ def create_manual_override(
         HTTPException: 404 if the document is unknown, 422 if it has not been
             classified or ``new_label`` equals the current effective label.
     """
-    document = documents_repo.get_document(session, request.document_id)
+    document = override_repo.lock_document(session, request.document_id)
     if document is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

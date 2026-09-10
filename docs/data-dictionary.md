@@ -183,7 +183,7 @@ scheduled to be thrown away.
 | `original_label` | `sensitivity_label` | no | Snapshot of the label before the override |
 | `new_label` | `sensitivity_label` | no | `CHECK` enforces it differs from `original_label` |
 | `justification` | `text` | no | `CHECK` enforces at least 20 characters (`PRD.md` FR-12) |
-| `overridden_at` | `timestamptz` | no | Defaults to `now()` |
+| `overridden_at` | `timestamptz` | no | Column default is `now()`. The persist API stamps `clock_timestamp()` after locking the document row, so latest-override order follows insert time under that lock, not transaction start |
 
 FR-12's 20-character minimum is enforced in the database as well as the API. It
 is an acceptance criterion, not a UI nicety, and a row that violates it should

@@ -10,12 +10,13 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.classifier.labels import SensitivityLabel, SensitivitySource
-from app.db.models import ClassificationMetadata, ManualOverride
+from app.db.models import ClassificationMetadata, Document, ManualOverride
 from app.db.repositories import classification as classification_repo
+from app.db.repositories import documents as documents_repo
 
 
 @dataclass(frozen=True)
@@ -41,12 +42,24 @@ class EffectiveSensitivity:
         return self.override.id
 
 
+def lock_document(session: Session, document_id: UUID) -> Document | None:
+    """Lock the document row for the rest of this transaction.
+
+    Override writes take this before reading the effective label and hold it
+    through the insert and the audit append. The second writer waits, then
+    sees the first commit, so ``original_label`` is the previous effective
+    label rather than a stale classification. Released on commit or rollback.
+    """
+    return documents_repo.get_document(session, document_id, for_update=True)
+
+
 def latest_for_document(session: Session, document_id: UUID) -> ManualOverride | None:
     """Return the most recent override for a document, if any.
 
-    Ordered by ``overridden_at`` then ``id``. The tiebreak matters because
-    ``overridden_at`` defaults to the transaction timestamp, so two overrides
-    written in one transaction would otherwise have no defined "most recent".
+    Ordered by ``overridden_at`` then ``id``. Writers stamp ``overridden_at``
+    with ``clock_timestamp()`` after taking :func:`lock_document`, so the
+    clock time is the insert time under the lock, not the transaction start.
+    ``id`` is only a last-resort tiebreak.
     """
     return session.scalars(
         select(ManualOverride)
@@ -95,13 +108,21 @@ def append_override(
     new_label: SensitivityLabel,
     justification: str,
 ) -> ManualOverride:
-    """Record one human relabel and return the row, without committing."""
+    """Record one human relabel and return the row, without committing.
+
+    ``overridden_at`` is ``clock_timestamp()``, not transaction-scoped
+    ``now()``. Two serialized writers can start in either order; the one that
+    inserts later must sort later or the resolver would treat the predecessor
+    as current.
+    """
+    stamped_at = session.scalar(select(func.clock_timestamp()))
     row = ManualOverride(
         document_id=document_id,
         overridden_by=overridden_by,
         original_label=original_label,
         new_label=new_label,
         justification=justification,
+        overridden_at=stamped_at,
     )
     session.add(row)
     session.flush()
