@@ -13,6 +13,18 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Manual override screen is dedicated; confirmation stays in the browser
+
+Decided by: Abhinav, implementing `PRD.md` FR-12's screen.
+
+`/override` is a separate App Router page, not a panel on classify. `?document_id=` is a convenience from the classify result.
+
+- Load uses `GET /api/v1/documents/{id}` so the current effective label is the same snapshot the inventory and the gate use.
+- Submit is disabled until the document is classified, the new label differs, justification is at least 20 characters after trim, and the analyst checks "I confirm this action will be permanently logged".
+- The POST body is `{ document_id, new_label, justification }` only. `confirmed` is not sent.
+
+Rejected: a section on the classify workbench (FR-12 says dedicated). Rejected: sending `confirmed` (forgeable; already decided on persist). Rejected: inventing field layout from a CIA spec that is not in this repository — same tokens as the classify workbench.
+
 ### 2026-09-10: Audit viewer lists one document's chain, does not judge it
 
 Decided by: Abhinav, implementing `PRD.md` FR-15's read surface.

@@ -81,6 +81,13 @@ describe("DashboardPage workbench", () => {
     expect(screen.getByText("Step 2 — Classification Result")).toBeInTheDocument();
     expect(screen.getByText("CONFIDENTIAL")).toBeInTheDocument();
     expect(screen.getByText("85.0%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /override this classification/i })
+    ).toHaveAttribute("href", "/override?document_id=doc-uuid-12345");
+    expect(screen.getByRole("link", { name: /^override$/i })).toHaveAttribute(
+      "href",
+      "/override"
+    );
 
     expect(mockRegisterAndClassify).toHaveBeenCalledTimes(1);
     expect(mockRegisterAndClassify).toHaveBeenCalledWith(
