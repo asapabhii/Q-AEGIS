@@ -11,8 +11,8 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.classifier.labels import SensitivitySource
-from app.db.enums import PolicyAction
-from app.db.models import PolicyDecision, PolicyRule
+from app.db.enums import AuditEventType, PolicyAction
+from app.db.models import AuditLog, PolicyDecision, PolicyRule
 from app.policy.engine import EvaluableRule, PolicyEvalResult
 
 
@@ -77,6 +77,29 @@ def append_decision(
     session.add(row)
     session.flush()
     return row
+
+
+#: How many recent gate evaluations a dry-run inspects. Closed, not a query param.
+TEST_RULE_WINDOW = 20
+
+
+def list_recent_decision_audits(
+    session: Session, *, limit: int = TEST_RULE_WINDOW
+) -> list[AuditLog]:
+    """Newest ``policy_decision_recorded`` entries, newest first.
+
+    The audit payload is the historical fact snapshot. Re-reading current
+    classification or trust would test the rule against today, not against
+    the decisions that already happened.
+    """
+    return list(
+        session.scalars(
+            select(AuditLog)
+            .where(AuditLog.event_type == AuditEventType.POLICY_DECISION_RECORDED.value)
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(limit)
+        ).all()
+    )
 
 
 def document_has_policy_decision(session: Session, document_id: UUID) -> bool:

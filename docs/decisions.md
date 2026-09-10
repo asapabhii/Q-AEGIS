@@ -13,6 +13,21 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Policy rule dry-run reads historical audit snapshots
+
+Decided by: Abhinav, implementing `PRD.md` FR-13's "test rule" action.
+
+`POST /api/v1/policy-rules/test` body is the same shape as `POST /policy-rules`: `{ rule_name, condition_expr, action, priority }`. Extra keys forbidden, including a caller-supplied window.
+
+- The candidate is not inserted. No `policy_decisions` row. No audit entry. HTTP 200.
+- Live `policy_rules` are not consulted. The question is "would this rule have matched these past facts?", not a replay of first-match against the current set.
+- Facts come from the last 20 `policy_decision_recorded` audit payloads, newest first. Re-reading current classification or trust would test against today.
+- A payload missing the v1 fact keys, or with an unrecognized `sensitivity_label` or action, is skipped, not guessed. `skipped` is counted.
+- `hypothetical_final_decision` is the candidate action on a match, else that snapshot's `ai_recommendation`.
+- Role: `compliance_officer` only, same as authoring.
+
+Rejected: a `limit` query param (window is part of the contract). Rejected: writing a "test" audit event (FR-13 says the action is not applied; an audit row would look like a decision). Rejected: requiring the rule to be saved first (the point is to test before it goes live).
+
 ### 2026-09-10: Manual override persist, and the gate reads the effective label
 
 Decided by: Abhinav, implementing `PRD.md` FR-12 persist and binding 3.6 to it.

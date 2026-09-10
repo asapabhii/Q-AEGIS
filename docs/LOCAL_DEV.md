@@ -329,6 +329,8 @@ after the policy gate).
 ### Policy gate
 
 `POST /api/v1/policy-rules` authors a rule. Role: `compliance_officer` only.
+`POST /api/v1/policy-rules/test` dry-runs the same body against the last 20
+gate audit snapshots and writes nothing — no rule, no decision, no audit row.
 `POST /api/v1/policy-decisions` evaluates active rules in priority order. Roles:
 `compliance_officer` and `security_admin`. The server computes `final_decision`;
 the client cannot supply it. Body is a `trust_score_id` and an
@@ -339,6 +341,20 @@ classification for that document is 422.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/policy-rules \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
+  -d '{
+    "rule_name": "Deny restricted",
+    "condition_expr": {
+      "field": "sensitivity_label",
+      "op": "eq",
+      "value": "RESTRICTED"
+    },
+    "action": "deny",
+    "priority": 10
+  }'
+
+curl -X POST http://127.0.0.1:8000/api/v1/policy-rules/test \
   -H "Content-Type: application/json" \
   -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
   -d '{

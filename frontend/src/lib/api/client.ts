@@ -20,6 +20,8 @@ import type {
   HealthResponse,
   ManualOverrideRequest,
   ManualOverrideResponse,
+  PolicyRuleRequest,
+  PolicyRuleTestResponse,
   UserRole,
 } from "./types";
 
@@ -189,6 +191,22 @@ export async function overrideClassification(
   role: UserRole
 ): Promise<ManualOverrideResponse> {
   return request<ManualOverrideResponse>("/api/v1/manual-overrides", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST /api/v1/policy-rules/test — dry-run a candidate against recent decisions.
+ *
+ * Does not save the rule. Do not send a window or limit; the server uses 20.
+ */
+export async function testPolicyRule(
+  body: PolicyRuleRequest,
+  role: UserRole
+): Promise<PolicyRuleTestResponse> {
+  return request<PolicyRuleTestResponse>("/api/v1/policy-rules/test", {
     method: "POST",
     headers: roleHeaders(role),
     body: JSON.stringify(body),

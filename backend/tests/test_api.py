@@ -8,8 +8,9 @@ refused rather than defaulted to some permitted value.
 
 What those endpoints *persist* is tested separately in ``test_api_persistence.py``.
 The policy gate (``SPEC.md`` 3.6), trust consensus (``SPEC.md`` 3.5),
-crypto-profile persist (``SPEC.md`` 3.7), and manual overrides (``PRD.md``
-FR-12) are covered here for auth and request validation.
+crypto-profile persist (``SPEC.md`` 3.7), manual overrides (``PRD.md``
+FR-12), and policy-rule dry-run (``PRD.md`` FR-13) are covered here for auth
+and request validation.
 """
 
 from decimal import Decimal
@@ -31,6 +32,7 @@ DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
 RISK_URL = f"{API_V1_PREFIX}/risk-scores"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
+POLICY_RULE_TEST_URL = f"{API_V1_PREFIX}/policy-rules/test"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
 CRYPTO_URL = f"{API_V1_PREFIX}/crypto-profiles"
@@ -587,6 +589,53 @@ def test_policy_rule_refuses_roles_outside_the_allow_list(
         headers={ACTOR_ROLE_HEADER: role.value},
     )
     assert response.status_code == 403
+
+
+def test_policy_rule_test_rejects_a_caller_with_no_role(client: TestClient) -> None:
+    response = client.post(POLICY_RULE_TEST_URL, json=policy_rule_body())
+    assert response.status_code == 401
+
+
+def test_policy_rule_test_admits_compliance_officer(client: TestClient) -> None:
+    response = client.post(
+        POLICY_RULE_TEST_URL, json=policy_rule_body(), headers=COMPLIANCE_HEADERS
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["considered"] == 0
+    assert payload["skipped"] == 0
+    assert payload["replays"] == []
+    assert payload["window"] == 20
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.SECURITY_ANALYST,
+        UserRole.SECURITY_ADMIN,
+        UserRole.AUDITOR,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_policy_rule_test_refuses_roles_outside_the_allow_list(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.post(
+        POLICY_RULE_TEST_URL,
+        json=policy_rule_body(),
+        headers={ACTOR_ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+def test_policy_rule_test_rejects_a_caller_supplied_window(
+    client: TestClient,
+) -> None:
+    body = policy_rule_body(window=5)
+    response = client.post(POLICY_RULE_TEST_URL, json=body, headers=COMPLIANCE_HEADERS)
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize(
