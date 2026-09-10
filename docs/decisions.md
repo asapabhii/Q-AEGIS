@@ -29,6 +29,8 @@ Unknown `trust_score_id` is 404. Roles unchanged: `compliance_officer` and `secu
 
 Rejected: "latest trust for this document" — append-only history, same reason 3.7 takes an explicit id. Rejected: keeping caller-supplied `trust_score` now that 3.5 persists one. Rejected: a pipeline orchestrator endpoint; that is sneaking toward 3.4.
 
+This supersedes the request-shape sentence in "Policy v1 condition language, depth-unrolled Rego, caller-supplied facts" below. That entry's condition language still stands.
+
 ### 2026-09-09: Crypto v1 persist is trust_score_id only, after a policy row
 
 Decided by: Abhinav, implementing 3.7 persist.
@@ -78,7 +80,7 @@ Closed v1 `condition_expr`:
 
 Rego forbids recursive rules (evaluation must terminate). The interpreter is therefore unrolled to depth 8 in `policy.rego`; Python rejects a deeper tree at 422 so the WASM module never sees one.
 
-`trust_score` and `ai_recommendation` on `POST /policy-decisions` are caller-asserted until 3.5 and 3.7 exist to produce them. Same treatment as 3.3's `after_hours`.
+`trust_score` and `ai_recommendation` on `POST /policy-decisions` were caller-asserted when this entry was written. That request shape is superseded: `trust_score` is now read from a persisted `trust_scores` row (see "Policy v1 reads persisted facts from a trust_score_id" above). `ai_recommendation` remains caller-asserted until 3.4. The condition language in this entry is unchanged.
 
 Host builtins provided to `opa-wasmtime`: `object.get` and `count` only, in-process. `capabilities.json` is an allowlist of the eleven builtins `policy.rego` actually uses (`assign`, `count`, `eq`, `equal`, `gt`, `gte`, `lt`, `lte`, `neq`, `object.get`, `internal.member_2`). It is not OPA `--current` minus a few names. `io.jwt.*`, `providers.aws.sign_req`, `http.*`, `net.*`, and `time.now_ns` are absent, so `opa check --capabilities` fails if they appear in the interpreter. Compile with OPA 1.8.0.
 

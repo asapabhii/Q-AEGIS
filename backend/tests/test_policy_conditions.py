@@ -193,6 +193,68 @@ def test_caller_supplied_scores_are_rejected() -> None:
         )
 
 
+def test_facts_from_persisted_uses_stored_decimals_and_the_caller_recommendation() -> (
+    None
+):
+    """The gate snapshot is the stored Decimals plus one caller action.
+
+    Endpoint tests hit this through HTTP. This pins the conversion itself so a
+    later change cannot start reading a client-supplied score again.
+    """
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from app.classifier.labels import SensitivityLabel
+    from app.db.enums import PolicyAction
+    from app.db.models import ClassificationMetadata, RiskScore, TrustScore
+    from app.policy.schemas import facts_from_persisted
+
+    document_id = uuid4()
+    classification = ClassificationMetadata(
+        document_id=document_id,
+        sensitivity_label=SensitivityLabel.INTERNAL,
+        confidence_score=Decimal("0.7500"),
+        model_version="stub-keyword-rules-0.1.0",
+        is_defaulted=False,
+    )
+    risk = RiskScore(
+        document_id=document_id,
+        risk_value=Decimal("0.2000"),
+        model_version="contextual-risk-additive-0.1.0",
+        context_snapshot={
+            "actor_user_id": str(uuid4()),
+            "device_id": "laptop-12",
+            "device_is_new": False,
+            "accessed_at": "2026-09-09T12:00:00+00:00",
+            "after_hours": False,
+        },
+    )
+    trust = TrustScore(
+        document_id=document_id,
+        risk_score_id=uuid4(),
+        consensus_value=Decimal("0.500"),
+        consensus_version="trust-weighted-mean-0.1.0",
+    )
+
+    facts = facts_from_persisted(
+        classification=classification,
+        risk=risk,
+        trust=trust,
+        ai_recommendation=PolicyAction.DENY,
+    )
+
+    assert facts.sensitivity_label == "INTERNAL"
+    assert facts.risk_value == float(Decimal("0.2000"))
+    assert facts.trust_score == float(Decimal("0.500"))
+    assert facts.ai_recommendation is PolicyAction.DENY
+    assert facts.as_json() == {
+        "sensitivity_label": "INTERNAL",
+        "risk_value": float(Decimal("0.2000")),
+        "trust_score": float(Decimal("0.500")),
+        "ai_recommendation": "deny",
+    }
+
+
 def test_tree_deeper_than_the_unrolled_rego_is_rejected() -> None:
     tree: dict = {"field": "trust_score", "op": "lt", "value": 0.5}
     for _ in range(MAX_TREE_DEPTH + 1):
