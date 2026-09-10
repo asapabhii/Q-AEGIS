@@ -355,6 +355,10 @@ chain. Verification and the audit viewer (`PRD.md` FR-15) both operate on one
 document's chain, and a single global chain would serialise every write in the
 system behind one row.
 
+v1 viewer: `GET /api/v1/audit/entries?document_id=` returns that document's
+rows in link order, genesis first. It does not write. It does not return
+`frontier` or a validity flag. Independent check is `GET /api/v1/audit/verify`.
+
 **Forks are structurally impossible.** Unique on `(document_id, prev_hash)` with
 `NULLS NOT DISTINCT`. Two rows claiming the same predecessor is exactly what a
 fork is, so the constraint rejects it, and `NULLS NOT DISTINCT` extends that to
