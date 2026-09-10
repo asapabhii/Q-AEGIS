@@ -277,6 +277,11 @@ invented to satisfy a `NOT NULL` is explicitly not the design.
 `CHECK (overridden = (final_decision IS DISTINCT FROM ai_recommendation))` keeps
 the flag from drifting away from the two columns it summarises.
 
+v1 evaluate: `POST /api/v1/policy-decisions` takes a `trust_score_id`. The
+label, risk, and consensus come from `classification_metadata` (latest row),
+the linked `risk_scores` row, and that `trust_scores` row. The client cannot
+supply them. `ai_recommendation` is still caller-asserted until 3.4.
+
 ## `crypto_profiles`
 
 Append-only. One row per selection or reselection.

@@ -15,14 +15,17 @@ from app.api.deps import (
 )
 from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
-from app.db.repositories import documents as documents_repo
+from app.db.repositories import classification as classification_repo
 from app.db.repositories import policy as policy_repo
+from app.db.repositories import risk as risk_repo
+from app.db.repositories import trust as trust_repo
 from app.policy.engine import PolicyEngineError, evaluate
 from app.policy.schemas import (
     PolicyDecisionRequest,
     PolicyDecisionResponse,
     PolicyRuleCreateRequest,
     PolicyRuleResponse,
+    facts_from_persisted,
 )
 
 router = APIRouter(tags=["policy"])
@@ -78,7 +81,7 @@ def create_policy_rule(
     "/policy-decisions",
     response_model=PolicyDecisionResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Evaluate the policy gate for a registered document",
+    summary="Evaluate the policy gate from a persisted trust score",
 )
 def evaluate_policy(
     request: PolicyDecisionRequest,
@@ -88,25 +91,65 @@ def evaluate_policy(
     """Evaluate active rules, persist the decision, and write the audit entry.
 
     ``final_decision`` is computed here. It is not accepted from the client.
-    ``trust_score`` and ``ai_recommendation`` are still caller-supplied; this
-    endpoint does not read ``trust_scores``.
+    ``sensitivity_label``, ``risk_value``, and ``trust_score`` are read from
+    the latest classification, the risk row behind this trust score, and the
+    trust row itself. ``ai_recommendation`` is still caller-supplied until
+    3.4 exists to produce it.
 
     Raises:
-        HTTPException: 404 if the document is not registered, 422 if a stored
-            rule's tree is corrupt, 500 if the WASM evaluator fails.
+        HTTPException: 404 if the trust score is unknown, 422 if classification
+            or the linked risk score is missing or a stored rule's tree is
+            corrupt, 500 if the WASM evaluator fails.
     """
-    document = documents_repo.get_document(session, request.document_id)
-    if document is None:
+    trust_row = trust_repo.get_trust_score(session, request.trust_score_id)
+    if trust_row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=_unknown_document_detail(request.document_id),
+            detail=_unknown_trust_score_detail(request.trust_score_id),
         )
+
+    risk_row = risk_repo.get_risk_score(session, trust_row.risk_score_id)
+    if risk_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "No risk score is linked to this trust score. Compute one first "
+                "via POST /api/v1/risk-scores."
+            ),
+        )
+    if risk_row.document_id != trust_row.document_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "This trust score's risk row belongs to a different document. "
+                "Score a new contextual risk row and recompute consensus."
+            ),
+        )
+
+    classification = classification_repo.latest_for_document(
+        session, trust_row.document_id
+    )
+    if classification is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "No classification recorded for this document. Classify it "
+                "first via POST /api/v1/classify."
+            ),
+        )
+
+    facts = facts_from_persisted(
+        classification=classification,
+        risk=risk_row,
+        trust=trust_row,
+        ai_recommendation=request.ai_recommendation,
+    )
 
     actor = resolve_seeded_actor(session, caller)
     stored = policy_repo.list_active_rules(session)
     try:
         rules = [policy_repo.as_evaluable(row) for row in stored]
-        result = evaluate(request.facts(), rules)
+        result = evaluate(facts, rules)
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -126,24 +169,35 @@ def evaluate_policy(
             detail=str(exc),
         ) from exc
 
-    row = policy_repo.append_decision(session, document_id=document.id, result=result)
+    row = policy_repo.append_decision(
+        session, document_id=trust_row.document_id, result=result
+    )
     audit_repo.append_entry(
         session,
         event_type=AuditEventType.POLICY_DECISION_RECORDED.value,
-        document_id=document.id,
+        document_id=trust_row.document_id,
         actor_id=actor.id,
         payload=policy_repo.decision_audit_payload(
-            document_id=document.id,
+            document_id=trust_row.document_id,
             result=result,
             decision_id=row.id,
-            facts=request.facts().as_json(),
+            facts=facts.as_json(),
+            trust_score_id=trust_row.id,
+            risk_score_id=risk_row.id,
+            classification_id=classification.id,
         ),
     )
     return PolicyDecisionResponse.from_row(
         decision_id=row.id,
-        document_id=document.id,
+        document_id=trust_row.document_id,
+        trust_score_id=trust_row.id,
+        risk_score_id=risk_row.id,
+        classification_id=classification.id,
+        facts=facts,
         result=result,
         decided_at=row.decided_at,
+        risk_value=risk_row.risk_value,
+        trust_score=trust_row.consensus_value,
     )
 
 
@@ -161,9 +215,9 @@ def _raise_rule_conflict(exc: IntegrityError) -> None:
     raise exc
 
 
-def _unknown_document_detail(document_id: UUID) -> str:
+def _unknown_trust_score_detail(trust_score_id: UUID) -> str:
     """Explain a 404 in terms of the action the caller needs to take."""
     return (
-        f"No document registered with id {document_id}. Register it first via "
-        "POST /api/v1/documents."
+        f"No trust score with id {trust_score_id}. Compute one first via "
+        "POST /api/v1/trust-scores."
     )
