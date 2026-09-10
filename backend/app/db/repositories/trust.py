@@ -20,6 +20,19 @@ def get_trust_score(session: Session, trust_score_id: UUID) -> TrustScore | None
     ).one_or_none()
 
 
+def latest_for_document(session: Session, document_id: UUID) -> TrustScore | None:
+    """Return the most recent consensus row for a document, if any.
+
+    Ordered by ``computed_at`` then ``id``.
+    """
+    return session.scalars(
+        select(TrustScore)
+        .where(TrustScore.document_id == document_id)
+        .order_by(TrustScore.computed_at.desc(), TrustScore.id.desc())
+        .limit(1)
+    ).one_or_none()
+
+
 def append_agent_outputs(
     session: Session,
     *,

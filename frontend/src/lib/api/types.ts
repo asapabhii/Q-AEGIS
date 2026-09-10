@@ -48,6 +48,9 @@ export type DocumentStatus =
   | "protected"
   | "archived";
 
+/** Protection profile selected after the policy gate. */
+export type CryptoProfileType = "aes256" | "hybrid" | "post_quantum";
+
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
@@ -76,6 +79,38 @@ export interface DocumentResponse {
   current_status: DocumentStatus;
   uploaded_by: string;
   uploaded_at: string;
+}
+
+/** GET /api/v1/documents/{id} — current risk and protection snapshot. */
+export interface DocumentSnapshot {
+  id: string;
+  filename: string;
+  storage_path: string | null;
+  current_status: DocumentStatus;
+  uploaded_by: string;
+  uploaded_at: string;
+  sensitivity_label: SensitivityLabel | null;
+  label_source: SensitivitySource | null;
+  override_id: string | null;
+  classification_id: string | null;
+  risk_score_id: string | null;
+  risk_value: string | null;
+  risk_computed_at: string | null;
+  trust_score_id: string | null;
+  trust_score: string | null;
+  trust_computed_at: string | null;
+  policy_decision_id: string | null;
+  final_decision: PolicyAction | null;
+  decided_at: string | null;
+  crypto_profile_id: string | null;
+  profile_type: CryptoProfileType | null;
+  selected_at: string | null;
+}
+
+/** GET /api/v1/documents — FR-14 inventory. */
+export interface DocumentInventoryResponse {
+  count: number;
+  documents: DocumentSnapshot[];
 }
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,7 @@ OVERRIDE_URL = f"{API_V1_PREFIX}/manual-overrides"
 
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
 ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
+ADMIN_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ADMIN.value}
 COMPLIANCE_HEADERS = {ACTOR_ROLE_HEADER: UserRole.COMPLIANCE_OFFICER.value}
 
 #: Content the keyword stub classifies confidently, so ``is_defaulted`` is False
@@ -110,6 +111,12 @@ def rows(session: Session, model, **filters) -> list:
     for column, value in filters.items():
         query = query.filter(getattr(model, column) == value)
     return query.all()
+
+
+def inventory(client: TestClient, document_id: str | None = None):
+    """Read the FR-14 inventory. List when ``document_id`` is omitted."""
+    url = DOCUMENTS_URL if document_id is None else f"{DOCUMENTS_URL}/{document_id}"
+    return client.get(url, headers=ADMIN_HEADERS)
 
 
 # --------------------------------------------------------------------------
@@ -1549,3 +1556,116 @@ def test_the_classify_to_crypto_chain_writes_every_decision_and_its_audit(
     assert rows(db_session, TrustScore, document_id=document_id)
     assert rows(db_session, PolicyDecision, document_id=document_id)
     assert rows(db_session, CryptoProfile, document_id=document_id)
+
+
+# --------------------------------------------------------------------------
+# GET /documents, PRD.md FR-14
+# --------------------------------------------------------------------------
+
+
+def test_a_registered_document_has_null_stage_fields(
+    client: TestClient,
+) -> None:
+    document_id = register(client)["id"]
+    response = inventory(client, document_id)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["id"] == document_id
+    assert payload["current_status"] == "registered"
+    assert payload["sensitivity_label"] is None
+    assert payload["label_source"] is None
+    assert payload["override_id"] is None
+    assert payload["classification_id"] is None
+    assert payload["risk_score_id"] is None
+    assert payload["risk_value"] is None
+    assert payload["trust_score_id"] is None
+    assert payload["trust_score"] is None
+    assert payload["policy_decision_id"] is None
+    assert payload["final_decision"] is None
+    assert payload["crypto_profile_id"] is None
+    assert payload["profile_type"] is None
+
+
+def test_inventory_list_and_item_agree(client: TestClient) -> None:
+    first = register(client, filename="one.pdf")["id"]
+    second = register(client, filename="two.pdf")["id"]
+    listed = inventory(client)
+    assert listed.status_code == 200, listed.text
+    payload = listed.json()
+    assert payload["count"] == 2
+    ids = {item["id"] for item in payload["documents"]}
+    assert ids == {first, second}
+    item = inventory(client, first)
+    assert item.status_code == 200, item.text
+    listed_first = next(row for row in payload["documents"] if row["id"] == first)
+    assert item.json() == listed_first
+
+
+def test_inventory_reads_the_effective_label_not_a_later_classification(
+    client: TestClient,
+) -> None:
+    document_id = register(client)["id"]
+    assert classify(client, document_id).status_code == 200
+    overridden = override_label(client, document_id)
+    assert overridden.status_code == 201, overridden.text
+    assert classify(client, document_id).status_code == 200
+
+    payload = inventory(client, document_id).json()
+    assert payload["sensitivity_label"] == "INTERNAL"
+    assert payload["label_source"] == "manual_override"
+    assert payload["override_id"] == overridden.json()["id"]
+    assert payload["classification_id"] is not None
+
+
+def test_inventory_reads_the_latest_risk_score(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    actor = owner_user_id(db_session)
+    first = score_risk(client, document_id, actor)
+    assert first.status_code == 201, first.text
+    second = score_risk(client, document_id, actor, after_hours=True)
+    assert second.status_code == 201, second.text
+    payload = inventory(client, document_id).json()
+    assert payload["risk_score_id"] == second.json()["id"]
+    assert Decimal(str(payload["risk_value"])) == Decimal("0.4500")
+    assert payload["risk_score_id"] != first.json()["id"]
+
+
+def test_inventory_reads_the_full_protection_snapshot(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, trust_id = gated_trust(client, db_session, score="0.50")
+    profile = select_crypto(client, trust_id)
+    assert profile.status_code == 201, profile.text
+    payload = inventory(client, document_id).json()
+    assert payload["sensitivity_label"] == "RESTRICTED"
+    assert payload["label_source"] == "classification"
+    assert payload["trust_score_id"] == trust_id
+    assert Decimal(str(payload["trust_score"])) == Decimal("0.500")
+    assert payload["final_decision"] == "allow"
+    assert payload["profile_type"] == "hybrid"
+    assert payload["crypto_profile_id"] == profile.json()["id"]
+    assert payload["policy_decision_id"] is not None
+    assert payload["risk_score_id"] is not None
+    listed = inventory(client).json()
+    row = next(item for item in listed["documents"] if item["id"] == document_id)
+    assert row == payload
+
+
+def test_reading_the_inventory_writes_nothing(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, _trust_id = assess(client, db_session)
+    rules_before = len(rows(db_session, PolicyRule))
+    decisions_before = len(rows(db_session, PolicyDecision))
+    audit_before = len(rows(db_session, AuditLog))
+    documents_before = len(rows(db_session, Document))
+
+    assert inventory(client).status_code == 200
+    assert inventory(client, document_id).status_code == 200
+
+    assert len(rows(db_session, PolicyRule)) == rules_before
+    assert len(rows(db_session, PolicyDecision)) == decisions_before
+    assert len(rows(db_session, AuditLog)) == audit_before
+    assert len(rows(db_session, Document)) == documents_before
