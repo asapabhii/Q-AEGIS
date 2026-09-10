@@ -7,6 +7,7 @@ import {
 
 const ready = {
   documentId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  loadedDocumentId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
   hasClassifiedSnapshot: true,
   newLabel: "INTERNAL" as const,
   currentLabel: "RESTRICTED" as const,
@@ -61,5 +62,29 @@ describe("canSubmitOverride", () => {
         currentLabel: null,
       })
     ).toBe(false);
+  });
+
+  it("refuses when the input id does not match the loaded snapshot", () => {
+    expect(
+      canSubmitOverride({
+        ...ready,
+        documentId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+      })
+    ).toBe(false);
+  });
+
+  it("counts Unicode code points so emoji length matches Python len()", () => {
+    const tenEmoji = "👍".repeat(10);
+    expect(tenEmoji.length).toBe(20);
+    expect(strippedJustificationLength(tenEmoji)).toBe(10);
+    expect(canSubmitOverride({ ...ready, justification: tenEmoji })).toBe(false);
+  });
+
+  it("allows a justification of 20 non-BMP code points", () => {
+    const twentyEmoji = "👍".repeat(20);
+    expect(strippedJustificationLength(twentyEmoji)).toBe(20);
+    expect(canSubmitOverride({ ...ready, justification: twentyEmoji })).toBe(
+      true
+    );
   });
 });

@@ -99,9 +99,14 @@ export function OverrideScreen({
     };
   }, [initialDocumentId, role]);
 
-  const currentLabel = snapshot?.sensitivity_label ?? null;
+  const snapshotMatchesInput =
+    snapshot !== null && snapshot.id === documentId.trim();
+  const currentLabel = snapshotMatchesInput
+    ? snapshot.sensitivity_label
+    : null;
   const canSubmit = canSubmitOverride({
     documentId,
+    loadedDocumentId: snapshot?.id ?? null,
     hasClassifiedSnapshot: currentLabel !== null,
     newLabel,
     currentLabel,
@@ -300,7 +305,7 @@ export function OverrideScreen({
             </div>
 
             <div className="space-y-4">
-              {snapshot && (
+              {snapshotMatchesInput && snapshot && (
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
                   <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
                     Current effective label
@@ -355,6 +360,12 @@ export function OverrideScreen({
                       <dd className="font-mono text-xs">{result.id}</dd>
                     </div>
                   </dl>
+                </div>
+              )}
+
+              {snapshot && !snapshotMatchesInput && (
+                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
+                  Document ID changed — load again
                 </div>
               )}
 

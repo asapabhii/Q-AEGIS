@@ -143,6 +143,23 @@ describe("OverrideScreen", () => {
     ).not.toBeChecked();
   });
 
+  it("disables submit when the document id no longer matches the loaded snapshot", async () => {
+    const user = userEvent.setup();
+    render(<OverrideScreen />);
+    await fillReadyForm(user);
+    const submit = screen.getByRole("button", { name: /submit override/i });
+    expect(submit).toBeEnabled();
+    await user.clear(screen.getByLabelText(/^document id/i));
+    await user.type(
+      screen.getByLabelText(/^document id/i),
+      "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    );
+    expect(submit).toBeDisabled();
+    expect(screen.queryByText("payroll.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText(/document id changed — load again/i)).toBeInTheDocument();
+    expect(mockOverride).not.toHaveBeenCalled();
+  });
+
   it("unchecking confirmation disables submit again", async () => {
     const user = userEvent.setup();
     render(<OverrideScreen />);

@@ -10,12 +10,14 @@ export const SENSITIVITY_LABELS: readonly SensitivityLabel[] = [
   "RESTRICTED",
 ];
 
+/** Code points after trim, matching Python ``len()`` on the persist API. */
 export function strippedJustificationLength(value: string): number {
-  return value.trim().length;
+  return Array.from(value.trim()).length;
 }
 
 export function canSubmitOverride(options: {
   documentId: string;
+  loadedDocumentId: string | null;
   hasClassifiedSnapshot: boolean;
   newLabel: SensitivityLabel | "";
   currentLabel: SensitivityLabel | null;
@@ -25,6 +27,7 @@ export function canSubmitOverride(options: {
 }): boolean {
   if (options.loading) return false;
   if (!options.documentId.trim()) return false;
+  if (options.loadedDocumentId !== options.documentId.trim()) return false;
   if (!options.hasClassifiedSnapshot) return false;
   if (!options.newLabel) return false;
   if (options.newLabel === options.currentLabel) return false;
