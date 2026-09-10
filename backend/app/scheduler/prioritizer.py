@@ -22,6 +22,7 @@ from typing import Any
 from uuid import UUID
 
 from app.classifier.labels import SensitivityLabel, rank as sensitivity_rank
+from app.scheduler import qaoa_optimizer
 from app.db.enums import CryptoProfileType
 
 

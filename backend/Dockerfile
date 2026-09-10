@@ -13,10 +13,32 @@ FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
+# Install build tools for liboqs (post-quantum cryptography) and BLAS for qiskit-aer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    libssl-dev \
+    libopenblas-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build and install liboqs C library
+RUN git clone --branch 0.16.0 --depth 1 https://github.com/open-quantum-safe/liboqs.git \
+    && cd liboqs \
+    && mkdir build && cd build \
+    && cmake -GNinja -DCMAKE_INSTALL_PREFIX=/opt/liboqs -DBUILD_SHARED_LIBS=ON -DOQS_USE_OPENSSL=ON .. \
+    && ninja install
+
 # Copied on its own, before the application code, so this layer is reused as
 # long as dependencies are unchanged. Copying the source first would reinstall
 # every dependency on any code edit.
 COPY requirements.txt ./
+
+# Set environment variables for liboqs so liboqs-python finds it
+ENV LD_LIBRARY_PATH="/opt/liboqs/lib:/opt/liboqs/lib64" \
+    C_INCLUDE_PATH="/opt/liboqs/include"
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
@@ -27,9 +49,15 @@ RUN python -m venv /opt/venv \
 # --------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
 
+# Install libssl (OpenSSL) required by liboqs at runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PATH="/opt/venv/bin:$PATH" \
+    LD_LIBRARY_PATH="/opt/liboqs/lib:/opt/liboqs/lib64"
 
 # Run as an unprivileged user. A container process does not need root, and
 # defaulting to it turns a container escape into a host-root problem.
@@ -37,6 +65,12 @@ RUN groupadd --system --gid 1001 qaegis \
     && useradd --system --uid 1001 --gid qaegis --no-create-home qaegis
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/liboqs /opt/liboqs
+
+# Configure dynamic linker so python ctypes (via liboqs-python) can find liboqs.so
+RUN echo "/opt/liboqs/lib" > /etc/ld.so.conf.d/liboqs.conf \
+    && echo "/opt/liboqs/lib64" >> /etc/ld.so.conf.d/liboqs.conf \
+    && ldconfig
 
 WORKDIR /srv
 COPY --chown=qaegis:qaegis app ./app
