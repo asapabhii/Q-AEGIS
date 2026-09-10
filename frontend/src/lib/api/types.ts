@@ -199,6 +199,26 @@ export interface PolicyRuleTestResponse {
   replays: PolicyRuleTestReplay[];
 }
 
+/** GET /api/v1/audit/entries — one chain row. No frontier, no is_valid. */
+export interface AuditEntry {
+  id: string;
+  index: number;
+  actor_id: string | null;
+  event_type: string;
+  payload: Record<string, unknown>;
+  payload_hash: string;
+  prev_hash: string | null;
+  merkle_root_at_time: string;
+  created_at: string;
+}
+
+/** GET /api/v1/audit/entries — one document's chain, genesis first. */
+export interface AuditChainResponse {
+  document_id: string;
+  count: number;
+  entries: AuditEntry[];
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------

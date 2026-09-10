@@ -1,26 +1,27 @@
-"""Audit log verification endpoint, ``SPEC.md`` 3.8, ``PRD.md`` FR-7.
+"""Audit log read and verification, ``SPEC.md`` 3.8, ``PRD.md`` FR-7, FR-15.
 
-Exposes a prefix-verification endpoint for the tamper-evident audit log.
-The endpoint is restricted to roles whose personas in ``PRD.md`` Section 5
-include a need to independently verify the audit trail:
+``GET /audit/entries`` is the viewer: one document's chain, genesis first.
+``GET /audit/verify`` is the independent check. The list does not carry a
+validity flag; an auditor who trusts ``is_valid`` on the same response that
+served the rows is not verifying independently.
 
-- ``AUDITOR``: FR-15 requires an auditor to independently verify the full
-  chain. This is that auditor's primary endpoint.
-- ``SECURITY_ADMIN``: monitors risk and protection status across the system,
-  which requires being able to verify the integrity of the record.
-- ``SECURITY_ANALYST``: reviews classifications and overrides, which requires
-  being able to verify the log entries around a decision.
+Roles whose personas in ``PRD.md`` Section 5 need the trail:
+
+- ``AUDITOR``: FR-15 requires viewing the chain and triggering verification.
+- ``SECURITY_ADMIN``: monitors risk and protection status across the system.
+- ``SECURITY_ANALYST``: reviews classifications and overrides.
 
 ``COMPLIANCE_OFFICER``, ``DATA_OWNER``, ``CISO``, and ``ENGINEER`` are
-deliberately excluded: chain verification belongs to the auditor persona,
-a data owner's stated need is a summary of their own document (FR-16), and
-CISO/engineer are not given a verify action in Section 5.
+excluded: a data owner's stated need is a summary of their own document
+(FR-16), and CISO/engineer are not given a verify or viewer action in
+Section 5.
 
 Role check is enforced server-side through :mod:`app.api.deps`. A missing or
 unrecognized header returns 401 or 403 before any database access occurs.
 """
 
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -29,7 +30,8 @@ from pydantic import BaseModel
 from app.api.deps import DbSession, require_role
 from app.audit.service import RangeVerificationResult, verify_chain_range
 from app.db.enums import UserRole
-from app.db.repositories.audit import AuditChainError
+from app.db.repositories import documents as documents_repo
+from app.db.repositories.audit import AuditChainError, load_chain
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -63,6 +65,85 @@ class VerifyRangeResponse(BaseModel):
     end_index: int
     entry_count: int
     document_id: UUID | None
+
+
+class AuditEntryResponse(BaseModel):
+    """One chain row. ``frontier`` is omitted; it is write-path state."""
+
+    id: UUID
+    index: int
+    actor_id: UUID | None
+    event_type: str
+    payload: dict[str, Any]
+    payload_hash: str
+    prev_hash: str | None
+    merkle_root_at_time: str
+    created_at: datetime
+
+
+class AuditChainResponse(BaseModel):
+    """One document's chain in link order, genesis first. Not a verdict."""
+
+    document_id: UUID
+    count: int
+    entries: list[AuditEntryResponse]
+
+
+@router.get(
+    "/entries",
+    response_model=AuditChainResponse,
+    summary="List one document's audit chain",
+)
+def list_audit_entries(
+    session: DbSession,
+    _caller: VerifyChainCaller,
+    document_id: Annotated[
+        UUID,
+        Query(description="Document whose chain to return. Required."),
+    ],
+) -> AuditChainResponse:
+    """Return the full chain for ``document_id``, genesis first.
+
+    Order follows ``prev_hash`` links, not ``created_at``. Entries written
+    in one transaction share ``now()`` and a timestamp sort would lie.
+    Unknown document is 404. An existing document with no entries is an
+    empty list. A broken chain is 409. Writes nothing.
+
+    Raises:
+        HTTPException: 404 if the document does not exist, 409 if the
+            stored rows are not one chain.
+    """
+    if documents_repo.get_document(session, document_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{document_id}' was not found.",
+        )
+    try:
+        chain = load_chain(session, document_id)
+    except AuditChainError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return AuditChainResponse(
+        document_id=document_id,
+        count=len(chain),
+        entries=[
+            AuditEntryResponse(
+                id=entry.id,
+                index=index,
+                actor_id=entry.actor_id,
+                event_type=entry.event_type,
+                payload=entry.payload,
+                payload_hash=entry.payload_hash,
+                prev_hash=entry.prev_hash,
+                merkle_root_at_time=entry.merkle_root_at_time,
+                created_at=entry.created_at,
+            )
+            for index, entry in enumerate(chain)
+        ],
+    )
 
 
 @router.get(

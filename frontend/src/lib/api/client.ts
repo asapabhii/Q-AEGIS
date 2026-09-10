@@ -13,6 +13,7 @@
  */
 
 import type {
+  AuditChainResponse,
   ClassificationRequest,
   ClassificationResponse,
   DocumentInventoryResponse,
@@ -175,6 +176,23 @@ export async function getDocument(
       headers: roleHeaders(role),
     }
   );
+}
+
+/**
+ * GET /api/v1/audit/entries — one document's chain, genesis first.
+ *
+ * Writes nothing. No is_valid on this response; call verify separately.
+ * document_id is required.
+ */
+export async function listAuditEntries(
+  documentId: string,
+  role: UserRole
+): Promise<AuditChainResponse> {
+  const query = new URLSearchParams({ document_id: documentId });
+  return request<AuditChainResponse>(`/api/v1/audit/entries?${query.toString()}`, {
+    method: "GET",
+    headers: roleHeaders(role),
+  });
 }
 
 /**

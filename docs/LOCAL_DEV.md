@@ -256,6 +256,21 @@ curl http://127.0.0.1:8000/api/v1/documents/<the id from step 1> \
   -H "X-Q-AEGIS-Actor-Role: security_admin"
 ```
 
+### Read a document's audit chain
+
+`GET /api/v1/audit/entries?document_id=` returns the full chain, genesis
+first, in `prev_hash` order. Roles: `auditor`, `security_admin`,
+`security_analyst`. Unknown document is 404. The response has no `is_valid`;
+that is `GET /api/v1/audit/verify`. These calls write nothing.
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/audit/entries?document_id=<the id from step 1>" \
+  -H "X-Q-AEGIS-Actor-Role: auditor"
+
+curl "http://127.0.0.1:8000/api/v1/audit/verify?document_id=<the id from step 1>" \
+  -H "X-Q-AEGIS-Actor-Role: auditor"
+```
+
 ### Override a classification
 
 `POST /api/v1/manual-overrides` writes a human relabel. The server snapshots
