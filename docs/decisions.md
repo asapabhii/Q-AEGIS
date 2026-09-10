@@ -22,7 +22,7 @@ Decided by: Abhinav, implementing `PRD.md` FR-14's read surface.
 - Each row is document identity plus the latest effective label, contextual risk, trust consensus, policy decision, and crypto profile.
 - A stage that has not run is null. The API does not invent a label, score, or profile.
 - The effective label is the latest override `new_label`, else the latest classification. A later classification does not retract an override. Same rule as the policy gate.
-- Latest in each history table is timestamp desc, then `id`. Two rows in one transaction share `now()`.
+- Latest in each history table is timestamp desc, then `id`. Classification, risk, trust, policy, and crypto use transaction-scoped `now()`, so two rows written in one transaction share a timestamp and `id` is the tiebreak. Overrides do not: `overridden_at` is `clock_timestamp()`, so two overrides in one transaction have distinct times, and that clock order is what determines the effective label.
 - No query params. No pagination. The list is the whole set, newest `uploaded_at` first.
 - Roles: `security_admin` (FR-14), `security_analyst` (FR-12 pick a document), `auditor` (FR-15 pick a document). Data owners are refused: FR-16 is one document's summary, not the fleet.
 - Reads write nothing. No audit entry for a GET.

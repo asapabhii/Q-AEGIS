@@ -144,11 +144,16 @@ def _latest_by_document(
     model: type[T],
     *order_cols: Any,
 ) -> dict[UUID, T]:
-    """PostgreSQL ``DISTINCT ON (document_id)`` for one history table."""
-    document_id = model.document_id  # type: ignore[attr-defined]
+    """PostgreSQL ``DISTINCT ON (document_id)`` for one history table.
+
+    Keys are ``UUID`` even when the identity map still holds a string
+    ``document_id`` from a same-session insert. ``documents.id`` is a UUID;
+    a string key would miss and the list would look unclassified.
+    """
+    document_col = model.document_id  # type: ignore[attr-defined]
     return {
-        row.document_id: row
+        UUID(str(row.document_id)): row
         for row in session.scalars(
-            select(model).distinct(document_id).order_by(document_id, *order_cols)
+            select(model).distinct(document_col).order_by(document_col, *order_cols)
         ).all()
     }
