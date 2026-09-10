@@ -189,6 +189,12 @@ FR-12's 20-character minimum is enforced in the database as well as the API. It
 is an acceptance criterion, not a UI nicety, and a row that violates it should
 not be storable by any path.
 
+v1 persist: `POST /api/v1/manual-overrides` writes one row per call. The body
+is `document_id`, `new_label`, and `justification` only. `original_label` is
+the current effective sensitivity (latest override `new_label`, else latest
+`classification_metadata`). A later classification does not retract an
+override. The confirmation checkbox is UI-only and is not a column.
+
 ## `risk_scores`
 
 Append-only. One row per recomputation.
@@ -278,9 +284,11 @@ invented to satisfy a `NOT NULL` is explicitly not the design.
 the flag from drifting away from the two columns it summarises.
 
 v1 evaluate: `POST /api/v1/policy-decisions` takes a `trust_score_id`. The
-label, risk, and consensus come from `classification_metadata` (latest row),
-the linked `risk_scores` row, and that `trust_scores` row. The client cannot
-supply them. `ai_recommendation` is still caller-asserted until 3.4.
+label is the effective sensitivity (latest `manual_overrides.new_label`, else
+latest `classification_metadata`). Risk and consensus come from the linked
+`risk_scores` row and that `trust_scores` row. The client cannot supply them.
+`ai_recommendation` is still caller-asserted until 3.4. The decision response
+and audit payload record `override_id` (nullable) and `label_source`.
 
 ## `crypto_profiles`
 

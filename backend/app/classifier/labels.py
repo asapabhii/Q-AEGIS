@@ -27,6 +27,18 @@ class SensitivityLabel(str, Enum):
     RESTRICTED = "RESTRICTED"
 
 
+class SensitivitySource(str, Enum):
+    """Which persisted row supplied the effective sensitivity label.
+
+    The policy gate and the override write path share this vocabulary so an
+    auditor can tell a human relabel from an AI classification without
+    inferring it from timestamps.
+    """
+
+    CLASSIFICATION = "classification"
+    MANUAL_OVERRIDE = "manual_override"
+
+
 #: Labels from least to most sensitive. Index position is the sensitivity rank.
 SENSITIVITY_ORDER: tuple[SensitivityLabel, ...] = (
     SensitivityLabel.PUBLIC,

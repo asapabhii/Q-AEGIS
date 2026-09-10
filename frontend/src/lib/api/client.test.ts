@@ -11,6 +11,7 @@ import {
   checkHealth,
   registerDocument,
   classifyDocument,
+  overrideClassification,
   ApiError,
 } from "./client";
 
@@ -232,5 +233,45 @@ describe("classifyDocument", () => {
       "String should have at most 1000000 characters"
     );
     expect(apiErr.message).not.toContain("[object Object]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// overrideClassification
+// ---------------------------------------------------------------------------
+
+describe("overrideClassification", () => {
+  it("sends POST to /api/v1/manual-overrides without original_label", async () => {
+    const responseBody = {
+      id: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+      document_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      overridden_by: "11111111-2222-3333-4444-555555555555",
+      original_label: "RESTRICTED",
+      new_label: "INTERNAL",
+      justification: "Reviewed with the data owner and reclassified.",
+      overridden_at: "2026-01-01T00:00:00Z",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody, 201));
+
+    const result = await overrideClassification(
+      {
+        document_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        new_label: "INTERNAL",
+        justification: "Reviewed with the data owner and reclassified.",
+      },
+      "security_analyst"
+    );
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/manual-overrides");
+    expect(options.method).toBe("POST");
+    const headers = options.headers as Record<string, string>;
+    expect(headers["X-Q-AEGIS-Actor-Role"]).toBe("security_analyst");
+    expect(JSON.parse(options.body as string)).toEqual({
+      document_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      new_label: "INTERNAL",
+      justification: "Reviewed with the data owner and reclassified.",
+    });
   });
 });
