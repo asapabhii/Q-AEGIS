@@ -19,16 +19,79 @@ from app.db.repositories import overrides as override_repo
 from app.db.repositories import policy as policy_repo
 from app.db.repositories import risk as risk_repo
 from app.db.repositories import trust as trust_repo
+from app.policy.dry_run import replay_candidate
 from app.policy.engine import PolicyEngineError, evaluate
 from app.policy.schemas import (
     PolicyDecisionRequest,
     PolicyDecisionResponse,
     PolicyRuleCreateRequest,
     PolicyRuleResponse,
+    PolicyRuleTestReplay,
+    PolicyRuleTestResponse,
     facts_from_persisted,
 )
 
 router = APIRouter(tags=["policy"])
+
+
+@router.post(
+    "/policy-rules/test",
+    response_model=PolicyRuleTestResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Dry-run a candidate rule against recent decisions",
+)
+def test_policy_rule(
+    request: PolicyRuleCreateRequest,
+    session: DbSession,
+    caller: PolicyRuleCaller,
+) -> PolicyRuleTestResponse:
+    """Evaluate the candidate against the last ``TEST_RULE_WINDOW`` decisions.
+
+    The rule is not stored. No ``policy_decisions`` row is written. No audit
+    entry is written. Live rules are not consulted. Facts come from each
+    decision's audit payload, not from current classification or trust.
+
+    Raises:
+        HTTPException: 500 if the WASM evaluator fails on the candidate itself.
+    """
+    resolve_seeded_actor(session, caller)
+    snapshots = policy_repo.list_recent_decision_audits(
+        session, limit=policy_repo.TEST_RULE_WINDOW
+    )
+    try:
+        result = replay_candidate(
+            condition_expr=request.condition_expr,
+            action=request.action,
+            snapshots=snapshots,
+        )
+    except PolicyEngineError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    return PolicyRuleTestResponse(
+        rule_name=request.rule_name,
+        action=request.action,
+        priority=request.priority,
+        condition_expr=request.condition_expr,
+        window=policy_repo.TEST_RULE_WINDOW,
+        considered=result.considered,
+        skipped=result.skipped,
+        replays=[
+            PolicyRuleTestReplay(
+                decision_id=item.decision_id,
+                document_id=item.document_id,
+                decided_at=item.decided_at,
+                sensitivity_label=item.sensitivity_label,
+                recorded_final_decision=item.recorded_final_decision,
+                would_match=item.would_match,
+                hypothetical_final_decision=item.hypothetical_final_decision,
+                would_change_outcome=item.would_change_outcome,
+            )
+            for item in result.replays
+        ],
+    )
 
 
 @router.post(

@@ -136,6 +136,51 @@ class PolicyDecisionResponse(BaseModel):
         )
 
 
+class PolicyRuleTestReplay(BaseModel):
+    """One historical decision replayed against the candidate. Not persisted."""
+
+    decision_id: UUID
+    document_id: UUID
+    decided_at: datetime
+    sensitivity_label: SensitivityLabel
+    recorded_final_decision: PolicyAction
+    would_match: bool
+    hypothetical_final_decision: PolicyAction
+    would_change_outcome: bool
+
+
+class PolicyRuleTestResponse(BaseModel):
+    """Dry-run result. The candidate rule is not stored."""
+
+    rule_name: str
+    action: PolicyAction
+    priority: int
+    condition_expr: dict[str, Any]
+    window: int
+    considered: int
+    skipped: int
+    replays: list[PolicyRuleTestReplay]
+
+
+def facts_from_audit_payload(payload: dict[str, Any]) -> DocumentFacts | None:
+    """Rebuild evaluation facts from a ``policy_decision_recorded`` payload.
+
+    Returns ``None`` when the payload is not a v1 snapshot rather than
+    guessing. A dry-run must not invent a label the audit log did not record.
+    An unrecognized ``sensitivity_label`` is the same failure: skip it so the
+    response model is not asked to serialize a string outside the enum.
+    """
+    try:
+        return DocumentFacts(
+            sensitivity_label=SensitivityLabel(str(payload["sensitivity_label"])).value,
+            risk_value=float(payload["risk_value"]),
+            trust_score=float(payload["trust_score"]),
+            ai_recommendation=PolicyAction(str(payload["ai_recommendation"])),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def facts_from_persisted(
     *,
     sensitivity_label: SensitivityLabel,
