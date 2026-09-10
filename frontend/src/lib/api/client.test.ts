@@ -12,6 +12,7 @@ import {
   registerDocument,
   listDocuments,
   getDocument,
+  listAuditEntries,
   classifyDocument,
   overrideClassification,
   testPolicyRule,
@@ -335,6 +336,27 @@ describe("getDocument", () => {
     expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
       "auditor"
     );
+  });
+});
+
+describe("listAuditEntries", () => {
+  it("sends GET to /api/v1/audit/entries with document_id and the role header", async () => {
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const responseBody = { document_id: id, count: 0, entries: [] };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody));
+
+    const result = await listAuditEntries(id, "auditor");
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `http://127.0.0.1:8000/api/v1/audit/entries?document_id=${id}`
+    );
+    expect(options.method).toBe("GET");
+    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+      "auditor"
+    );
+    expect(options.body).toBeUndefined();
   });
 });
 

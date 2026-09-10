@@ -343,6 +343,8 @@ def test_openapi_schema_is_served(client: TestClient) -> None:
     assert TRUST_URL in paths
     assert CRYPTO_URL in paths
     assert f"{DOCUMENTS_URL}/{{document_id}}" in paths
+    assert f"{API_V1_PREFIX}/audit/entries" in paths
+    assert f"{API_V1_PREFIX}/audit/verify" in paths
 
 
 # --------------------------------------------------------------------------

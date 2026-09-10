@@ -31,6 +31,7 @@ from app.db.repositories import audit as audit_repo
 EVENT = AuditEventType.CLASSIFICATION_COMPLETED.value
 
 VERIFY_URL = "/api/v1/audit/verify"
+ENTRIES_URL = "/api/v1/audit/entries"
 ROLE_HEADER = "X-Q-AEGIS-Actor-Role"
 
 
@@ -315,5 +316,158 @@ def test_verify_endpoint_forked_chain_returns_409(
             headers={ROLE_HEADER: UserRole.AUDITOR.value},
         )
 
+    assert response.status_code == 409
+    assert "forked" in response.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# GET /audit/entries, PRD.md FR-15
+# ---------------------------------------------------------------------------
+
+
+def test_entries_endpoint_rejects_a_caller_with_no_role(
+    client: TestClient, registered_document: Document
+) -> None:
+    response = client.get(
+        ENTRIES_URL, params={"document_id": str(registered_document.id)}
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "role",
+    [UserRole.AUDITOR, UserRole.SECURITY_ADMIN, UserRole.SECURITY_ANALYST],
+)
+def test_entries_endpoint_admits_permitted_roles(
+    client: TestClient, registered_document: Document, role: UserRole
+) -> None:
+    response = client.get(
+        ENTRIES_URL,
+        params={"document_id": str(registered_document.id)},
+        headers={ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["document_id"] == str(registered_document.id)
+    assert payload["count"] == 0
+    assert payload["entries"] == []
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.DATA_OWNER,
+        UserRole.COMPLIANCE_OFFICER,
+        UserRole.CISO,
+        UserRole.ENGINEER,
+    ],
+)
+def test_entries_endpoint_refuses_excluded_roles(
+    client: TestClient, registered_document: Document, role: UserRole
+) -> None:
+    response = client.get(
+        ENTRIES_URL,
+        params={"document_id": str(registered_document.id)},
+        headers={ROLE_HEADER: role.value},
+    )
+    assert response.status_code == 403
+
+
+def test_entries_endpoint_requires_a_document_id(client: TestClient) -> None:
+    response = client.get(ENTRIES_URL, headers={ROLE_HEADER: UserRole.AUDITOR.value})
+    assert response.status_code == 422
+
+
+def test_entries_endpoint_unknown_document_is_404(client: TestClient) -> None:
+    response = client.get(
+        ENTRIES_URL,
+        params={"document_id": str(uuid4())},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 404
+
+
+def test_entries_endpoint_returns_the_chain_in_link_order(
+    client: TestClient, registered_document: Document, db_session: Session
+) -> None:
+    first = append(db_session, registered_document.id, "one")
+    second = append(db_session, registered_document.id, "two")
+    third = append(db_session, registered_document.id, "three")
+
+    response = client.get(
+        ENTRIES_URL,
+        params={"document_id": str(registered_document.id)},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["count"] == 3
+    notes = [entry["payload"]["note"] for entry in payload["entries"]]
+    assert notes == ["one", "two", "three"]
+    assert [entry["index"] for entry in payload["entries"]] == [0, 1, 2]
+    assert payload["entries"][0]["id"] == str(first.id)
+    assert payload["entries"][0]["prev_hash"] is None
+    assert payload["entries"][1]["prev_hash"] == first.payload_hash
+    assert payload["entries"][2]["prev_hash"] == second.payload_hash
+    assert payload["entries"][2]["payload_hash"] == third.payload_hash
+    assert "frontier" not in payload["entries"][0]
+    assert "is_valid" not in payload
+
+
+def test_entries_endpoint_includes_the_actor(
+    client: TestClient,
+    registered_document: Document,
+    db_session: Session,
+    seeded_users: dict,
+) -> None:
+    actor = seeded_users[UserRole.SECURITY_ANALYST]
+    audit_repo.append_entry(
+        db_session,
+        event_type=EVENT,
+        document_id=registered_document.id,
+        actor_id=actor.id,
+        payload={"note": "acted"},
+    )
+    response = client.get(
+        ENTRIES_URL,
+        params={"document_id": str(registered_document.id)},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 200, response.text
+    entry = response.json()["entries"][0]
+    assert entry["actor_id"] == str(actor.id)
+    assert entry["event_type"] == EVENT
+
+
+def test_reading_entries_writes_nothing(
+    client: TestClient, registered_document: Document, db_session: Session
+) -> None:
+    append(db_session, registered_document.id, "only")
+    before = len(audit_repo.load_chain(db_session, registered_document.id))
+    response = client.get(
+        ENTRIES_URL,
+        params={"document_id": str(registered_document.id)},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 200, response.text
+    assert len(audit_repo.load_chain(db_session, registered_document.id)) == before
+
+
+def test_entries_endpoint_forked_chain_returns_409(
+    client: TestClient, registered_document: Document
+) -> None:
+    from unittest.mock import patch
+
+    from app.db.repositories.audit import AuditChainError
+
+    with patch(
+        "app.api.routes.audit.load_chain",
+        side_effect=AuditChainError("Simulated forked chain for test"),
+    ):
+        response = client.get(
+            ENTRIES_URL,
+            params={"document_id": str(registered_document.id)},
+            headers={ROLE_HEADER: UserRole.AUDITOR.value},
+        )
     assert response.status_code == 409
     assert "forked" in response.json()["detail"].lower()
