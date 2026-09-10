@@ -10,7 +10,7 @@ is that the decision and its audit entry are written together, or not at all.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import ACTOR_ROLE_HEADER
 from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
-from app.db.enums import AuditEventType, PolicyAction, SensitivityLabel, UserRole
+from app.db.enums import (
+    AuditEventType,
+    CryptoProfileType,
+    PolicyAction,
+    SensitivityLabel,
+    UserRole,
+)
 from app.db.models import (
     AgentOutput,
     AuditLog,
@@ -50,6 +56,7 @@ OVERRIDE_URL = f"{API_V1_PREFIX}/manual-overrides"
 
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
 ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
+ADMIN_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ADMIN.value}
 COMPLIANCE_HEADERS = {ACTOR_ROLE_HEADER: UserRole.COMPLIANCE_OFFICER.value}
 
 #: Content the keyword stub classifies confidently, so ``is_defaulted`` is False
@@ -110,6 +117,12 @@ def rows(session: Session, model, **filters) -> list:
     for column, value in filters.items():
         query = query.filter(getattr(model, column) == value)
     return query.all()
+
+
+def inventory(client: TestClient, document_id: str | None = None):
+    """Read the FR-14 inventory. List when ``document_id`` is omitted."""
+    url = DOCUMENTS_URL if document_id is None else f"{DOCUMENTS_URL}/{document_id}"
+    return client.get(url, headers=ADMIN_HEADERS)
 
 
 # --------------------------------------------------------------------------
@@ -1549,3 +1562,287 @@ def test_the_classify_to_crypto_chain_writes_every_decision_and_its_audit(
     assert rows(db_session, TrustScore, document_id=document_id)
     assert rows(db_session, PolicyDecision, document_id=document_id)
     assert rows(db_session, CryptoProfile, document_id=document_id)
+
+
+# --------------------------------------------------------------------------
+# GET /documents, PRD.md FR-14
+# --------------------------------------------------------------------------
+
+
+def test_a_registered_document_has_null_stage_fields(
+    client: TestClient,
+) -> None:
+    document_id = register(client)["id"]
+    response = inventory(client, document_id)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["id"] == document_id
+    assert payload["current_status"] == "registered"
+    assert payload["sensitivity_label"] is None
+    assert payload["label_source"] is None
+    assert payload["override_id"] is None
+    assert payload["classification_id"] is None
+    assert payload["risk_score_id"] is None
+    assert payload["risk_value"] is None
+    assert payload["trust_score_id"] is None
+    assert payload["trust_score"] is None
+    assert payload["policy_decision_id"] is None
+    assert payload["final_decision"] is None
+    assert payload["crypto_profile_id"] is None
+    assert payload["profile_type"] is None
+
+
+def test_inventory_list_and_item_agree(client: TestClient) -> None:
+    first = register(client, filename="one.pdf")["id"]
+    second = register(client, filename="two.pdf")["id"]
+    listed = inventory(client)
+    assert listed.status_code == 200, listed.text
+    payload = listed.json()
+    assert payload["count"] == 2
+    ids = {item["id"] for item in payload["documents"]}
+    assert ids == {first, second}
+    item = inventory(client, first)
+    assert item.status_code == 200, item.text
+    listed_first = next(row for row in payload["documents"] if row["id"] == first)
+    assert item.json() == listed_first
+
+
+def test_inventory_reads_the_effective_label_not_a_later_classification(
+    client: TestClient,
+) -> None:
+    document_id = register(client)["id"]
+    assert classify(client, document_id).status_code == 200
+    overridden = override_label(client, document_id)
+    assert overridden.status_code == 201, overridden.text
+    assert classify(client, document_id).status_code == 200
+
+    payload = inventory(client, document_id).json()
+    assert payload["sensitivity_label"] == "INTERNAL"
+    assert payload["label_source"] == "manual_override"
+    assert payload["override_id"] == overridden.json()["id"]
+    assert payload["classification_id"] is not None
+
+
+def test_inventory_list_returns_the_newest_row_of_each_stage(
+    client: TestClient, db_session: Session
+) -> None:
+    """The fleet query is a separate DISTINCT ON path from GET-by-id.
+
+    Recency on the item endpoint does not prove the list. Two rows per
+    stage, newer timestamp wins, read only through ``GET /documents``.
+    """
+    document_id = UUID(register(client)["id"])
+    actor = owner_user_id(db_session)
+    older = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    newer = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+
+    stale_class = ClassificationMetadata(
+        document_id=document_id,
+        sensitivity_label=SensitivityLabel.RESTRICTED,
+        confidence_score=Decimal("0.9000"),
+        model_version="test-inventory-0.1.0",
+        is_defaulted=False,
+        classified_at=older,
+    )
+    current_class = ClassificationMetadata(
+        document_id=document_id,
+        sensitivity_label=SensitivityLabel.CONFIDENTIAL,
+        confidence_score=Decimal("0.9000"),
+        model_version="test-inventory-0.1.0",
+        is_defaulted=False,
+        classified_at=newer,
+    )
+    stale_override = ManualOverride(
+        document_id=document_id,
+        overridden_by=actor,
+        original_label=SensitivityLabel.RESTRICTED,
+        new_label=SensitivityLabel.INTERNAL,
+        justification=OVERRIDE_JUSTIFICATION,
+        overridden_at=older,
+    )
+    current_override = ManualOverride(
+        document_id=document_id,
+        overridden_by=actor,
+        original_label=SensitivityLabel.INTERNAL,
+        new_label=SensitivityLabel.PUBLIC,
+        justification=OVERRIDE_JUSTIFICATION,
+        overridden_at=newer,
+    )
+    context = {
+        "actor_user_id": actor,
+        "device_id": "laptop-12",
+        "device_is_new": False,
+        "accessed_at": "2026-09-09T12:00:00+00:00",
+        "after_hours": False,
+    }
+    stale_risk = RiskScore(
+        document_id=document_id,
+        risk_value=Decimal("0.2000"),
+        model_version=RISK_MODEL_VERSION,
+        context_snapshot=context,
+        computed_at=older,
+    )
+    current_risk = RiskScore(
+        document_id=document_id,
+        risk_value=Decimal("0.4500"),
+        model_version=RISK_MODEL_VERSION,
+        context_snapshot=context,
+        computed_at=newer,
+    )
+    db_session.add_all(
+        [
+            stale_class,
+            current_class,
+            stale_override,
+            current_override,
+            stale_risk,
+            current_risk,
+        ]
+    )
+    db_session.flush()
+    stale_trust = TrustScore(
+        document_id=document_id,
+        risk_score_id=stale_risk.id,
+        consensus_value=Decimal("0.500"),
+        consensus_version=CONSENSUS_VERSION,
+        computed_at=older,
+    )
+    current_trust = TrustScore(
+        document_id=document_id,
+        risk_score_id=current_risk.id,
+        consensus_value=Decimal("0.200"),
+        consensus_version=CONSENSUS_VERSION,
+        computed_at=newer,
+    )
+    stale_decision = PolicyDecision(
+        document_id=document_id,
+        rule_id=None,
+        ai_recommendation=PolicyAction.ALLOW,
+        final_decision=PolicyAction.ALLOW,
+        overridden=False,
+        decided_at=older,
+    )
+    current_decision = PolicyDecision(
+        document_id=document_id,
+        rule_id=None,
+        ai_recommendation=PolicyAction.ALLOW,
+        final_decision=PolicyAction.DENY,
+        overridden=True,
+        decided_at=newer,
+    )
+    db_session.add_all([stale_trust, current_trust, stale_decision, current_decision])
+    db_session.flush()
+    stale_profile = CryptoProfile(
+        document_id=document_id,
+        trust_score_id=stale_trust.id,
+        profile_type=CryptoProfileType.HYBRID,
+        selected_at=older,
+    )
+    current_profile = CryptoProfile(
+        document_id=document_id,
+        trust_score_id=current_trust.id,
+        profile_type=CryptoProfileType.POST_QUANTUM,
+        selected_at=newer,
+    )
+    db_session.add_all([stale_profile, current_profile])
+    db_session.flush()
+
+    listed = inventory(client)
+    assert listed.status_code == 200, listed.text
+    row = next(
+        item for item in listed.json()["documents"] if item["id"] == str(document_id)
+    )
+    assert row["classification_id"] == str(current_class.id)
+    assert row["classification_id"] != str(stale_class.id)
+    assert row["override_id"] == str(current_override.id)
+    assert row["override_id"] != str(stale_override.id)
+    assert row["sensitivity_label"] == "PUBLIC"
+    assert row["label_source"] == "manual_override"
+    assert row["risk_score_id"] == str(current_risk.id)
+    assert row["risk_score_id"] != str(stale_risk.id)
+    assert Decimal(str(row["risk_value"])) == Decimal("0.4500")
+    assert row["trust_score_id"] == str(current_trust.id)
+    assert row["trust_score_id"] != str(stale_trust.id)
+    assert Decimal(str(row["trust_score"])) == Decimal("0.200")
+    assert row["policy_decision_id"] == str(current_decision.id)
+    assert row["policy_decision_id"] != str(stale_decision.id)
+    assert row["final_decision"] == "deny"
+    assert row["crypto_profile_id"] == str(current_profile.id)
+    assert row["crypto_profile_id"] != str(stale_profile.id)
+    assert row["profile_type"] == "post_quantum"
+    assert inventory(client, document_id).json() == row
+
+
+def test_inventory_reads_the_latest_risk_score(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = UUID(register(client)["id"])
+    actor = owner_user_id(db_session)
+    older = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    newer = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+    context = {
+        "actor_user_id": actor,
+        "device_id": "laptop-12",
+        "device_is_new": False,
+        "accessed_at": "2026-09-09T12:00:00+00:00",
+        "after_hours": False,
+    }
+    stale = RiskScore(
+        document_id=document_id,
+        risk_value=Decimal("0.2000"),
+        model_version=RISK_MODEL_VERSION,
+        context_snapshot=context,
+        computed_at=older,
+    )
+    current = RiskScore(
+        document_id=document_id,
+        risk_value=Decimal("0.4500"),
+        model_version=RISK_MODEL_VERSION,
+        context_snapshot=context,
+        computed_at=newer,
+    )
+    db_session.add_all([stale, current])
+    db_session.flush()
+    payload = inventory(client, document_id).json()
+    assert payload["risk_score_id"] == str(current.id)
+    assert Decimal(str(payload["risk_value"])) == Decimal("0.4500")
+    assert payload["risk_score_id"] != str(stale.id)
+
+
+def test_inventory_reads_the_full_protection_snapshot(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, trust_id = gated_trust(client, db_session, score="0.50")
+    profile = select_crypto(client, trust_id)
+    assert profile.status_code == 201, profile.text
+    payload = inventory(client, document_id).json()
+    assert payload["sensitivity_label"] == "RESTRICTED"
+    assert payload["label_source"] == "classification"
+    assert payload["trust_score_id"] == trust_id
+    assert Decimal(str(payload["trust_score"])) == Decimal("0.500")
+    assert payload["final_decision"] == "allow"
+    assert payload["profile_type"] == "hybrid"
+    assert payload["crypto_profile_id"] == profile.json()["id"]
+    assert payload["policy_decision_id"] is not None
+    assert payload["risk_score_id"] is not None
+    listed = inventory(client).json()
+    row = next(item for item in listed["documents"] if item["id"] == document_id)
+    assert row == payload
+
+
+def test_reading_the_inventory_writes_nothing(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, _trust_id = assess(client, db_session)
+    rules_before = len(rows(db_session, PolicyRule))
+    decisions_before = len(rows(db_session, PolicyDecision))
+    audit_before = len(rows(db_session, AuditLog))
+    documents_before = len(rows(db_session, Document))
+
+    assert inventory(client).status_code == 200
+    assert inventory(client, document_id).status_code == 200
+
+    assert len(rows(db_session, PolicyRule)) == rules_before
+    assert len(rows(db_session, PolicyDecision)) == decisions_before
+    assert len(rows(db_session, AuditLog)) == audit_before
+    assert len(rows(db_session, Document)) == documents_before

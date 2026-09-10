@@ -151,6 +151,12 @@ which is why none of them carries a "current" flag.
 to the current lifecycle stage, not a decision record; every decision that moves
 it is preserved in its own history table and in `audit_log`.
 
+v1 inventory: `GET /api/v1/documents` and `GET /api/v1/documents/{id}` return
+this row plus the latest effective label (override, else classification),
+`risk_scores`, `trust_scores`, `policy_decisions`, and `crypto_profiles`.
+Those history tables are not denormalized onto `documents`. Stage fields are
+null until a row exists. The endpoints do not write.
+
 ## `classification_metadata`
 
 Append-only. One row per classification run.

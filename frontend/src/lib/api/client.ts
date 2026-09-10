@@ -15,8 +15,10 @@
 import type {
   ClassificationRequest,
   ClassificationResponse,
+  DocumentInventoryResponse,
   DocumentRegistrationRequest,
   DocumentResponse,
+  DocumentSnapshot,
   HealthResponse,
   ManualOverrideRequest,
   ManualOverrideResponse,
@@ -140,6 +142,39 @@ export async function registerDocument(
     headers: roleHeaders(role),
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * GET /api/v1/documents — current risk and protection status for every document.
+ *
+ * Writes nothing. Stage fields are null until that step has run. data_owner
+ * is refused; this is the fleet view, not FR-16.
+ */
+export async function listDocuments(
+  role: UserRole
+): Promise<DocumentInventoryResponse> {
+  return request<DocumentInventoryResponse>("/api/v1/documents", {
+    method: "GET",
+    headers: roleHeaders(role),
+  });
+}
+
+/**
+ * GET /api/v1/documents/{id} — one document's current snapshot.
+ *
+ * Same field contract as one row of listDocuments. Unknown id is 404.
+ */
+export async function getDocument(
+  documentId: string,
+  role: UserRole
+): Promise<DocumentSnapshot> {
+  return request<DocumentSnapshot>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}`,
+    {
+      method: "GET",
+      headers: roleHeaders(role),
+    }
+  );
 }
 
 /**
