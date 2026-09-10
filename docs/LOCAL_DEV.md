@@ -305,8 +305,10 @@ after the policy gate).
 `POST /api/v1/policy-rules` authors a rule. Role: `compliance_officer` only.
 `POST /api/v1/policy-decisions` evaluates active rules in priority order. Roles:
 `compliance_officer` and `security_admin`. The server computes `final_decision`;
-the client cannot supply it. `trust_score` and `ai_recommendation` are
-still caller-asserted on this endpoint; it does not read `trust_scores`.
+the client cannot supply it. Body is a `trust_score_id` and an
+`ai_recommendation`. The label, risk value, and trust score are read from
+stored rows. Classify, score risk, and compute trust first. An unknown
+`trust_score_id` is a 404. No classification for that document is 422.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/policy-rules \
@@ -327,17 +329,14 @@ curl -X POST http://127.0.0.1:8000/api/v1/policy-decisions \
   -H "Content-Type: application/json" \
   -H "X-Q-AEGIS-Actor-Role: compliance_officer" \
   -d '{
-    "document_id": "<the id from step 1>",
-    "ai_recommendation": "allow",
-    "sensitivity_label": "RESTRICTED",
-    "risk_value": 0.20,
-    "trust_score": 0.30
+    "trust_score_id": "<the id from the trust-score call>",
+    "ai_recommendation": "allow"
   }'
 ```
 
 Each call writes the decision (or the rule) and one `audit_log` entry in the
-same transaction. An unknown `document_id` is a 404. Evaluation does not change
-`documents.current_status`.
+same transaction. An unknown `trust_score_id` is a 404. Evaluation does not
+change `documents.current_status`.
 
 The API loads the committed `backend/app/policy/rego/policy.wasm`. You do not
 need the OPA CLI to run it. Rebuild the WASM only after editing `policy.rego`,
