@@ -110,11 +110,21 @@ def decision_audit_payload(
     result: PolicyEvalResult,
     decision_id: UUID,
     facts: dict[str, str | float],
+    trust_score_id: UUID,
+    risk_score_id: UUID,
+    classification_id: UUID,
 ) -> dict[str, Any]:
-    """Audit payload for one gate evaluation. JSON primitives only."""
+    """Audit payload for one gate evaluation. JSON primitives only.
+
+    Source row ids stay in the payload so the floats on the fact snapshot
+    remain attributable after a later reclassify or rescore.
+    """
     payload: dict[str, Any] = {
         "policy_decision_id": str(decision_id),
         "document_id": str(document_id),
+        "trust_score_id": str(trust_score_id),
+        "risk_score_id": str(risk_score_id),
+        "classification_id": str(classification_id),
         "rule_id": str(result.rule_id) if result.rule_id is not None else None,
         "rule_name": result.rule_name,
         "ai_recommendation": result.ai_recommendation.value,
