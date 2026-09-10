@@ -8,7 +8,7 @@ consensus, and crypto-profile persist. What these tests assert is that the
 decision and its audit entry are written together, or not at all.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import ACTOR_ROLE_HEADER
 from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
-from app.db.enums import AuditEventType, PolicyAction, UserRole
+from app.db.enums import AuditEventType, PolicyAction, SensitivityLabel, UserRole
 from app.db.models import (
     AgentOutput,
     AuditLog,
@@ -597,7 +597,7 @@ def test_authoring_a_rule_persists_it_and_an_audit_entry(
 def test_a_matching_rule_overrides_the_ai_recommendation(
     client: TestClient, db_session: Session
 ) -> None:
-    document_id = register(client)["id"]
+    document_id, trust_id = assess(client, db_session)
     client.post(
         POLICY_RULES_URL,
         json={
@@ -612,23 +612,17 @@ def test_a_matching_rule_overrides_the_ai_recommendation(
         },
         headers=COMPLIANCE_HEADERS,
     )
-    response = client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "RESTRICTED",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(client, trust_id)
     assert response.status_code == 201, response.text
     payload = response.json()
     assert payload["overridden"] is True
     assert payload["final_decision"] == "deny"
     assert payload["rule_id"] is not None
     assert payload["policy_version"] == POLICY_VERSION
+    assert payload["sensitivity_label"] == "RESTRICTED"
+    assert payload["trust_score_id"] == trust_id
+    assert Decimal(str(payload["trust_score"])) == Decimal("0.500")
+    assert Decimal(str(payload["risk_value"])) == Decimal("0.2000")
 
     decisions = rows(db_session, PolicyDecision, document_id=document_id)
     assert len(decisions) == 1
@@ -640,23 +634,29 @@ def test_a_matching_rule_overrides_the_ai_recommendation(
     ]
     assert len(events) == 1
     assert events[0].payload["overridden"] is True
+    assert events[0].payload["trust_score_id"] == trust_id
+    assert events[0].payload["classification_id"] == payload["classification_id"]
 
 
 def test_no_matching_rule_leaves_the_ai_recommendation_standing(
     client: TestClient, db_session: Session
 ) -> None:
-    document_id = register(client)["id"]
-    response = client.post(
-        POLICY_DECISIONS_URL,
+    _document_id, trust_id = assess(client, db_session)
+    client.post(
+        POLICY_RULES_URL,
         json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "PUBLIC",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
+            "rule_name": "Deny public only",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "PUBLIC",
+            },
+            "action": "deny",
+            "priority": 1,
         },
         headers=COMPLIANCE_HEADERS,
     )
+    response = evaluate_policy_gate(client, trust_id)
     assert response.status_code == 201, response.text
     payload = response.json()
     assert payload["rule_id"] is None
@@ -669,7 +669,7 @@ def test_inactive_rules_are_not_evaluated(
 ) -> None:
     from tests import factories
 
-    document_id = register(client)["id"]
+    document_id, trust_id = assess(client, db_session)
     factories.make_policy_rule(
         db_session,
         seeded_users[UserRole.COMPLIANCE_OFFICER].id,
@@ -679,19 +679,11 @@ def test_inactive_rules_are_not_evaluated(
         action=PolicyAction.DENY,
     )
     db_session.flush()
-    response = client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "RESTRICTED",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 201, response.text
     assert response.json()["rule_id"] is None
     assert response.json()["overridden"] is False
+    assert document_id == response.json()["document_id"]
 
 
 def test_a_failed_audit_write_rolls_back_the_policy_decision(
@@ -699,23 +691,13 @@ def test_a_failed_audit_write_rolls_back_the_policy_decision(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    document_id = register(raising_client)["id"]
+    document_id, trust_id = assess(raising_client, db_session)
 
     def explode(*args: object, **kwargs: object) -> None:
         raise RuntimeError("simulated audit log failure")
 
     monkeypatch.setattr(audit_repo, "append_entry", explode)
-    response = raising_client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "PUBLIC",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(raising_client, trust_id)
     assert response.status_code == 500
     db_session.expire_all()
     assert rows(db_session, PolicyDecision, document_id=document_id) == []
@@ -724,7 +706,7 @@ def test_a_failed_audit_write_rolls_back_the_policy_decision(
 def test_the_lower_priority_active_rule_wins(
     client: TestClient, db_session: Session
 ) -> None:
-    document_id = register(client)["id"]
+    _document_id, trust_id = assess(client, db_session)
     later = client.post(
         POLICY_RULES_URL,
         json={
@@ -756,17 +738,7 @@ def test_the_lower_priority_active_rule_wins(
     assert later.status_code == 201, later.text
     assert earlier.status_code == 201, earlier.text
 
-    response = client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "RESTRICTED",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(client, trust_id)
     assert response.status_code == 201, response.text
     assert response.json()["rule_id"] == earlier.json()["id"]
     assert response.json()["final_decision"] == "require_mfa"
@@ -775,41 +747,21 @@ def test_the_lower_priority_active_rule_wins(
 def test_policy_evaluation_does_not_change_document_status(
     client: TestClient, db_session: Session
 ) -> None:
-    document_id = register(client)["id"]
+    document_id, trust_id = assess(client, db_session)
     before = db_session.get(Document, document_id).current_status
-    response = client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "PUBLIC",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(client, trust_id)
     assert response.status_code == 201, response.text
     db_session.expire_all()
     assert db_session.get(Document, document_id).current_status == before
 
 
-def test_an_unknown_document_leaves_no_policy_rows(
+def test_an_unknown_trust_score_leaves_no_policy_rows(
     client: TestClient, db_session: Session
 ) -> None:
     unknown = str(uuid4())
-    response = client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": unknown,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "PUBLIC",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(client, unknown)
     assert response.status_code == 404
-    assert rows(db_session, PolicyDecision, document_id=unknown) == []
+    assert rows(db_session, PolicyDecision) == []
     assert rows(db_session, AuditLog, document_id=unknown) == []
 
 
@@ -819,7 +771,7 @@ def test_a_corrupt_stored_condition_fails_closed(
     """A stored tree this version cannot interpret is 422, not a skipped deny."""
     from tests import factories
 
-    document_id = register(client)["id"]
+    document_id, trust_id = assess(client, db_session)
     factories.make_policy_rule(
         db_session,
         seeded_users[UserRole.COMPLIANCE_OFFICER].id,
@@ -828,17 +780,7 @@ def test_a_corrupt_stored_condition_fails_closed(
         condition_expr={"field": "geo_country", "op": "eq", "value": "IN"},
     )
     db_session.flush()
-    response = client.post(
-        POLICY_DECISIONS_URL,
-        json={
-            "document_id": document_id,
-            "ai_recommendation": "allow",
-            "sensitivity_label": "RESTRICTED",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
-        },
-        headers=COMPLIANCE_HEADERS,
-    )
+    response = evaluate_policy_gate(client, trust_id)
     assert response.status_code == 422
     assert rows(db_session, PolicyDecision, document_id=document_id) == []
 
@@ -848,7 +790,7 @@ def test_an_overdeep_stored_condition_fails_closed(
 ) -> None:
     from tests import factories
 
-    document_id = register(client)["id"]
+    document_id, trust_id = assess(client, db_session)
     tree: dict = {"field": "trust_score", "op": "lt", "value": 0.5}
     for _ in range(9):
         tree = {"not": tree}
@@ -860,17 +802,121 @@ def test_an_overdeep_stored_condition_fails_closed(
         condition_expr=tree,
     )
     db_session.flush()
-    response = client.post(
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 422
+    assert rows(db_session, PolicyDecision, document_id=document_id) == []
+
+
+def test_the_latest_classification_is_the_label_the_gate_sees(
+    client: TestClient, db_session: Session
+) -> None:
+    """A later row supersedes the first. The client cannot pick which label.
+
+    ``classified_at`` defaults to the transaction's ``now()``, so two inserts
+    in one test share a timestamp. UPDATE is refused; the newer label is
+    inserted with an explicit later time.
+    """
+    document_id, trust_id = assess(client, db_session)
+    db_session.add(
+        ClassificationMetadata(
+            document_id=document_id,
+            sensitivity_label=SensitivityLabel.INTERNAL,
+            confidence_score=Decimal("0.9000"),
+            model_version="test-later-0.1.0",
+            is_defaulted=False,
+            classified_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    db_session.flush()
+    client.post(
+        POLICY_RULES_URL,
+        json={
+            "rule_name": "Deny restricted after reclassify",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "RESTRICTED",
+            },
+            "action": "deny",
+            "priority": 2,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 201, response.text
+    assert response.json()["sensitivity_label"] == "INTERNAL"
+    assert response.json()["final_decision"] == "allow"
+    assert response.json()["overridden"] is False
+
+
+def test_the_stored_trust_score_is_what_the_gate_compares(
+    client: TestClient, db_session: Session
+) -> None:
+    """Equal-weight 0.500 matches lt 0.6. A caller cannot send 0.9 instead."""
+    _document_id, trust_id = assess(client, db_session, score="0.50")
+    client.post(
+        POLICY_RULES_URL,
+        json={
+            "rule_name": "MFA below 0.6 trust",
+            "condition_expr": {"field": "trust_score", "op": "lt", "value": 0.6},
+            "action": "require_mfa",
+            "priority": 4,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    refused = client.post(
         POLICY_DECISIONS_URL,
         json={
-            "document_id": document_id,
+            "trust_score_id": trust_id,
             "ai_recommendation": "allow",
-            "sensitivity_label": "RESTRICTED",
-            "risk_value": 0.1,
             "trust_score": 0.9,
         },
         headers=COMPLIANCE_HEADERS,
     )
+    assert refused.status_code == 422
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 201, response.text
+    assert response.json()["final_decision"] == "require_mfa"
+
+
+def test_a_missing_linked_risk_score_fails_closed(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _document_id, trust_id = assess(client, db_session)
+    monkeypatch.setattr(
+        "app.api.routes.policy.risk_repo.get_risk_score", lambda *args, **kwargs: None
+    )
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 422
+    assert "POST /api/v1/risk-scores" in response.json()["detail"]
+
+
+def test_a_trust_row_pointing_at_another_documents_risk_fails_closed(
+    client: TestClient, db_session: Session
+) -> None:
+    from tests import factories
+
+    document_id, _trust_id = assess(client, db_session)
+    other_id, _other_trust = assess(client, db_session)
+    document = db_session.get(Document, document_id)
+    other_risk = rows(db_session, RiskScore, document_id=other_id)[0]
+    mismatched = factories.make_trust_score(db_session, document, other_risk)
+    db_session.flush()
+    response = evaluate_policy_gate(client, str(mismatched.id))
+    assert response.status_code == 422
+    assert "different document" in response.json()["detail"]
+
+
+def test_trust_without_classification_leaves_no_policy_rows(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    trust = compute_trust(client, risk_id)
+    assert trust.status_code == 201, trust.text
+    response = evaluate_policy_gate(client, trust.json()["id"])
     assert response.status_code == 422
     assert rows(db_session, PolicyDecision, document_id=document_id) == []
 
@@ -934,19 +980,32 @@ def compute_trust(client: TestClient, risk_id: str, score: str = "0.50"):
     )
 
 
-def evaluate_policy_gate(client: TestClient, document_id: str):
-    """Evaluate the gate with no matching rule so the AI allow stands."""
+def evaluate_policy_gate(client: TestClient, trust_score_id: str):
+    """Evaluate the gate from a persisted trust score."""
     return client.post(
         POLICY_DECISIONS_URL,
         json={
-            "document_id": document_id,
+            "trust_score_id": trust_score_id,
             "ai_recommendation": "allow",
-            "sensitivity_label": "PUBLIC",
-            "risk_value": 0.1,
-            "trust_score": 0.9,
         },
         headers=COMPLIANCE_HEADERS,
     )
+
+
+def assess(
+    client: TestClient,
+    db_session: Session,
+    *,
+    content: str = CONFIDENT_CONTENT,
+    score: str = "0.50",
+) -> tuple[str, str]:
+    """Register → classify → risk → trust. Returns ``(document_id, trust_id)``."""
+    document_id = register(client)["id"]
+    assert classify(client, document_id, content).status_code == 200
+    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
+    trust = compute_trust(client, risk_id, score)
+    assert trust.status_code == 201, trust.text
+    return document_id, trust.json()["id"]
 
 
 def select_crypto(client: TestClient, trust_score_id: str):
@@ -961,14 +1020,11 @@ def select_crypto(client: TestClient, trust_score_id: str):
 def gated_trust(
     client: TestClient, db_session: Session, score: str = "0.50"
 ) -> tuple[str, str]:
-    """Register → risk → trust → policy. Returns ``(document_id, trust_id)``."""
-    document_id = register(client)["id"]
-    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
-    trust = compute_trust(client, risk_id, score)
-    assert trust.status_code == 201, trust.text
-    gate = evaluate_policy_gate(client, document_id)
+    """Classify through policy. Returns ``(document_id, trust_id)``."""
+    document_id, trust_id = assess(client, db_session, score=score)
+    gate = evaluate_policy_gate(client, trust_id)
     assert gate.status_code == 201, gate.text
-    return document_id, trust.json()["id"]
+    return document_id, trust_id
 
 
 def test_computing_trust_persists_outputs_the_row_and_the_audit_entry(
@@ -1131,18 +1187,15 @@ def test_a_deny_policy_decision_still_allows_crypto_persist(
     client: TestClient, db_session: Session
 ) -> None:
     """The gate already recorded; this table is separate history."""
-    document_id = register(client)["id"]
-    risk_id = score_risk(client, document_id, owner_user_id(db_session)).json()["id"]
-    trust = compute_trust(client, risk_id)
-    assert trust.status_code == 201, trust.text
+    document_id, trust_id = assess(client, db_session)
     rule = client.post(
         POLICY_RULES_URL,
         json={
-            "rule_name": "Deny public for crypto persist",
+            "rule_name": "Deny restricted for crypto persist",
             "condition_expr": {
                 "field": "sensitivity_label",
                 "op": "eq",
-                "value": "PUBLIC",
+                "value": "RESTRICTED",
             },
             "action": "deny",
             "priority": 3,
@@ -1150,11 +1203,12 @@ def test_a_deny_policy_decision_still_allows_crypto_persist(
         headers=COMPLIANCE_HEADERS,
     )
     assert rule.status_code == 201, rule.text
-    gate = evaluate_policy_gate(client, document_id)
+    gate = evaluate_policy_gate(client, trust_id)
     assert gate.status_code == 201, gate.text
     assert gate.json()["final_decision"] == "deny"
-    response = select_crypto(client, trust.json()["id"])
+    response = select_crypto(client, trust_id)
     assert response.status_code == 201, response.text
+    assert document_id == gate.json()["document_id"]
 
 
 def test_selecting_a_crypto_profile_does_not_change_document_status(
@@ -1215,3 +1269,38 @@ def test_a_failed_audit_write_rolls_back_the_crypto_profile(
     assert response.status_code == 500
     db_session.expire_all()
     assert rows(db_session, CryptoProfile, document_id=document_id) == []
+
+
+# --------------------------------------------------------------------------
+# Full decision path, SPEC.md Section 4
+# --------------------------------------------------------------------------
+
+
+def test_the_classify_to_crypto_chain_writes_every_decision_and_its_audit(
+    client: TestClient, db_session: Session
+) -> None:
+    """Classify → risk → trust → policy → crypto, each with an audit entry."""
+    document_id, trust_id = assess(client, db_session, score="0.50")
+    gate = evaluate_policy_gate(client, trust_id)
+    assert gate.status_code == 201, gate.text
+    assert gate.json()["sensitivity_label"] == "RESTRICTED"
+    assert Decimal(str(gate.json()["trust_score"])) == Decimal("0.500")
+
+    profile = select_crypto(client, trust_id)
+    assert profile.status_code == 201, profile.text
+    assert profile.json()["profile_type"] == "hybrid"
+
+    events = {
+        entry.event_type
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+    }
+    assert AuditEventType.CLASSIFICATION_COMPLETED.value in events
+    assert AuditEventType.RISK_SCORE_COMPUTED.value in events
+    assert AuditEventType.TRUST_SCORE_UPDATED.value in events
+    assert AuditEventType.POLICY_DECISION_RECORDED.value in events
+    assert AuditEventType.CRYPTO_PROFILE_SELECTED.value in events
+    assert rows(db_session, ClassificationMetadata, document_id=document_id)
+    assert rows(db_session, RiskScore, document_id=document_id)
+    assert rows(db_session, TrustScore, document_id=document_id)
+    assert rows(db_session, PolicyDecision, document_id=document_id)
+    assert rows(db_session, CryptoProfile, document_id=document_id)

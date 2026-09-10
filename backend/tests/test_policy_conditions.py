@@ -180,17 +180,15 @@ def test_blank_rule_name_is_rejected() -> None:
         )
 
 
-def test_non_finite_score_is_rejected() -> None:
+def test_caller_supplied_scores_are_rejected() -> None:
     from uuid import uuid4
 
     from app.policy.schemas import PolicyDecisionRequest
 
     with pytest.raises(ValidationError):
         PolicyDecisionRequest(
-            document_id=uuid4(),
+            trust_score_id=uuid4(),
             ai_recommendation="allow",
-            sensitivity_label="PUBLIC",
-            risk_value=float("inf"),
             trust_score=0.2,
         )
 

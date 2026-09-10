@@ -543,14 +543,11 @@ def policy_rule_body(**overrides: object) -> dict[str, object]:
 
 
 def policy_decision_body(
-    document_id: UUID | str, **overrides: object
+    trust_score_id: UUID | str, **overrides: object
 ) -> dict[str, object]:
     body: dict[str, object] = {
-        "document_id": str(document_id),
+        "trust_score_id": str(trust_score_id),
         "ai_recommendation": "allow",
-        "sensitivity_label": "RESTRICTED",
-        "risk_value": 0.2,
-        "trust_score": 0.3,
     }
     body.update(overrides)
     return body
@@ -595,14 +592,22 @@ def test_policy_rule_refuses_roles_outside_the_allow_list(
     [UserRole.COMPLIANCE_OFFICER, UserRole.SECURITY_ADMIN],
 )
 def test_policy_decision_admits_permitted_roles(
-    client: TestClient, document_id: UUID, role: UserRole
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    role: UserRole,
 ) -> None:
+    trust_id = assess_trust_score_id(
+        client, document_id, seeded_users[UserRole.DATA_OWNER].id
+    )
     response = client.post(
         POLICY_DECISIONS_URL,
-        json=policy_decision_body(document_id),
+        json=policy_decision_body(trust_id),
         headers={ACTOR_ROLE_HEADER: role.value},
     )
-    assert response.status_code == 201
+    assert response.status_code == 201, response.text
+    assert response.json()["sensitivity_label"] == "RESTRICTED"
+    assert response.json()["trust_score"] == "0.500"
 
 
 @pytest.mark.parametrize(
@@ -697,7 +702,7 @@ def test_policy_rule_rejects_a_duplicate_active_priority(client: TestClient) -> 
     assert response.status_code == 409
 
 
-def test_policy_decision_rejects_an_unknown_document(client: TestClient) -> None:
+def test_policy_decision_rejects_an_unknown_trust_score(client: TestClient) -> None:
     unknown = str(uuid4())
     response = client.post(
         POLICY_DECISIONS_URL,
@@ -705,15 +710,46 @@ def test_policy_decision_rejects_an_unknown_document(client: TestClient) -> None
         headers=COMPLIANCE_HEADERS,
     )
     assert response.status_code == 404
-    assert "POST /api/v1/documents" in response.json()["detail"]
+    assert "POST /api/v1/trust-scores" in response.json()["detail"]
 
 
-def test_policy_decision_rejects_a_boolean_score(
-    client: TestClient, document_id: UUID
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"risk_value": 0.1},
+        {"trust_score": 0.9},
+        {"sensitivity_label": "PUBLIC"},
+        {"document_id": str(uuid4())},
+    ],
+)
+def test_policy_decision_rejects_caller_supplied_facts(
+    client: TestClient, extra: dict[str, object]
 ) -> None:
-    body = policy_decision_body(document_id, risk_value=True)
+    body = policy_decision_body(uuid4(), **extra)
     response = client.post(POLICY_DECISIONS_URL, json=body, headers=COMPLIANCE_HEADERS)
     assert response.status_code == 422
+
+
+def test_policy_decision_requires_a_prior_classification(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+    trust = client.post(
+        TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
+    )
+    response = client.post(
+        POLICY_DECISIONS_URL,
+        json=policy_decision_body(trust.json()["id"]),
+        headers=COMPLIANCE_HEADERS,
+    )
+    assert response.status_code == 422
+    assert "POST /api/v1/classify" in response.json()["detail"]
 
 
 def test_policy_rule_rejects_a_blank_name(client: TestClient) -> None:
@@ -726,9 +762,16 @@ def test_policy_rule_rejects_a_blank_name(client: TestClient) -> None:
 
 
 def test_policy_decision_returns_500_when_the_engine_fails(
-    raising_client: TestClient, document_id: UUID, monkeypatch: pytest.MonkeyPatch
+    raising_client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.policy.engine import PolicyEngineError
+
+    trust_id = assess_trust_score_id(
+        raising_client, document_id, seeded_users[UserRole.DATA_OWNER].id
+    )
 
     def explode(*args: object, **kwargs: object) -> None:
         raise PolicyEngineError("wasm down")
@@ -736,7 +779,7 @@ def test_policy_decision_returns_500_when_the_engine_fails(
     monkeypatch.setattr("app.api.routes.policy.evaluate", explode)
     response = raising_client.post(
         POLICY_DECISIONS_URL,
-        json=policy_decision_body(document_id),
+        json=policy_decision_body(trust_id),
         headers=COMPLIANCE_HEADERS,
     )
     assert response.status_code == 500
@@ -788,6 +831,37 @@ def trust_body(risk_score_id: UUID | str, **overrides: object) -> dict[str, obje
     }
     body.update(overrides)
     return body
+
+
+RESTRICTED_CONTENT = "Employee SSN, passport number, and CVV are on file."
+
+
+def assess_trust_score_id(
+    client: TestClient,
+    document_id: UUID,
+    owner_user_id: UUID,
+    outputs: list[dict[str, object]] | None = None,
+) -> str:
+    """Classify → risk → trust. Returns the trust-score id."""
+    classified = client.post(
+        CLASSIFY_URL,
+        json=classify_body(RESTRICTED_CONTENT, document_id),
+        headers=OWNER_HEADERS,
+    )
+    assert classified.status_code == 200, classified.text
+    risk = client.post(
+        RISK_URL,
+        json=risk_body(document_id, owner_user_id),
+        headers=ANALYST_HEADERS,
+    )
+    assert risk.status_code == 201, risk.text
+    trust = client.post(
+        TRUST_URL,
+        json=trust_body(risk.json()["id"], outputs=outputs or agent_outputs_body()),
+        headers=ANALYST_HEADERS,
+    )
+    assert trust.status_code == 201, trust.text
+    return trust.json()["id"]
 
 
 def test_trust_score_rejects_a_caller_with_no_role(client: TestClient) -> None:
@@ -960,26 +1034,15 @@ def gated_trust_score_id(
     owner_user_id: UUID,
     outputs: list[dict[str, object]] | None = None,
 ) -> str:
-    """Risk → trust → policy decision. Returns the trust-score id."""
-    risk = client.post(
-        RISK_URL,
-        json=risk_body(document_id, owner_user_id),
-        headers=ANALYST_HEADERS,
-    )
-    assert risk.status_code == 201, risk.text
-    trust = client.post(
-        TRUST_URL,
-        json=trust_body(risk.json()["id"], outputs=outputs or agent_outputs_body()),
-        headers=ANALYST_HEADERS,
-    )
-    assert trust.status_code == 201, trust.text
+    """Classify → risk → trust → policy. Returns the trust-score id."""
+    trust_id = assess_trust_score_id(client, document_id, owner_user_id, outputs)
     decision = client.post(
         POLICY_DECISIONS_URL,
-        json=policy_decision_body(document_id),
+        json=policy_decision_body(trust_id),
         headers=COMPLIANCE_HEADERS,
     )
     assert decision.status_code == 201, decision.text
-    return trust.json()["id"]
+    return trust_id
 
 
 def test_crypto_profile_rejects_a_caller_with_no_role(client: TestClient) -> None:
@@ -1092,21 +1155,23 @@ def test_crypto_profile_does_not_accept_another_documents_policy_decision(
     seeded_users: dict[UserRole, User],
 ) -> None:
     """A gate evaluation on document B does not unlock selection on document A."""
+    owner_id = seeded_users[UserRole.DATA_OWNER].id
     other = client.post(
         DOCUMENTS_URL, json={"filename": "other.pdf"}, headers=OWNER_HEADERS
     )
     assert other.status_code == 201, other.text
     risk = client.post(
         RISK_URL,
-        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        json=risk_body(document_id, owner_id),
         headers=ANALYST_HEADERS,
     )
     trust = client.post(
         TRUST_URL, json=trust_body(risk.json()["id"]), headers=ANALYST_HEADERS
     )
+    other_trust = assess_trust_score_id(client, other.json()["id"], owner_id)
     decision = client.post(
         POLICY_DECISIONS_URL,
-        json=policy_decision_body(other.json()["id"]),
+        json=policy_decision_body(other_trust),
         headers=COMPLIANCE_HEADERS,
     )
     assert decision.status_code == 201, decision.text
