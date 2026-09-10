@@ -4,8 +4,8 @@ Closes a known defect: before the data model existed, ``POST /classify`` compute
 a classification and stored nothing, and ``PRD.md`` Section 7 treats a decision
 with no corresponding audit entry as a defect rather than an edge case. The same
 atomicity applies to ``POST /risk-scores``, the policy gate, trust-score
-consensus, and crypto-profile persist. What these tests assert is that the
-decision and its audit entry are written together, or not at all.
+consensus, crypto-profile persist, and manual overrides. What these tests assert
+is that the decision and its audit entry are written together, or not at all.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -26,6 +26,7 @@ from app.db.models import (
     ClassificationMetadata,
     CryptoProfile,
     Document,
+    ManualOverride,
     PolicyDecision,
     PolicyRule,
     RiskScore,
@@ -44,6 +45,7 @@ POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
 TRUST_URL = f"{API_V1_PREFIX}/trust-scores"
 CRYPTO_URL = f"{API_V1_PREFIX}/crypto-profiles"
+OVERRIDE_URL = f"{API_V1_PREFIX}/manual-overrides"
 
 OWNER_HEADERS = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
 ANALYST_HEADERS = {ACTOR_ROLE_HEADER: UserRole.SECURITY_ANALYST.value}
@@ -636,6 +638,10 @@ def test_a_matching_rule_overrides_the_ai_recommendation(
     assert events[0].payload["overridden"] is True
     assert events[0].payload["trust_score_id"] == trust_id
     assert events[0].payload["classification_id"] == payload["classification_id"]
+    assert events[0].payload["override_id"] is None
+    assert events[0].payload["label_source"] == "classification"
+    assert payload["override_id"] is None
+    assert payload["label_source"] == "classification"
 
 
 def test_no_matching_rule_leaves_the_ai_recommendation_standing(
@@ -1269,6 +1275,179 @@ def test_a_failed_audit_write_rolls_back_the_crypto_profile(
     assert response.status_code == 500
     db_session.expire_all()
     assert rows(db_session, CryptoProfile, document_id=document_id) == []
+
+
+# --------------------------------------------------------------------------
+# POST /manual-overrides, PRD.md FR-12
+# --------------------------------------------------------------------------
+
+
+OVERRIDE_JUSTIFICATION = "Reviewed with the data owner and reclassified."
+
+
+def override_label(
+    client: TestClient,
+    document_id: str,
+    new_label: str = "INTERNAL",
+    justification: str = OVERRIDE_JUSTIFICATION,
+):
+    """Persist a manual override for ``document_id``."""
+    return client.post(
+        OVERRIDE_URL,
+        json={
+            "document_id": document_id,
+            "new_label": new_label,
+            "justification": justification,
+        },
+        headers=ANALYST_HEADERS,
+    )
+
+
+def test_overriding_persists_the_row_and_the_audit_entry(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    assert classify(client, document_id).status_code == 200
+
+    response = override_label(client, document_id)
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["original_label"] == "RESTRICTED"
+    assert payload["new_label"] == "INTERNAL"
+    assert payload["justification"] == OVERRIDE_JUSTIFICATION
+
+    overrides = rows(db_session, ManualOverride, document_id=document_id)
+    assert len(overrides) == 1
+    assert overrides[0].original_label.value == "RESTRICTED"
+    assert overrides[0].new_label.value == "INTERNAL"
+    events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.MANUAL_OVERRIDE.value
+    ]
+    assert len(events) == 1
+    assert events[0].payload["override_id"] == payload["id"]
+    assert events[0].payload["original_label"] == "RESTRICTED"
+    assert events[0].payload["new_label"] == "INTERNAL"
+
+
+def test_a_failed_audit_write_rolls_back_the_override(
+    raising_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = register(raising_client)["id"]
+    assert classify(raising_client, document_id).status_code == 200
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated audit log failure")
+
+    monkeypatch.setattr(audit_repo, "append_entry", explode)
+    response = override_label(raising_client, document_id)
+    assert response.status_code == 500
+    db_session.expire_all()
+    assert rows(db_session, ManualOverride, document_id=document_id) == []
+
+
+def test_override_does_not_change_document_status(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    assert classify(client, document_id).status_code == 200
+    before = db_session.get(Document, document_id).current_status
+    response = override_label(client, document_id)
+    assert response.status_code == 201, response.text
+    db_session.expire_all()
+    assert db_session.get(Document, document_id).current_status == before
+
+
+def test_a_second_override_snapshots_the_previous_effective_label(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id = register(client)["id"]
+    assert classify(client, document_id).status_code == 200
+    first = override_label(client, document_id, new_label="INTERNAL")
+    assert first.status_code == 201, first.text
+    second = override_label(client, document_id, new_label="PUBLIC")
+    assert second.status_code == 201, second.text
+    assert second.json()["original_label"] == "INTERNAL"
+    assert second.json()["new_label"] == "PUBLIC"
+    assert len(rows(db_session, ManualOverride, document_id=document_id)) == 2
+
+
+def test_the_gate_sees_the_override_not_the_ai_label(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, trust_id = assess(client, db_session)
+    overridden = override_label(client, document_id, new_label="INTERNAL")
+    assert overridden.status_code == 201, overridden.text
+    client.post(
+        POLICY_RULES_URL,
+        json={
+            "rule_name": "Deny restricted after override",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "RESTRICTED",
+            },
+            "action": "deny",
+            "priority": 7,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["sensitivity_label"] == "INTERNAL"
+    assert payload["override_id"] == overridden.json()["id"]
+    assert payload["label_source"] == "manual_override"
+    assert payload["final_decision"] == "allow"
+    assert payload["overridden"] is False
+    events = [
+        entry
+        for entry in rows(db_session, AuditLog, document_id=document_id)
+        if entry.event_type == AuditEventType.POLICY_DECISION_RECORDED.value
+    ]
+    assert events[0].payload["override_id"] == overridden.json()["id"]
+    assert events[0].payload["label_source"] == "manual_override"
+    assert events[0].payload["sensitivity_label"] == "INTERNAL"
+
+
+def test_a_later_classification_does_not_undo_the_override_at_the_gate(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, trust_id = assess(client, db_session)
+    assert override_label(client, document_id, new_label="INTERNAL").status_code == 201
+    db_session.add(
+        ClassificationMetadata(
+            document_id=document_id,
+            sensitivity_label=SensitivityLabel.RESTRICTED,
+            confidence_score=Decimal("0.9000"),
+            model_version="test-later-0.1.0",
+            is_defaulted=False,
+            classified_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    db_session.flush()
+    client.post(
+        POLICY_RULES_URL,
+        json={
+            "rule_name": "Deny restricted after reclassify under override",
+            "condition_expr": {
+                "field": "sensitivity_label",
+                "op": "eq",
+                "value": "RESTRICTED",
+            },
+            "action": "deny",
+            "priority": 8,
+        },
+        headers=COMPLIANCE_HEADERS,
+    )
+    response = evaluate_policy_gate(client, trust_id)
+    assert response.status_code == 201, response.text
+    assert response.json()["sensitivity_label"] == "INTERNAL"
+    assert response.json()["label_source"] == "manual_override"
+    assert response.json()["final_decision"] == "allow"
 
 
 # --------------------------------------------------------------------------

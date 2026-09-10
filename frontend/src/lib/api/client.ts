@@ -18,6 +18,8 @@ import type {
   DocumentRegistrationRequest,
   DocumentResponse,
   HealthResponse,
+  ManualOverrideRequest,
+  ManualOverrideResponse,
   UserRole,
 } from "./types";
 
@@ -174,4 +176,21 @@ export async function registerAndClassify(
     role
   );
   return { document, classification };
+}
+
+/**
+ * POST /api/v1/manual-overrides — persist a human relabel.
+ *
+ * original_label is computed server-side. Do not send it, and do not send a
+ * confirmed boolean: the checkbox is a UI gate, not an API field.
+ */
+export async function overrideClassification(
+  body: ManualOverrideRequest,
+  role: UserRole
+): Promise<ManualOverrideResponse> {
+  return request<ManualOverrideResponse>("/api/v1/manual-overrides", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify(body),
+  });
 }

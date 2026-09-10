@@ -13,6 +13,28 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Log
 
+### 2026-09-10: Manual override persist, and the gate reads the effective label
+
+Decided by: Abhinav, implementing `PRD.md` FR-12 persist and binding 3.6 to it.
+
+`POST /api/v1/manual-overrides` body is `{ "document_id", "new_label", "justification" }` only. Extra keys forbidden.
+
+- `original_label` is the current effective sensitivity: latest override `new_label`, else latest `classification_metadata`. The client cannot supply it.
+- No classification is 422. `new_label` equal to the effective label is 422. Unknown document is 404.
+- Justification is stripped, then must be at least 20 characters. The database CHECK remains the backstop.
+- Persist writes one `manual_overrides` row and `MANUAL_OVERRIDE` in the same transaction. A later override is a new row. `documents.current_status` is not changed.
+- Roles: `security_analyst` and `security_admin`. Data owners see the outcome; they do not write this table.
+
+FR-12's confirmation checkbox is a UI requirement. It is not an API field. A client-supplied `confirmed: true` is forgeable and would not prove the analyst confirmed.
+
+The policy gate now uses that same effective label. A later classification does not retract an override. Clearing an override back to "whatever the AI says now" is a later endpoint, not a timestamp comparison. `POST /policy-decisions` records `override_id` (nullable) and `label_source` (`classification` | `manual_override`) on the response and the audit payload so an auditor does not have to infer provenance.
+
+This supersedes the "manual overrides are not applied" sentence in "Policy v1 reads persisted facts from a trust_score_id" below.
+
+Concurrent writes take a `documents` row lock (`SELECT … FOR UPDATE`) before reading the effective label and hold it through the insert and audit append. `overridden_at` on that write path is `clock_timestamp()`, not transaction-scoped `now()`, so a writer that started earlier but inserted later cannot sort as current. The UUID is only a last-resort tiebreak.
+
+Rejected: accepting `original_label` from the client (the snapshot would be caller-asserted). Rejected: a `confirmed` boolean. Rejected: writing the human label into `classification_metadata` (that table is AI history). Rejected: latest-event-wins between `classified_at` and `overridden_at` (the stub classifier would silently undo an analyst). Rejected: relying on `now()` plus `id` under concurrency — two transactions can start in one order and commit in the other.
+
 ### 2026-09-09: Policy v1 reads persisted facts from a trust_score_id
 
 Decided by: Abhinav, binding 3.6 to 3.2 / 3.3 / 3.5.
@@ -22,7 +44,7 @@ Decided by: Abhinav, binding 3.6 to 3.2 / 3.3 / 3.5.
 - `document_id` comes from the trust row.
 - `trust_score` is that row's `consensus_value`.
 - `risk_value` is the linked `risk_scores` row. A document mismatch is 422.
-- `sensitivity_label` is `latest_for_document` on `classification_metadata`. No classification is 422. Manual overrides are not applied; there is no override persist API yet.
+- `sensitivity_label` was originally `latest_for_document` on `classification_metadata`, with overrides ignored because no persist API existed. Superseded on 2026-09-10: the gate now reads the effective label (latest override, else latest classification). No classification is still 422.
 - `ai_recommendation` stays caller-asserted until 3.4 exists to produce it.
 
 Unknown `trust_score_id` is 404. Roles unchanged: `compliance_officer` and `security_admin`.

@@ -242,6 +242,32 @@ replacing them; the history tables are append-only and a trigger enforces it.
 There is no read endpoint for that history yet. If you need one, say so rather
 than querying the tables directly from the frontend.
 
+### Override a classification
+
+`POST /api/v1/manual-overrides` writes a human relabel. The server snapshots
+`original_label` from the current effective sensitivity (latest override, else
+latest classification). The client cannot supply it. Roles: `security_analyst`
+and `security_admin`. Classify the document first. An unknown `document_id` is
+a 404. No classification, or `new_label` equal to the current effective
+label, is 422. Justification must be at least 20 characters after stripping
+padding. There is no `confirmed` field; the checkbox is UI-only.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/manual-overrides \
+  -H "Content-Type: application/json" \
+  -H "X-Q-AEGIS-Actor-Role: security_analyst" \
+  -d '{
+    "document_id": "<the id from step 1>",
+    "new_label": "INTERNAL",
+    "justification": "Reviewed with the data owner and reclassified."
+  }'
+```
+
+Each call writes one `manual_overrides` row and one `audit_log` entry in the
+same transaction. It does not change `documents.current_status`. A later
+classification does not undo this row; only another override changes the
+effective label the policy gate reads.
+
 ### Compute contextual risk
 
 `POST /api/v1/risk-scores` scores a closed snapshot. The server computes
@@ -306,9 +332,10 @@ after the policy gate).
 `POST /api/v1/policy-decisions` evaluates active rules in priority order. Roles:
 `compliance_officer` and `security_admin`. The server computes `final_decision`;
 the client cannot supply it. Body is a `trust_score_id` and an
-`ai_recommendation`. The label, risk value, and trust score are read from
-stored rows. Classify, score risk, and compute trust first. An unknown
-`trust_score_id` is a 404. No classification for that document is 422.
+`ai_recommendation`. The label is the effective sensitivity (latest override,
+else latest classification). Risk and trust come from stored rows. Classify,
+score risk, and compute trust first. An unknown `trust_score_id` is a 404. No
+classification for that document is 422.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/policy-rules \
