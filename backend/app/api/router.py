@@ -12,6 +12,7 @@ from app.api.routes import (
     crypto,
     documents,
     health,
+    overrides,
     policy,
     risk,
     trust,
@@ -26,6 +27,7 @@ api_router = APIRouter(prefix=API_V1_PREFIX)
 api_router.include_router(health.router)
 api_router.include_router(documents.router)
 api_router.include_router(classify.router)
+api_router.include_router(overrides.router)
 api_router.include_router(audit.router)
 api_router.include_router(risk.router)
 api_router.include_router(policy.router)

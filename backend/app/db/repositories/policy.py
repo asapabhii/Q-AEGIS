@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from app.classifier.labels import SensitivitySource
 from app.db.enums import PolicyAction
 from app.db.models import PolicyDecision, PolicyRule
 from app.policy.engine import EvaluableRule, PolicyEvalResult
@@ -113,11 +114,13 @@ def decision_audit_payload(
     trust_score_id: UUID,
     risk_score_id: UUID,
     classification_id: UUID,
+    override_id: UUID | None,
+    label_source: SensitivitySource,
 ) -> dict[str, Any]:
     """Audit payload for one gate evaluation. JSON primitives only.
 
     Source row ids stay in the payload so the floats on the fact snapshot
-    remain attributable after a later reclassify or rescore.
+    remain attributable after a later reclassify, override, or rescore.
     """
     payload: dict[str, Any] = {
         "policy_decision_id": str(decision_id),
@@ -125,6 +128,8 @@ def decision_audit_payload(
         "trust_score_id": str(trust_score_id),
         "risk_score_id": str(risk_score_id),
         "classification_id": str(classification_id),
+        "override_id": str(override_id) if override_id is not None else None,
+        "label_source": label_source.value,
         "rule_id": str(result.rule_id) if result.rule_id is not None else None,
         "rule_name": result.rule_name,
         "ai_recommendation": result.ai_recommendation.value,
