@@ -271,6 +271,38 @@ def test_facts_from_audit_payload_returns_none_when_keys_are_missing() -> None:
     assert facts_from_audit_payload({"sensitivity_label": "PUBLIC"}) is None
 
 
+def test_facts_from_audit_payload_returns_none_for_an_unknown_label() -> None:
+    from app.policy.schemas import facts_from_audit_payload
+
+    assert (
+        facts_from_audit_payload(
+            {
+                "sensitivity_label": "TOP_SECRET",
+                "risk_value": 0.2,
+                "trust_score": 0.5,
+                "ai_recommendation": "allow",
+            }
+        )
+        is None
+    )
+
+
+def test_facts_from_audit_payload_returns_none_for_an_unknown_action() -> None:
+    from app.policy.schemas import facts_from_audit_payload
+
+    assert (
+        facts_from_audit_payload(
+            {
+                "sensitivity_label": "RESTRICTED",
+                "risk_value": 0.2,
+                "trust_score": 0.5,
+                "ai_recommendation": "quarantine",
+            }
+        )
+        is None
+    )
+
+
 def test_tree_deeper_than_the_unrolled_rego_is_rejected() -> None:
     tree: dict = {"field": "trust_score", "op": "lt", "value": 0.5}
     for _ in range(MAX_TREE_DEPTH + 1):

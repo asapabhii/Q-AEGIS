@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from app.classifier.labels import SensitivityLabel
 from app.db.enums import PolicyAction
 from app.db.models import AuditLog
 from app.policy.engine import EvaluableRule, evaluate
@@ -23,7 +24,7 @@ class RuleReplay:
     decision_id: UUID
     document_id: UUID
     decided_at: datetime
-    sensitivity_label: str
+    sensitivity_label: SensitivityLabel
     recorded_final_decision: PolicyAction
     would_match: bool
     hypothetical_final_decision: PolicyAction
@@ -80,6 +81,7 @@ def _replay_one(candidate: EvaluableRule, entry: AuditLog) -> RuleReplay | None:
         decision_id = UUID(str(raw_decision_id))
         document_id = UUID(str(raw_document_id))
         recorded = PolicyAction(str(raw_recorded))
+        label = SensitivityLabel(facts.sensitivity_label)
     except (TypeError, ValueError):
         return None
     result = evaluate(facts, [candidate])
@@ -88,7 +90,7 @@ def _replay_one(candidate: EvaluableRule, entry: AuditLog) -> RuleReplay | None:
         decision_id=decision_id,
         document_id=document_id,
         decided_at=entry.created_at,
-        sensitivity_label=facts.sensitivity_label,
+        sensitivity_label=label,
         recorded_final_decision=recorded,
         would_match=result.rule_id is not None,
         hypothetical_final_decision=hypothetical,

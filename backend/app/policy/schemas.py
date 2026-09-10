@@ -167,10 +167,12 @@ def facts_from_audit_payload(payload: dict[str, Any]) -> DocumentFacts | None:
 
     Returns ``None`` when the payload is not a v1 snapshot rather than
     guessing. A dry-run must not invent a label the audit log did not record.
+    An unrecognized ``sensitivity_label`` is the same failure: skip it so the
+    response model is not asked to serialize a string outside the enum.
     """
     try:
         return DocumentFacts(
-            sensitivity_label=str(payload["sensitivity_label"]),
+            sensitivity_label=SensitivityLabel(str(payload["sensitivity_label"])).value,
             risk_value=float(payload["risk_value"]),
             trust_score=float(payload["trust_score"]),
             ai_recommendation=PolicyAction(str(payload["ai_recommendation"])),

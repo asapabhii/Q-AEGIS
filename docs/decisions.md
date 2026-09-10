@@ -22,7 +22,7 @@ Decided by: Abhinav, implementing `PRD.md` FR-13's "test rule" action.
 - The candidate is not inserted. No `policy_decisions` row. No audit entry. HTTP 200.
 - Live `policy_rules` are not consulted. The question is "would this rule have matched these past facts?", not a replay of first-match against the current set.
 - Facts come from the last 20 `policy_decision_recorded` audit payloads, newest first. Re-reading current classification or trust would test against today.
-- A payload missing the v1 fact keys is skipped, not guessed. `skipped` is counted.
+- A payload missing the v1 fact keys, or with an unrecognized `sensitivity_label` or action, is skipped, not guessed. `skipped` is counted.
 - `hypothetical_final_decision` is the candidate action on a match, else that snapshot's `ai_recommendation`.
 - Role: `compliance_officer` only, same as authoring.
 
