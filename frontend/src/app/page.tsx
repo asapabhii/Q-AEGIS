@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
+import { LabelBadge } from "@/components/LabelBadge";
+import { SiteNav } from "@/components/SiteNav";
 import {
   checkHealth,
   registerAndClassify,
@@ -11,33 +14,7 @@ import type {
   ClassificationResponse,
   DocumentResponse,
   UserRole,
-  SensitivityLabel,
 } from "@/lib/api/types";
-
-// ---------------------------------------------------------------------------
-// Sensitivity label badge colours
-// ---------------------------------------------------------------------------
-
-const LABEL_STYLES: Record<SensitivityLabel, string> = {
-  PUBLIC:
-    "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  INTERNAL:
-    "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  CONFIDENTIAL:
-    "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  RESTRICTED:
-    "bg-red-500/15 text-red-400 border-red-500/30",
-};
-
-function LabelBadge({ label }: { label: SensitivityLabel }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold tracking-wide ${LABEL_STYLES[label]}`}
-    >
-      {label}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Role descriptions — authorization plumbing, NOT authentication
@@ -131,18 +108,22 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Health status dot */}
-          <div className="flex items-center gap-2 text-sm">
-            <span
-              className={`inline-block h-2.5 w-2.5 rounded-full ${
-                health
-                  ? "bg-emerald-400 animate-pulse-glow text-emerald-400"
-                  : "bg-slate-600"
-              }`}
-            />
-            <span className="text-[var(--color-text-secondary)]">
-              {health ? `v${health.version}` : "Not checked"}
-            </span>
+          <div className="flex items-center gap-6">
+            <SiteNav active="/" />
+
+            {/* Health status dot */}
+            <div className="flex items-center gap-2 text-sm">
+              <span
+                className={`inline-block h-2.5 w-2.5 rounded-full ${
+                  health
+                    ? "bg-emerald-400 animate-pulse-glow text-emerald-400"
+                    : "bg-slate-600"
+                }`}
+              />
+              <span className="text-[var(--color-text-secondary)]">
+                {health ? `v${health.version}` : "Not checked"}
+              </span>
+            </div>
           </div>
         </div>
       </header>
@@ -429,6 +410,14 @@ export default function DashboardPage() {
                       </dd>
                     </div>
                   </dl>
+                  {registeredDocument && (
+                    <Link
+                      href={`/override?document_id=${registeredDocument.id}`}
+                      className="mt-4 inline-block text-sm text-cyan-400 hover:underline"
+                    >
+                      Override this classification
+                    </Link>
+                  )}
                 </div>
               )}
 
