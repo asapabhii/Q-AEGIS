@@ -12,12 +12,23 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import CryptoProfileCaller, DbSession, resolve_seeded_actor
-from app.crypto.schemas import CryptoProfileRequest, CryptoProfileResponse
+from app.api.deps import (
+    CryptoProfileCaller,
+    DbSession,
+    ShredDocumentCaller,
+    resolve_seeded_actor,
+)
+from app.crypto.schemas import (
+    CryptoProfileRequest,
+    CryptoProfileResponse,
+    CryptoShredRequest,
+    CryptoShredResponse,
+)
 from app.crypto.selector import select_crypto_profile
-from app.db.enums import AuditEventType
+from app.db.enums import AuditEventType, DocumentStatus
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import crypto as crypto_repo
+from app.db.repositories import documents as documents_repo
 from app.db.repositories import policy as policy_repo
 from app.db.repositories import trust as trust_repo
 
@@ -114,4 +125,69 @@ def _unknown_trust_score_detail(trust_score_id: UUID) -> str:
     return (
         f"No trust score with id {trust_score_id}. Compute one first via "
         "POST /api/v1/trust-scores."
+    )
+
+
+@router.post(
+    "/crypto-shredding",
+    response_model=CryptoShredResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Permanently shred a document's encryption key",
+)
+def shred_document_key(
+    request: CryptoShredRequest,
+    session: DbSession,
+    caller: ShredDocumentCaller,
+) -> CryptoShredResponse:
+    """Destroy a document's encryption key irreversibly.
+
+    Implements PRD FR-8. The document's status becomes ARCHIVED. The audit
+    trail proving the request was made and honored is preserved. Since this
+    build has no object storage, this simulates key destruction by logging the
+    event and updating the document status.
+    """
+    from datetime import datetime, timezone
+
+    document = documents_repo.get_document(
+        session, request.document_id, for_update=True
+    )
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{request.document_id}' was not found.",
+        )
+
+    actor = resolve_seeded_actor(session, caller)
+    if actor.id != document.uploaded_by:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the data owner who uploaded the document can shred it.",
+        )
+
+    if document.current_status == DocumentStatus.ARCHIVED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Document is already shredded (archived).",
+        )
+
+    previous_status = document.current_status.value
+    documents_repo.mark_archived(session, document)
+
+    audit_repo.append_entry(
+        session,
+        event_type=AuditEventType.DOCUMENT_SHREDDED.value,
+        document_id=document.id,
+        actor_id=actor.id,
+        payload={
+            "document_id": str(document.id),
+            "action": "crypto_key_shredded",
+            "previous_status": previous_status,
+            "status": "archived",
+        },
+    )
+
+    return CryptoShredResponse(
+        document_id=document.id,
+        shredded_at=datetime.now(timezone.utc),
+        status="shredded",
     )

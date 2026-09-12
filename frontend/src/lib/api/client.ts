@@ -16,6 +16,7 @@ import type {
   AuditChainResponse,
   ClassificationRequest,
   ClassificationResponse,
+  CryptoProfileResponse,
   DocumentInventoryResponse,
   DocumentRegistrationRequest,
   DocumentResponse,
@@ -23,9 +24,14 @@ import type {
   HealthResponse,
   ManualOverrideRequest,
   ManualOverrideResponse,
+  PolicyDecisionResponse,
   PolicyRuleRequest,
   PolicyRuleResponse,
   PolicyRuleTestResponse,
+  RiskScoreRequest,
+  RiskScoreResponse,
+  TrustScoreRequest,
+  TrustScoreResponse,
   UserRole,
 } from "./types";
 
@@ -281,5 +287,123 @@ export async function testPolicyRule(
     method: "POST",
     headers: roleHeaders(role),
     body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Risk scoring — SPEC.md 3.3
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/risk-scores — compute a contextual risk score for one access event.
+ *
+ * The server returns the score and its context snapshot. This is a write
+ * endpoint: the score is persisted and its id becomes the foreign key for
+ * POST /api/v1/trust-scores.
+ */
+export async function submitRiskScore(
+  body: RiskScoreRequest,
+  role: UserRole
+): Promise<RiskScoreResponse> {
+  return request<RiskScoreResponse>("/api/v1/risk-scores", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Trust engine — SPEC.md 3.4 / 3.5
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/trust-scores — record five agent outputs and compute consensus.
+ *
+ * The server persists each AgentOutput row, then derives the equal-weight
+ * trust score. risk_score_id must reference an existing risk score.
+ */
+export async function submitTrustScore(
+  body: TrustScoreRequest,
+  role: UserRole
+): Promise<TrustScoreResponse> {
+  return request<TrustScoreResponse>("/api/v1/trust-scores", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Crypto profile selection — SPEC.md 3.7
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/crypto-profiles — select and persist the protection profile.
+ *
+ * trust_score_id must reference an existing trust score. The server selects
+ * the profile based on the policy engine's decision and the trust consensus.
+ */
+export async function selectCryptoProfile(
+  trustScoreId: string,
+  role: UserRole
+): Promise<CryptoProfileResponse> {
+  return request<CryptoProfileResponse>("/api/v1/crypto-profiles", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify({ trust_score_id: trustScoreId }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Audit verification — SPEC.md 3.8
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/audit/verify — verify the chain integrity for one document.
+ *
+ * Returns whether the chain is intact, along with the chain length and any
+ * tampered entry indices.
+ */
+export async function verifyAuditChain(
+  documentId: string,
+  role: UserRole
+): Promise<{
+  document_id: string;
+  is_valid: boolean;
+  chain_length: number;
+  tampered_indices: number[];
+}> {
+  const query = new URLSearchParams({ document_id: documentId });
+  return request<{
+    document_id: string;
+    is_valid: boolean;
+    chain_length: number;
+    tampered_indices: number[];
+  }>(`/api/v1/audit/verify?${query.toString()}`, {
+    method: "GET",
+    headers: roleHeaders(role),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Policy decisions — SPEC.md 3.6
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/policy-decisions — evaluate a policy decision for a document.
+ *
+ * Returns the matched rule (if any) and the final decision. The server reads
+ * the document's current sensitivity label and risk score, evaluates the
+ * active rules in priority order, and returns the first match or a default
+ * allow.
+ */
+export async function evaluatePolicyDecision(
+  documentId: string,
+  role: UserRole
+): Promise<PolicyDecisionResponse> {
+  return request<PolicyDecisionResponse>("/api/v1/policy-decisions", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify({ document_id: documentId }),
   });
 }

@@ -3,8 +3,15 @@
 import { FormEvent, Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { LabelBadge } from "@/components/LabelBadge";
-import { SiteNav } from "@/components/SiteNav";
+import {
+  ArrowRight,
+  AlertTriangle,
+  CheckCircle2,
+  FileText,
+  X,
+} from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import {
   ApiError,
   getDocument,
@@ -23,6 +30,23 @@ import {
   strippedJustificationLength,
 } from "@/lib/override";
 
+const LABEL_TONES: Record<
+  string,
+  "public" | "internal" | "confidential" | "restricted"
+> = {
+  PUBLIC: "public",
+  INTERNAL: "internal",
+  CONFIDENTIAL: "confidential",
+  RESTRICTED: "restricted",
+};
+
+const LABEL_COLORS: Record<SensitivityLabel, string> = {
+  PUBLIC: "#10B981",
+  INTERNAL: "#3B82F6",
+  CONFIDENTIAL: "#F59E0B",
+  RESTRICTED: "#EF4444",
+};
+
 const OVERRIDE_ROLES: { value: UserRole; label: string }[] = [
   { value: "security_analyst", label: "Security Analyst" },
   { value: "security_admin", label: "Security Admin" },
@@ -38,6 +62,7 @@ export function OverrideScreen({
 }: {
   initialDocumentId?: string;
 }) {
+  const containerRef = useGsapReveal<HTMLDivElement>();
   const [role, setRole] = useState<UserRole>("security_analyst");
   const [documentId, setDocumentId] = useState(initialDocumentId);
   const [snapshot, setSnapshot] = useState<DocumentSnapshot | null>(null);
@@ -132,6 +157,7 @@ export function OverrideScreen({
       );
       setResult(saved);
       setConfirmed(false);
+      setJustification("");
       await loadSnapshot(documentId, { keepResult: true });
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : "Network error");
@@ -141,250 +167,555 @@ export function OverrideScreen({
   }
 
   const justChars = strippedJustificationLength(justification);
+  const charCountColor =
+    justChars >= MIN_JUSTIFICATION_CHARS
+      ? "var(--status-pass)"
+      : justChars > 0
+        ? "var(--status-override)"
+        : "var(--color-text-tertiary)";
 
   return (
-    <div className="flex-1 flex flex-col">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-bold"
-            >
-              Q
-            </Link>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                Manual Override
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                PRD.md FR-12 · permanently logged
-              </p>
-            </div>
-          </div>
-          <SiteNav active="/override" />
+    <div
+      ref={containerRef}
+      className="mx-auto w-full max-w-screen-xl space-y-8 px-6 py-8"
+    >
+      {/* Hero Header */}
+      <header data-reveal className="flex items-start justify-between">
+        <div>
+          <h1
+            className="font-semibold mb-1"
+            style={{
+              fontSize: "var(--font-size-2xl)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Security Override Console
+          </h1>
+          <p
+            style={{
+              fontSize: "var(--font-size-sm)",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            Manual classification override with permanent audit trail
+          </p>
+        </div>
+
+        {/* Role Selector */}
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium" style={{ color: "var(--color-text-secondary)" }}>
+            Acting as
+          </label>
+          <select
+            value={role}
+            onChange={(event) => setRole(event.target.value as UserRole)}
+            className="input max-w-[200px]"
+          >
+            {OVERRIDE_ROLES.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
         </div>
       </header>
 
-      <main className="flex-1 mx-auto w-full max-w-6xl px-6 py-8 space-y-8">
-        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
-          <h2 className="text-base font-semibold mb-1">Override a classification</h2>
-          <p className="text-sm text-[var(--color-text-muted)] mb-6">
-            Security Analysts and Security Admins can relabel a document. The
-            server snapshots the current effective label. Confirmation is a
-            UI gate — it is not sent to the API.
-          </p>
-
-          <form onSubmit={handleSubmit} className="grid gap-5 md:grid-cols-2">
-            <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="override-role"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                >
-                  Caller Role
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    (authorization plumbing, not authentication)
-                  </span>
-                </label>
-                <select
-                  id="override-role"
-                  value={role}
-                  onChange={(event) => setRole(event.target.value as UserRole)}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                >
-                  {OVERRIDE_ROLES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="override-document-id"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                >
-                  Document ID
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="override-document-id"
-                    type="text"
-                    value={documentId}
-                    onChange={(event) => setDocumentId(event.target.value)}
-                    className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm font-mono focus:border-[var(--color-border-focus)] focus:outline-none"
-                    placeholder="UUID from classify or inventory"
-                  />
-                  <button
-                    type="button"
-                    id="override-load-btn"
-                    onClick={() => void loadSnapshot(documentId)}
-                    disabled={loadingSnapshot || !documentId.trim()}
-                    className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loadingSnapshot ? "Loading…" : "Load"}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="override-new-label"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                >
-                  New label
-                </label>
-                <select
-                  id="override-new-label"
-                  value={newLabel}
-                  onChange={(event) =>
-                    setNewLabel(event.target.value as SensitivityLabel | "")
-                  }
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                >
-                  <option value="">Select a label</option>
-                  {SENSITIVITY_LABELS.map((label) => (
-                    <option
-                      key={label}
-                      value={label}
-                      disabled={label === currentLabel}
-                    >
-                      {label}
-                      {label === currentLabel ? " (current)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="override-justification"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                >
-                  Justification
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    ({justChars}/{MIN_JUSTIFICATION_CHARS} after trim)
-                  </span>
-                </label>
-                <textarea
-                  id="override-justification"
-                  value={justification}
-                  onChange={(event) => setJustification(event.target.value)}
-                  rows={4}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none resize-y"
-                  placeholder="Why this label is correct. At least 20 characters."
-                />
-              </div>
-
-              <div className="flex items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
-                <input
-                  id="override-confirm"
-                  type="checkbox"
-                  checked={confirmed}
-                  onChange={(event) => setConfirmed(event.target.checked)}
-                  className="mt-0.5 h-4 w-4"
-                />
-                <label htmlFor="override-confirm" className="text-sm leading-relaxed">
-                  I confirm this action will be permanently logged
-                </label>
-              </div>
-
-              <button
-                type="submit"
-                id="override-submit-btn"
-                disabled={!canSubmit}
-                className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {submitting ? "Submitting…" : "Submit override"}
-              </button>
-
-              {loadError && <p className="text-sm text-red-400">{loadError}</p>}
-              {submitError && <p className="text-sm text-red-400">{submitError}</p>}
+      {/* Success Banner */}
+      {result && (
+        <div
+          data-reveal
+          className="card p-6 flex items-start gap-4"
+          style={{ borderColor: "var(--status-pass)" }}
+        >
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-full"
+            style={{ backgroundColor: "rgba(16, 185, 129, 0.1)" }}
+          >
+            <CheckCircle2 className="h-5 w-5" style={{ color: "var(--status-pass)" }} />
+          </div>
+          <div className="flex-1">
+            <h3
+              className="text-base font-semibold mb-2"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Override Successfully Recorded
+            </h3>
+            <div className="flex items-center gap-3 mb-3">
+              <Badge
+                label={result.original_label}
+                tone={LABEL_TONES[result.original_label]}
+                size="sm"
+              />
+              <ArrowRight className="h-4 w-4" style={{ color: "var(--color-text-tertiary)" }} />
+              <Badge
+                label={result.new_label}
+                tone={LABEL_TONES[result.new_label]}
+                size="sm"
+              />
             </div>
-
-            <div className="space-y-4">
-              {snapshotMatchesInput && snapshot && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
-                    Current effective label
-                  </h3>
-                  <dl className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">Filename</dt>
-                      <dd>{snapshot.filename}</dd>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <dt className="text-[var(--color-text-secondary)]">Label</dt>
-                      <dd>
-                        {snapshot.sensitivity_label ? (
-                          <LabelBadge label={snapshot.sensitivity_label} />
-                        ) : (
-                          <span className="text-[var(--color-text-muted)]">
-                            Not classified — cannot override
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                    {snapshot.label_source && (
-                      <div className="flex justify-between">
-                        <dt className="text-[var(--color-text-secondary)]">Source</dt>
-                        <dd className="font-mono text-xs">{snapshot.label_source}</dd>
-                      </div>
-                    )}
-                  </dl>
-                </div>
-              )}
-
-              {result && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
-                    Override recorded
-                  </h3>
-                  <dl className="space-y-2 text-sm">
-                    <div className="flex justify-between items-center">
-                      <dt className="text-[var(--color-text-secondary)]">From</dt>
-                      <dd>
-                        <LabelBadge label={result.original_label} />
-                      </dd>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <dt className="text-[var(--color-text-secondary)]">To</dt>
-                      <dd>
-                        <LabelBadge label={result.new_label} />
-                      </dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">ID</dt>
-                      <dd className="font-mono text-xs">{result.id}</dd>
-                    </div>
-                  </dl>
-                </div>
-              )}
-
-              {snapshot && !snapshotMatchesInput && (
-                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
-                  Document ID changed — load again
-                </div>
-              )}
-
-              {!snapshot && !result && !loadError && (
-                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
-                  Load a classified document to override it
-                </div>
-              )}
-            </div>
-          </form>
-        </section>
-      </main>
-
-      <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Q-AEGIS Shield · SPEC.md 3.13 · Input Screen 2</span>
-          <span>Checkbox gates submit — confirmed is not an API field</span>
+            <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+              Override ID:{" "}
+              <span className="mono-data" style={{ color: "var(--status-pass)" }}>
+                {result.id}
+              </span>
+            </p>
+          </div>
+          <button
+            onClick={() => setResult(null)}
+            className="btn btn-ghost"
+            style={{ padding: "var(--spacing-2)" }}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      </footer>
+      )}
+
+      {/* Main Content */}
+      <div data-reveal className="grid gap-6 lg:grid-cols-[1fr_480px]">
+        {/* Left: Form */}
+        <div className="card p-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <header className="mb-6">
+              <h2
+                className="font-semibold mb-1"
+                style={{
+                  fontSize: "var(--font-size-lg)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                Override Request
+              </h2>
+            </header>
+
+            {/* Document ID */}
+            <div>
+              <label
+                className="block text-sm font-medium mb-2"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Document ID
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="override-document-id"
+                  type="text"
+                  value={documentId}
+                  onChange={(event) => setDocumentId(event.target.value)}
+                  className="input mono-data flex-1"
+                  placeholder="Enter document UUID..."
+                />
+                <button
+                  type="button"
+                  id="override-load-btn"
+                  onClick={() => void loadSnapshot(documentId)}
+                  disabled={loadingSnapshot || !documentId.trim()}
+                  className="btn btn-secondary"
+                >
+                  {loadingSnapshot ? "Loading" : "Load"}
+                </button>
+              </div>
+              {loadError && (
+                <p
+                  className="mt-2 text-sm flex items-center gap-2"
+                  style={{ color: "var(--status-fail)" }}
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  {loadError}
+                </p>
+              )}
+            </div>
+
+            {/* New Label Selector */}
+            {snapshotMatchesInput && snapshot && (
+              <div className="space-y-6">
+                <div>
+                  <label
+                    className="block text-sm font-medium mb-3"
+                    style={{ color: "var(--color-text-secondary)" }}
+                  >
+                    Override Classification
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {SENSITIVITY_LABELS.map((label) => {
+                      const isSelected = newLabel === label;
+                      const isCurrent = label === currentLabel;
+                      const color = LABEL_COLORS[label];
+
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => !isCurrent && setNewLabel(label)}
+                          disabled={isCurrent}
+                          className="text-left rounded-lg p-3 transition-colors"
+                          style={{
+                            border: `var(--border-width-hairline) solid ${
+                              isSelected ? color : "var(--color-border)"
+                            }`,
+                            backgroundColor: isSelected
+                              ? `rgba(99, 102, 241, 0.05)`
+                              : "var(--color-bg-tertiary)",
+                            opacity: isCurrent ? 0.5 : 1,
+                            cursor: isCurrent ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="text-sm font-medium"
+                              style={{
+                                color: isSelected
+                                  ? color
+                                  : "var(--color-text-primary)",
+                              }}
+                            >
+                              {label}
+                            </span>
+                            {isSelected && !isCurrent && (
+                              <CheckCircle2
+                                className="h-4 w-4"
+                                style={{ color }}
+                              />
+                            )}
+                          </div>
+                          {isCurrent && (
+                            <span
+                              className="text-xs block mt-1"
+                              style={{ color: "var(--color-text-tertiary)" }}
+                            >
+                              (Current)
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Justification */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label
+                      className="block text-sm font-medium"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      Justification
+                    </label>
+                    <span
+                      className="text-xs mono-data"
+                      style={{ color: charCountColor }}
+                    >
+                      {justChars}/{MIN_JUSTIFICATION_CHARS} chars
+                    </span>
+                  </div>
+                  <textarea
+                    id="override-justification"
+                    value={justification}
+                    onChange={(event) => setJustification(event.target.value)}
+                    rows={4}
+                    className="input resize-y"
+                    placeholder="Explain why this classification is correct (minimum 20 characters)..."
+                  />
+                </div>
+
+                {/* Confirmation Warning */}
+                <div
+                  className="rounded-lg p-4"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    border: "var(--border-width-hairline) solid var(--status-override)",
+                  }}
+                >
+                  <div className="flex items-start gap-3 mb-3">
+                    <AlertTriangle
+                      className="h-5 w-5 flex-shrink-0 mt-0.5"
+                      style={{ color: "var(--status-override)" }}
+                    />
+                    <div className="flex-1">
+                      <p
+                        className="text-sm font-medium mb-1"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        Permanent Audit Trail
+                      </p>
+                      <p
+                        className="text-xs"
+                        style={{
+                          color: "var(--color-text-secondary)",
+                          lineHeight: "var(--line-height-relaxed)",
+                        }}
+                      >
+                        This override will be permanently logged in the
+                        tamper-evident audit chain. The decision, rationale, and
+                        your identity will be cryptographically recorded and
+                        cannot be deleted or modified.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      id="override-confirm"
+                      type="checkbox"
+                      checked={confirmed}
+                      onChange={(event) => setConfirmed(event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded cursor-pointer"
+                      style={{
+                        backgroundColor: "var(--color-bg-primary)",
+                        borderColor: "var(--color-border)",
+                      }}
+                    />
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      I understand and confirm this action will be permanently logged
+                    </span>
+                  </label>
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  id="override-submit-btn"
+                  disabled={!canSubmit}
+                  className="btn btn-primary w-full py-3"
+                  style={{ justifyContent: "center" }}
+                >
+                  {submitting ? "Submitting Override..." : "Submit Override"}
+                </button>
+
+                {submitError && (
+                  <div
+                    className="p-4 rounded-lg flex items-center gap-3 border-hairline"
+                    style={{
+                      backgroundColor: "rgba(239, 68, 68, 0.1)",
+                      borderColor: "var(--status-fail)",
+                    }}
+                  >
+                    <AlertTriangle
+                      className="h-5 w-5 flex-shrink-0"
+                      style={{ color: "var(--status-fail)" }}
+                    />
+                    <p className="text-sm" style={{ color: "var(--status-fail)" }}>
+                      {submitError}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* Right: Document Details */}
+        <div className="space-y-4">
+          {snapshotMatchesInput && snapshot ? (
+            <div className="card p-6">
+              <header className="mb-6">
+                <h3
+                  className="font-semibold mb-1"
+                  style={{
+                    fontSize: "var(--font-size-base)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  Current Document State
+                </h3>
+                <p
+                  style={{
+                    fontSize: "var(--font-size-sm)",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  Effective classification before override
+                </p>
+              </header>
+
+              <div className="space-y-4">
+                {/* Filename */}
+                <div
+                  className="flex items-center gap-3 p-3 rounded-lg border-hairline"
+                  style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                >
+                  <FileText
+                    className="h-5 w-5"
+                    style={{ color: "var(--color-text-secondary)" }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-xs mb-0.5 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Filename
+                    </p>
+                    <p
+                      className="text-sm font-medium truncate"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {snapshot.filename}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Current Label */}
+                <div>
+                  <p
+                    className="text-xs mb-2 uppercase tracking-wider"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Current Classification
+                  </p>
+                  {snapshot.sensitivity_label ? (
+                    <div
+                      className="flex items-center justify-between p-4 rounded-lg border-hairline"
+                      style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                    >
+                      <Badge
+                        label={snapshot.sensitivity_label}
+                        tone={LABEL_TONES[snapshot.sensitivity_label]}
+                        size="lg"
+                      />
+                      {snapshot.label_source && (
+                        <span
+                          className="text-xs mono-data"
+                          style={{ color: "var(--color-text-tertiary)" }}
+                        >
+                          {snapshot.label_source}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      className="p-4 rounded-lg border-hairline text-center"
+                      style={{
+                        borderStyle: "dashed",
+                        backgroundColor: "var(--color-bg-tertiary)",
+                      }}
+                    >
+                      <p
+                        className="text-sm"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        Not classified
+                      </p>
+                      <p
+                        className="text-xs mt-1"
+                        style={{ color: "var(--color-text-tertiary)" }}
+                      >
+                        Cannot override unclassified document
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Metadata */}
+                <div
+                  className="pt-4 space-y-2 border-t"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
+                  <div className="flex items-center justify-between text-sm">
+                    <span style={{ color: "var(--color-text-secondary)" }}>
+                      Document ID
+                    </span>
+                    <span
+                      className="mono-data text-xs"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {snapshot.id}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span style={{ color: "var(--color-text-secondary)" }}>
+                      Status
+                    </span>
+                    <span
+                      className="text-xs uppercase"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {snapshot.current_status}
+                    </span>
+                  </div>
+                  {snapshot.uploaded_at && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span style={{ color: "var(--color-text-secondary)" }}>
+                        Uploaded
+                      </span>
+                      <span
+                        className="text-xs mono-data"
+                        style={{ color: "var(--color-text-tertiary)" }}
+                      >
+                        {new Date(snapshot.uploaded_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* View Links */}
+                <div className="pt-4 space-y-2">
+                  <Link
+                    href={`/documents/${snapshot.id}/summary`}
+                    className="flex items-center justify-between w-full p-3 rounded-lg border-hairline transition-colors group"
+                    style={{
+                      backgroundColor: "var(--color-bg-secondary)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
+                      e.currentTarget.style.color = "var(--color-text-primary)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "var(--color-bg-secondary)";
+                      e.currentTarget.style.color = "var(--color-text-secondary)";
+                    }}
+                  >
+                    <span className="text-sm">View Full Summary</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  <Link
+                    href={`/audit/${snapshot.id}`}
+                    className="flex items-center justify-between w-full p-3 rounded-lg border-hairline transition-colors group"
+                    style={{
+                      backgroundColor: "var(--color-bg-secondary)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
+                      e.currentTarget.style.color = "var(--color-text-primary)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "var(--color-bg-secondary)";
+                      e.currentTarget.style.color = "var(--color-text-secondary)";
+                    }}
+                  >
+                    <span className="text-sm">View Audit Chain</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="card flex flex-col items-center justify-center py-12"
+              style={{ minHeight: "400px" }}
+            >
+              <FileText
+                className="h-12 w-12 mb-4 opacity-40"
+                style={{ color: "var(--color-text-tertiary)" }}
+              />
+              <p
+                className="text-base font-medium mb-2"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                No Document Loaded
+              </p>
+              <p
+                className="text-sm text-center max-w-xs"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Enter a document ID and click Load to view classification details
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -392,16 +723,18 @@ export function OverrideScreen({
 function OverrideFromQuery() {
   const params = useSearchParams();
   const documentId = params.get("document_id") ?? "";
-  return (
-    <OverrideScreen key={documentId} initialDocumentId={documentId} />
-  );
+  return <OverrideScreen key={documentId} initialDocumentId={documentId} />;
 }
 
 export default function OverridePage() {
   return (
     <Suspense
       fallback={
-        <p className="p-6 text-sm text-[var(--color-text-muted)]">Loading…</p>
+        <div className="flex items-center justify-center min-h-screen">
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            Loading override console...
+          </p>
+        </div>
       }
     >
       <OverrideFromQuery />

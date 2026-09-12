@@ -35,6 +35,10 @@ opa-wasmtime==0.1.1
 #   neo4j                -> knowledge graph (SPEC.md 3.11)
 #   pgvector             -> agentic RAG (SPEC.md 3.12)
 #   qiskit               -> migration scheduler (SPEC.md 3.10)
+qiskit>=1.2.2
+qiskit-algorithms>=0.3.0
+qiskit-optimization>=0.7.0
+qiskit-aer>=0.15.1
 #   liboqs-python        -> crypto engine (SPEC.md 3.7). Pin the exact version
 #                           when added and re-run the full crypto suite after
 #                           any bump; this library's API has changed before.

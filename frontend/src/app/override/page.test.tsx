@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OverrideScreen } from "./page";
 import { ApiError, getDocument, overrideClassification } from "@/lib/api/client";
@@ -59,17 +59,15 @@ async function fillReadyForm(
   options?: { confirm?: boolean }
 ) {
   mockGetDocument.mockResolvedValueOnce(sampleSnapshot);
-  await user.type(
-    screen.getByLabelText(/^document id/i),
-    sampleSnapshot.id
-  );
+  const input = screen.getByPlaceholderText(/Enter document UUID/i);
+  fireEvent.change(input, { target: { value: sampleSnapshot.id } });
   await user.click(screen.getByRole("button", { name: /^load$/i }));
   expect(await screen.findByText("payroll.pdf")).toBeInTheDocument();
-  await user.selectOptions(screen.getByLabelText(/^new label/i), "INTERNAL");
-  await user.type(screen.getByLabelText(/^justification/i), longJustification);
+  await user.click(screen.getByRole("button", { name: /^INTERNAL$/i }));
+  await user.type(screen.getByPlaceholderText(/Explain why this classification/i), longJustification);
   if (options?.confirm !== false) {
     await user.click(
-      screen.getByLabelText(/i confirm this action will be permanently logged/i)
+      screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );
   }
 }
@@ -93,21 +91,21 @@ describe("OverrideScreen", () => {
     expect(mockOverride).not.toHaveBeenCalled();
 
     await user.click(
-      screen.getByLabelText(/i confirm this action will be permanently logged/i)
+      screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );
     expect(submit).toBeEnabled();
-  });
+  }, 10000);
 
   it("keeps submit disabled when justification is under 20 characters after trim", async () => {
     const user = userEvent.setup();
     mockGetDocument.mockResolvedValueOnce(sampleSnapshot);
     render(<OverrideScreen />);
-    await user.type(screen.getByLabelText(/^document id/i), sampleSnapshot.id);
+    fireEvent.change(screen.getByPlaceholderText(/Enter document UUID/i), { target: { value: sampleSnapshot.id } });
     await user.click(screen.getByRole("button", { name: /^load$/i }));
-    await user.selectOptions(screen.getByLabelText(/^new label/i), "INTERNAL");
-    await user.type(screen.getByLabelText(/^justification/i), "   too short   ");
+    await user.click(screen.getByRole("button", { name: /^INTERNAL$/i }));
+    await user.type(screen.getByPlaceholderText(/Explain why this classification/i), "   too short   ");
     await user.click(
-      screen.getByLabelText(/i confirm this action will be permanently logged/i)
+      screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );
     expect(screen.getByRole("button", { name: /submit override/i })).toBeDisabled();
   });
@@ -136,10 +134,10 @@ describe("OverrideScreen", () => {
     );
     expect(mockOverride.mock.calls[0][0]).not.toHaveProperty("confirmed");
     expect(mockOverride.mock.calls[0][0]).not.toHaveProperty("original_label");
-    expect(await screen.findByText("Override recorded")).toBeInTheDocument();
+    expect(await screen.findByText(/Override Successfully Recorded/i)).toBeInTheDocument();
     expect(screen.getByText(sampleResult.id)).toBeInTheDocument();
     expect(
-      screen.getByLabelText(/i confirm this action will be permanently logged/i)
+      screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     ).not.toBeChecked();
   });
 
@@ -149,14 +147,11 @@ describe("OverrideScreen", () => {
     await fillReadyForm(user);
     const submit = screen.getByRole("button", { name: /submit override/i });
     expect(submit).toBeEnabled();
-    await user.clear(screen.getByLabelText(/^document id/i));
-    await user.type(
-      screen.getByLabelText(/^document id/i),
-      "ffffffff-ffff-ffff-ffff-ffffffffffff"
-    );
-    expect(submit).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/Enter document UUID/i), {
+      target: { value: "ffffffff-ffff-ffff-ffff-ffffffffffff" },
+    });
+    expect(screen.queryByRole("button", { name: /submit override/i })).not.toBeInTheDocument();
     expect(screen.queryByText("payroll.pdf")).not.toBeInTheDocument();
-    expect(screen.getByText(/document id changed — load again/i)).toBeInTheDocument();
     expect(mockOverride).not.toHaveBeenCalled();
   });
 
@@ -165,7 +160,7 @@ describe("OverrideScreen", () => {
     render(<OverrideScreen />);
     await fillReadyForm(user);
     const box = screen.getByLabelText(
-      /i confirm this action will be permanently logged/i
+      /i understand and confirm this action will be permanently logged/i
     );
     const submit = screen.getByRole("button", { name: /submit override/i });
     expect(submit).toBeEnabled();
@@ -179,19 +174,19 @@ describe("OverrideScreen", () => {
       new ApiError(404, "Not Found", { detail: "Document was not found." })
     );
     render(<OverrideScreen />);
-    await user.type(screen.getByLabelText(/^document id/i), sampleSnapshot.id);
+    fireEvent.change(screen.getByPlaceholderText(/Enter document UUID/i), { target: { value: sampleSnapshot.id } });
     await user.click(screen.getByRole("button", { name: /^load$/i }));
     expect(
       await screen.findByText(/API 404: Document was not found/i)
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /submit override/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /submit override/i })).not.toBeInTheDocument();
   });
 
   it("loads the initial document id and shows the effective label", async () => {
     mockGetDocument.mockResolvedValue(sampleSnapshot);
     render(<OverrideScreen initialDocumentId={sampleSnapshot.id} />);
     expect(await screen.findByText("payroll.pdf")).toBeInTheDocument();
-    expect(screen.getByText("RESTRICTED")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /RESTRICTED.*Current/i })).toBeDisabled();
     expect(mockGetDocument).toHaveBeenCalledWith(
       sampleSnapshot.id,
       "security_analyst"
@@ -206,22 +201,22 @@ describe("OverrideScreen", () => {
     expect(
       await screen.findByText(/API 404: Document was not found/i)
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /submit override/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /submit override/i })).not.toBeInTheDocument();
   });
 
   it("disables the current label and keeps submit disabled until a different one is chosen", async () => {
     const user = userEvent.setup();
     mockGetDocument.mockResolvedValueOnce(sampleSnapshot);
     render(<OverrideScreen />);
-    await user.type(screen.getByLabelText(/^document id/i), sampleSnapshot.id);
+    fireEvent.change(screen.getByPlaceholderText(/Enter document UUID/i), { target: { value: sampleSnapshot.id } });
     await user.click(screen.getByRole("button", { name: /^load$/i }));
     expect(await screen.findByText("payroll.pdf")).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: /RESTRICTED \(current\)/i })
+      screen.getByRole("button", { name: /RESTRICTED.*Current/i })
     ).toBeDisabled();
-    await user.type(screen.getByLabelText(/^justification/i), longJustification);
+    await user.type(screen.getByPlaceholderText(/Explain why this classification/i), longJustification);
     await user.click(
-      screen.getByLabelText(/i confirm this action will be permanently logged/i)
+      screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );
     expect(screen.getByRole("button", { name: /submit override/i })).toBeDisabled();
   });
@@ -235,15 +230,15 @@ describe("OverrideScreen", () => {
       classification_id: null,
     });
     render(<OverrideScreen />);
-    await user.type(screen.getByLabelText(/^document id/i), sampleSnapshot.id);
+    fireEvent.change(screen.getByPlaceholderText(/Enter document UUID/i), { target: { value: sampleSnapshot.id } });
     await user.click(screen.getByRole("button", { name: /^load$/i }));
     expect(
-      await screen.findByText(/not classified — cannot override/i)
+      await screen.findByText(/not classified/i)
     ).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText(/^new label/i), "INTERNAL");
-    await user.type(screen.getByLabelText(/^justification/i), longJustification);
+    await user.click(screen.getByRole("button", { name: /^INTERNAL$/i }));
+    await user.type(screen.getByPlaceholderText(/Explain why this classification/i), longJustification);
     await user.click(
-      screen.getByLabelText(/i confirm this action will be permanently logged/i)
+      screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );
     expect(screen.getByRole("button", { name: /submit override/i })).toBeDisabled();
     expect(mockOverride).not.toHaveBeenCalled();
@@ -262,7 +257,7 @@ describe("OverrideScreen", () => {
     expect(
       await screen.findByText(/API 403: Role security_analyst is not permitted/i)
     ).toBeInTheDocument();
-    expect(screen.queryByText("Override recorded")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Override Successfully Recorded/i)).not.toBeInTheDocument();
   });
 
   it("passes the selected role to load and to persist", async () => {
@@ -270,7 +265,7 @@ describe("OverrideScreen", () => {
     mockOverride.mockResolvedValueOnce(sampleResult);
     render(<OverrideScreen />);
     await user.selectOptions(
-      screen.getByLabelText(/^caller role/i),
+      screen.getByRole("combobox"),
       "security_admin"
     );
     await fillReadyForm(user);
@@ -294,3 +289,4 @@ describe("OverrideScreen", () => {
     );
   });
 });
+

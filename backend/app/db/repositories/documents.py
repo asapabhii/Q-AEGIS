@@ -58,6 +58,18 @@ def mark_classified(session: Session, document: Document) -> Document:
     return document
 
 
+def mark_archived(session: Session, document: Document) -> Document:
+    """Advance a document's lifecycle pointer to ``ARCHIVED``.
+
+    Used when a document's key is shredded (PRD FR-8). The document becomes
+    permanently unreadable, but its audit history is preserved.
+    """
+    if document.current_status != DocumentStatus.ARCHIVED:
+        document.current_status = DocumentStatus.ARCHIVED
+        session.flush()
+    return document
+
+
 def list_documents(session: Session) -> list[Document]:
     """Every document, newest ``uploaded_at`` first, then ``id``.
 

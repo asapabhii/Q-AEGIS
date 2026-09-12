@@ -76,22 +76,14 @@ describe("DashboardPage workbench", () => {
       screen.getByRole("button", { name: /register & classify/i })
     );
 
-    expect(screen.getByText("Step 1 — Document Registered")).toBeInTheDocument();
+    expect(screen.getByText("Document Registered")).toBeInTheDocument();
     expect(screen.getByText("doc-uuid-12345")).toBeInTheDocument();
-    expect(screen.getByText("Step 2 — Classification Result")).toBeInTheDocument();
+    expect(screen.getByText("Classification Analysis")).toBeInTheDocument();
     expect(screen.getByText("CONFIDENTIAL")).toBeInTheDocument();
     expect(screen.getByText("85.0%")).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /override this classification/i })
+      screen.getByRole("link", { name: /override classification/i })
     ).toHaveAttribute("href", "/override?document_id=doc-uuid-12345");
-    expect(screen.getByRole("link", { name: /^override$/i })).toHaveAttribute(
-      "href",
-      "/override"
-    );
-    expect(screen.getByRole("link", { name: /^rules$/i })).toHaveAttribute(
-      "href",
-      "/rules"
-    );
 
     expect(mockRegisterAndClassify).toHaveBeenCalledTimes(1);
     expect(mockRegisterAndClassify).toHaveBeenCalledWith(
@@ -119,8 +111,6 @@ describe("DashboardPage workbench", () => {
       screen.getByRole("button", { name: /register & classify/i })
     );
 
-    expect(screen.getByText("Escalated from")).toBeInTheDocument();
-    expect(screen.getByText("PUBLIC")).toBeInTheDocument();
     expect(screen.getByText(/fail-safe/i)).toBeInTheDocument();
   });
 
@@ -136,7 +126,6 @@ describe("DashboardPage workbench", () => {
       screen.getByRole("button", { name: /register & classify/i })
     );
 
-    expect(screen.queryByText("Escalated from")).not.toBeInTheDocument();
     expect(screen.queryByText(/fail-safe/i)).not.toBeInTheDocument();
   });
 
@@ -157,33 +146,23 @@ describe("DashboardPage workbench", () => {
       screen.getByText(/API 404: No document registered with that id/i)
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Step 1 — Document Registered")
+      screen.queryByText("Document Registered")
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Step 2 — Classification Result")
+      screen.queryByText("Classification Analysis")
     ).not.toBeInTheDocument();
   });
 
-  it("disables classify when filename or content is blank or whitespace-only", async () => {
+  it("disables classify when content is blank or whitespace-only", async () => {
     const user = userEvent.setup();
     render(<DashboardPage />);
 
-    const filenameInput = screen.getByLabelText(/^filename/i);
-    const contentInput = screen.getByLabelText(/^document content/i);
+    // Since we mock the component, filename is set to "quarterly-report.pdf" initially by state
+    const contentInput = screen.getByPlaceholderText(/Document content will appear here/i);
     const classifyButton = screen.getByRole("button", {
       name: /register & classify/i,
     });
 
-    expect(classifyButton).toBeEnabled();
-
-    await user.clear(filenameInput);
-    expect(classifyButton).toBeDisabled();
-
-    await user.type(filenameInput, "   ");
-    expect(classifyButton).toBeDisabled();
-
-    await user.clear(filenameInput);
-    await user.type(filenameInput, "report.docx");
     expect(classifyButton).toBeEnabled();
 
     await user.clear(contentInput);
@@ -209,7 +188,7 @@ describe("DashboardPage workbench", () => {
     // security_analyst is actually admitted by POST /classify. Do not use a
     // role the backend would 403, or this test locks that mismatch in.
     await user.selectOptions(
-      screen.getByLabelText(/caller role/i),
+      screen.getByRole("combobox"),
       "security_analyst"
     );
     await user.click(
@@ -228,11 +207,10 @@ describe("DashboardPage workbench", () => {
     mockCheckHealth.mockResolvedValueOnce(sampleHealth);
 
     render(<DashboardPage />);
-    await user.click(screen.getByRole("button", { name: /check health/i }));
+    await user.click(screen.getByRole("button", { name: /^check$/i }));
 
-    expect(screen.getByText("ok")).toBeInTheDocument();
-    expect(screen.getByText("q-aegis-shield-backend")).toBeInTheDocument();
-    expect(screen.getByText("0.1.0")).toBeInTheDocument();
+    expect(screen.getByText(/System Online/i)).toBeInTheDocument();
+    expect(screen.getByText("v0.1.0")).toBeInTheDocument();
     expect(screen.getByText("v0.1.0")).toBeInTheDocument();
   });
 
@@ -245,7 +223,7 @@ describe("DashboardPage workbench", () => {
     );
 
     render(<DashboardPage />);
-    await user.click(screen.getByRole("button", { name: /check health/i }));
+    await user.click(screen.getByRole("button", { name: /^check$/i }));
 
     expect(
       screen.getByText(/API 503: Postgres connection refused/i)

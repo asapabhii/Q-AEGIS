@@ -39,3 +39,22 @@ class CryptoProfileResponse(BaseModel):
     profile_type: CryptoProfileType
     consensus_value: Decimal
     selected_at: datetime
+
+
+class CryptoShredRequest(BaseModel):
+    """Request to permanently shred a document's encryption key.
+
+    ``document_id`` identifies the document to shred.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: UUID
+
+
+class CryptoShredResponse(BaseModel):
+    """Response after successfully shredding a document's key."""
+
+    document_id: UUID
+    shredded_at: datetime
+    status: str

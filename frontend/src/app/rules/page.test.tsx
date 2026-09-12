@@ -67,7 +67,10 @@ const expectedBody = {
 };
 
 async function fillReadyForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/^rule name/i), "Deny restricted");
+  await user.type(
+    screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i),
+    "Deny restricted"
+  );
   await user.selectOptions(screen.getByLabelText(/^value$/i), "RESTRICTED");
 }
 
@@ -84,11 +87,14 @@ describe("RuleBuilderScreen", () => {
     const user = userEvent.setup();
     render(<RuleBuilderScreen />);
     const testBtn = screen.getByRole("button", { name: /test rule/i });
-    const saveBtn = screen.getByRole("button", { name: /save rule/i });
+    const saveBtn = screen.getByRole("button", { name: /deploy rule/i });
     expect(testBtn).toBeDisabled();
     expect(saveBtn).toBeDisabled();
 
-    await user.type(screen.getByLabelText(/^rule name/i), "Deny restricted");
+    await user.type(
+      screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i),
+      "Deny restricted"
+    );
     expect(testBtn).toBeDisabled();
 
     await user.selectOptions(screen.getByLabelText(/^value$/i), "RESTRICTED");
@@ -99,10 +105,13 @@ describe("RuleBuilderScreen", () => {
   it("keeps both actions disabled for a whitespace-only name", async () => {
     const user = userEvent.setup();
     render(<RuleBuilderScreen />);
-    await user.type(screen.getByLabelText(/^rule name/i), "   ");
+    await user.type(
+      screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i),
+      "   "
+    );
     await user.selectOptions(screen.getByLabelText(/^value$/i), "RESTRICTED");
     expect(screen.getByRole("button", { name: /test rule/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /save rule/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /deploy rule/i })).toBeDisabled();
   });
 
   it("tests without calling createPolicyRule", async () => {
@@ -115,8 +124,8 @@ describe("RuleBuilderScreen", () => {
     expect(mockTest).toHaveBeenCalledTimes(1);
     expect(mockTest).toHaveBeenCalledWith(expectedBody, "compliance_officer");
     expect(mockCreate).not.toHaveBeenCalled();
-    expect(await screen.findByText("Dry-run result")).toBeInTheDocument();
-    expect(screen.getByText(/would match/i)).toBeInTheDocument();
+    expect(await screen.findByText("Test Results")).toBeInTheDocument();
+    expect(screen.getByText(/^Match$/i)).toBeInTheDocument();
     expect(JSON.stringify(mockTest.mock.calls[0][0])).not.toContain("window");
   });
 
@@ -125,12 +134,12 @@ describe("RuleBuilderScreen", () => {
     mockCreate.mockResolvedValueOnce(sampleSaved);
     render(<RuleBuilderScreen />);
     await fillReadyForm(user);
-    await user.click(screen.getByRole("button", { name: /save rule/i }));
+    await user.click(screen.getByRole("button", { name: /deploy rule/i }));
 
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(mockCreate).toHaveBeenCalledWith(expectedBody, "compliance_officer");
     expect(mockTest).not.toHaveBeenCalled();
-    expect(await screen.findByText("Rule saved")).toBeInTheDocument();
+    expect(await screen.findByText("Policy Rule Deployed")).toBeInTheDocument();
     expect(screen.getByText(sampleSaved.id)).toBeInTheDocument();
   });
 
@@ -148,7 +157,7 @@ describe("RuleBuilderScreen", () => {
     await user.selectOptions(screen.getAllByLabelText(/^field$/i)[1], "trust_score");
     await user.selectOptions(screen.getAllByLabelText(/^operator$/i)[1], "lte");
     await user.type(screen.getAllByLabelText(/^value$/i)[1], "0.4");
-    await user.click(screen.getByRole("button", { name: /save rule/i }));
+    await user.click(screen.getByRole("button", { name: /deploy rule/i }));
 
     expect(mockCreate).toHaveBeenCalledWith(
       {
@@ -176,11 +185,11 @@ describe("RuleBuilderScreen", () => {
     );
     render(<RuleBuilderScreen />);
     await fillReadyForm(user);
-    await user.click(screen.getByRole("button", { name: /save rule/i }));
+    await user.click(screen.getByRole("button", { name: /deploy rule/i }));
     expect(
       await screen.findByText(/API 409: A rule with this name already exists/i)
     ).toBeInTheDocument();
-    expect(screen.queryByText("Rule saved")).not.toBeInTheDocument();
+    expect(screen.queryByText("Policy Rule Deployed")).not.toBeInTheDocument();
   });
 
   it("passes the selected role to test and save", async () => {
@@ -189,13 +198,14 @@ describe("RuleBuilderScreen", () => {
     mockCreate.mockResolvedValueOnce(sampleSaved);
     render(<RuleBuilderScreen />);
     await user.selectOptions(
-      screen.getByLabelText(/^caller role/i),
+      screen.getByDisplayValue("Compliance Officer"),
       "security_admin"
     );
     await fillReadyForm(user);
     await user.click(screen.getByRole("button", { name: /test rule/i }));
     expect(mockTest).toHaveBeenCalledWith(expectedBody, "security_admin");
-    await user.click(screen.getByRole("button", { name: /save rule/i }));
+    await user.click(screen.getByRole("button", { name: /deploy rule/i }));
     expect(mockCreate).toHaveBeenCalledWith(expectedBody, "security_admin");
   });
 });
+

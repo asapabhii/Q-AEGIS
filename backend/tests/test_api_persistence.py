@@ -1846,3 +1846,55 @@ def test_reading_the_inventory_writes_nothing(
     assert len(rows(db_session, PolicyDecision)) == decisions_before
     assert len(rows(db_session, AuditLog)) == audit_before
     assert len(rows(db_session, Document)) == documents_before
+
+
+# --------------------------------------------------------------------------
+# POST /crypto-shredding, SPEC.md 3.9, PRD.md FR-8
+# --------------------------------------------------------------------------
+
+
+def test_shredding_a_document_persists_archived_status_and_audit_entry(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, _trust_id = assess(client, db_session)
+    # The default data owner seeded by `app.db.seed` is used for registration.
+
+    response = client.post(
+        f"{API_V1_PREFIX}/crypto-shredding",
+        json={"document_id": document_id},
+        headers={"X-Q-AEGIS-Actor-Role": "data_owner"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["document_id"] == document_id
+    assert data["status"] == "shredded"
+
+    doc_row = next(iter(rows(db_session, Document, id=document_id)))
+    assert doc_row.current_status.value == "archived"
+
+    audit_entry = next(
+        iter(
+            rows(
+                db_session,
+                AuditLog,
+                document_id=document_id,
+                event_type="document_shredded",
+            )
+        )
+    )
+    assert audit_entry.payload["action"] == "crypto_key_shredded"
+    assert audit_entry.payload["status"] == "archived"
+
+
+def test_shredding_requires_data_owner_who_uploaded(
+    client: TestClient, db_session: Session
+) -> None:
+    document_id, _trust_id = assess(client, db_session)
+
+    # A security analyst cannot shred it
+    response = client.post(
+        f"{API_V1_PREFIX}/crypto-shredding",
+        json={"document_id": document_id},
+        headers={"X-Q-AEGIS-Actor-Role": "security_analyst"},
+    )
+    assert response.status_code == 403
