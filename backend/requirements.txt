@@ -12,6 +12,12 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.4
 pydantic==2.13.5
 pydantic-settings==2.15.0
+email-validator==2.3.0
+python-multipart==0.0.20
+PyJWT==2.10.1
+bcrypt==4.3.0
+pypdf==6.0.0
+python-docx==1.2.0
 
 # Data model, SPEC.md Section 5. psycopg 3 (not psycopg2) because DATABASE_URL
 # uses the postgresql+psycopg driver; the [binary] extra ships prebuilt wheels
@@ -45,3 +51,6 @@ qiskit==1.4.3
 
 # Knowledge graph, SPEC.md 3.11 / PRD FR-10.
 neo4j==5.28.1
+
+# Vector store for FR-11 RAG (pgvector type + SQLAlchemy VECTOR).
+pgvector==0.4.1

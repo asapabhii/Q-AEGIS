@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from app.config import get_settings
+from app.event_bus.client import redis_from_settings
 from app.event_bus.publisher import STREAM_KEY, is_bus_configured, parse_stream_fields
 from app.event_bus.schemas import EventType
 from app.risk_engine.recompute import run_scheduled_recompute
@@ -51,17 +52,15 @@ def _handle_envelope(envelope: Any) -> None:
 
 
 def _loop() -> None:
+    if not get_settings().redis_url:
+        return
+
     try:
-        import redis
+        client = redis_from_settings()
     except ImportError:  # pragma: no cover
         logger.error("redis package missing; risk consumer cannot start")
         return
 
-    url = get_settings().redis_url
-    if not url:
-        return
-
-    client = redis.Redis.from_url(url, decode_responses=True)
     try:
         _ensure_group(client)
         while not _stop.is_set():

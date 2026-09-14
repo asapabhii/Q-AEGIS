@@ -70,3 +70,40 @@ def test_find_document_paths_builds_summaries() -> None:
 def test_find_document_paths_rejects_bad_hops() -> None:
     with pytest.raises(ValueError):
         find_document_paths(uuid4(), max_hops=0)
+
+
+def test_driver_kwargs_includes_custom_ca(tmp_path, monkeypatch) -> None:
+    from app.config import get_settings
+    from app.graph.client import _uri_and_driver_kwargs
+
+    ca = tmp_path / "ca.crt"
+    ca.write_text("dummy-ca\n", encoding="utf-8")
+    monkeypatch.setenv("QAEGIS_NEO4J_URI", "bolt+s://127.0.0.1:7687")
+    monkeypatch.setenv("QAEGIS_NEO4J_USER", "neo4j")
+    monkeypatch.setenv("QAEGIS_NEO4J_PASSWORD", "test-password")
+    monkeypatch.setenv("QAEGIS_NEO4J_SSL_CA_CERTS", str(ca))
+    get_settings.cache_clear()
+    try:
+        uri, kwargs = _uri_and_driver_kwargs()
+    finally:
+        get_settings.cache_clear()
+    assert uri == "bolt://127.0.0.1:7687"
+    assert kwargs["encrypted"] is True
+    assert "trusted_certificates" in kwargs
+    assert kwargs["auth"] == ("neo4j", "test-password")
+
+
+def test_driver_kwargs_rejects_missing_ca(monkeypatch) -> None:
+    from app.config import get_settings
+    from app.graph.client import GraphNotConfiguredError, _uri_and_driver_kwargs
+
+    monkeypatch.setenv("QAEGIS_NEO4J_URI", "bolt+s://127.0.0.1:7687")
+    monkeypatch.setenv("QAEGIS_NEO4J_USER", "neo4j")
+    monkeypatch.setenv("QAEGIS_NEO4J_PASSWORD", "test-password")
+    monkeypatch.setenv("QAEGIS_NEO4J_SSL_CA_CERTS", "C:/missing/ca.crt")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(GraphNotConfiguredError, match="missing file"):
+            _uri_and_driver_kwargs()
+    finally:
+        get_settings.cache_clear()

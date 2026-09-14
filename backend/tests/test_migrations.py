@@ -31,6 +31,7 @@ EXPECTED_TABLES = frozenset(
         "document_ciphertexts",
         "migration_schedule",
         "audit_log",
+        "rag_chunks",
     }
 )
 

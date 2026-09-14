@@ -137,6 +137,7 @@ which is why none of them carries a "current" flag.
 | `name` | `varchar(120)` | no | |
 | `email` | `varchar(255)` unique | no | Login identity |
 | `role` | `user_role` | no | `data_owner`, `security_analyst`, `security_admin`, `compliance_officer`, `auditor`, `ciso`, `engineer` |
+| `password_hash` | `varchar(255)` | **yes** | bcrypt hash for local JWT login. Null until set (seeded accounts get a known local-only password). Never store plaintext |
 | `created_at` | `timestamptz` | no | Defaults to `now()` |
 
 ## `documents`
@@ -493,3 +494,15 @@ similarity search. That table is an implementation of the vector store decision
 (see `docs/decisions.md`); it is not one of the twelve core domain tables in
 Section 5 of `SPEC.md`, and it must not be used as a substitute for Neo4j path
 queries.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | `gen_random_uuid()` |
+| `document_id` | `uuid` FK → `documents` ON DELETE CASCADE | nullable for non-document sources |
+| `source_type` | `varchar(80)` | inventory / audit / etc. |
+| `source_id` | `varchar(120)` | optional origin key |
+| `content` | `text` | chunk body |
+| `embedding` | `vector(64)` | stub-hash-v1 width this phase |
+| `embedding_model` | `varchar(80)` | always names the embedder |
+| `metadata` | `jsonb` | default `{}` |
+| `created_at` | `timestamptz` | `now()` |

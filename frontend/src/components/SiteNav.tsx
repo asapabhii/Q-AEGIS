@@ -5,11 +5,14 @@ const LINKS = [
   { href: "/override", label: "Override" },
   { href: "/rules", label: "Rules" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/ciso", label: "CISO" },
+  { href: "/engineer", label: "Engineer" },
   { href: "/audit", label: "Audit" },
   { href: "/summary", label: "Summary" },
   { href: "/migration", label: "Migration" },
   { href: "/graph", label: "Graph" },
   { href: "/ask", label: "Ask" },
+  { href: "/login", label: "Login" },
 ] as const;
 
 export type SiteNavHref = (typeof LINKS)[number]["href"];

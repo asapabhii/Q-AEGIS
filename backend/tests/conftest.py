@@ -12,6 +12,7 @@ A rollback discards the savepoint without ever issuing a statement the triggers
 would refuse.
 """
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,9 @@ from app.db.session import (
     require_database_url,
 )
 from app.main import create_app
+
+# Required by ``seed_development_users``; never a production secret.
+os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
 
 #: Repository-relative path to the Alembic configuration.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +74,14 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     )
     monkeypatch.setenv("RISK_RECOMPUTE_INTERVAL_SECONDS", "0")
+    # Tests keep the forgeable role header as a DEV bypass; JWT still works
+    # when a test issues a token against this secret.
+    monkeypatch.setenv("JWT_SECRET", "test-only-jwt-secret-not-for-prod")
+    monkeypatch.setenv("AUTH_DEV_HEADER_BYPASS", "true")
+    monkeypatch.setenv("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
+    # Host .env often points at a live Redis (possibly TLS). Tests must not
+    # start the risk-consumer thread against that instance.
+    monkeypatch.setenv("REDIS_URL", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

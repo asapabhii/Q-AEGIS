@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
+from app.event_bus.client import redis_from_settings
 from app.event_bus.schemas import (
     DocumentClassifiedPayload,
     DocumentUploadedPayload,
@@ -95,14 +96,10 @@ def publish_event(
         return None
 
     try:
-        import redis
+        client = redis_from_settings()
     except ImportError as exc:  # pragma: no cover - dependency is declared
         raise RuntimeError("redis package is required when REDIS_URL is set") from exc
 
-    client = redis.Redis.from_url(
-        get_settings().redis_url,  # type: ignore[arg-type]
-        decode_responses=True,
-    )
     try:
         entry_id = client.xadd(
             STREAM_KEY,

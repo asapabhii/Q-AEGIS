@@ -11,7 +11,8 @@ from app.api.deps import DbSession, RagCaller, resolve_seeded_actor
 from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import documents as documents_repo
-from app.rag.pipeline import ask_question, ingest_document_records
+from app.rag.ingest import ingest_document_records
+from app.rag.pipeline import ask_question
 from app.rag.schemas import RagAnswer, RagIngestResult
 
 router = APIRouter(tags=["rag"])

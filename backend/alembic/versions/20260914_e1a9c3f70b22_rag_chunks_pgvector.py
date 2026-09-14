@@ -10,15 +10,14 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = "e1a9c3f70b22"
-down_revision: Union[str, None] = "c4f8a1e92b03"
+down_revision: Union[str, None] = "d8e2b4c91a07"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.execute(
-        """
+    op.execute("""
         CREATE TABLE rag_chunks (
             id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
@@ -30,8 +29,7 @@ def upgrade() -> None:
             metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
             created_at timestamptz NOT NULL DEFAULT now()
         )
-        """
-    )
+        """)
     op.execute("CREATE INDEX ix_rag_chunks_document_id ON rag_chunks (document_id)")
     op.execute("CREATE INDEX ix_rag_chunks_source_type ON rag_chunks (source_type)")
 

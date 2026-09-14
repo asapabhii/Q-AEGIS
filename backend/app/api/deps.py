@@ -1,34 +1,37 @@
-"""Shared API dependencies: the database session and the authorization guard.
+"""Shared API dependencies: session + authorization.
 
-``AGENTS.md`` requires every endpoint to check caller identity and role
-(``users.role``) server-side before acting, and never to rely on frontend UI
-hiding as access control. This module is where that check lives.
+Primary auth is JWT (``Authorization: Bearer``). When
+``AUTH_DEV_HEADER_BYPASS`` is true, ``X-Q-AEGIS-Actor-Role`` remains a
+dev-only identity bypass that maps to a seeded user. Disable the bypass
+outside local/CI.
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator
+from contextvars import ContextVar
 from typing import Annotated, Callable
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.auth.security import decode_access_token
+from app.config import get_settings
 from app.db.enums import UserRole
 from app.db.models import User
 from app.db.repositories import identity
 from app.db.session import session_scope
 
-#: Header carrying the caller's role in the Phase 1 STUB guard below.
 ACTOR_ROLE_HEADER = "X-Q-AEGIS-Actor-Role"
+
+_current_user_id: ContextVar[UUID | None] = ContextVar(
+    "qaegis_current_user_id", default=None
+)
 
 
 def get_db_session() -> Iterator[Session]:
-    """Yield a session whose transaction spans the whole request.
-
-    One transaction per request is what makes "a decision and the audit entry
-    proving it happened are atomic" true: the handler writes both, and either
-    both commit here or neither does. A handler that raises, including one
-    raising ``HTTPException`` for a 404, rolls back rather than leaving a partial
-    write behind.
-    """
+    """Yield a session whose transaction spans the whole request."""
     with session_scope() as session:
         yield session
 
@@ -36,96 +39,113 @@ def get_db_session() -> Iterator[Session]:
 DbSession = Annotated[Session, Depends(get_db_session)]
 
 
-def _parse_role(raw: str | None) -> UserRole:
-    """Resolve a raw header value to a :class:`UserRole`, failing closed.
-
-    Raises:
-        HTTPException: 401 when no role is presented, 403 when the presented role
-            is not recognized. Both are refusals; there is no branch here that
-            proceeds without a valid role.
-    """
-    if raw is None or not raw.strip():
+def _user_from_bearer(session: Session, authorization: str | None) -> User | None:
+    if authorization is None or not authorization.strip():
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Missing {ACTOR_ROLE_HEADER} header; caller identity is required.",
+            detail="Authorization must be Bearer <token>.",
         )
     try:
-        return UserRole(raw.strip().lower())
+        payload = decode_access_token(token.strip())
+        user_id = UUID(str(payload["sub"]))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token.",
+        ) from exc
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token subject is not a known user.",
+        )
+    return user
+
+
+def _user_from_dev_header(session: Session, actor_role: str | None) -> User | None:
+    settings = get_settings()
+    if not settings.auth_dev_header_bypass:
+        return None
+    if actor_role is None or not actor_role.strip():
+        return None
+    try:
+        role = UserRole(actor_role.strip().lower())
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unrecognized caller role.",
         ) from None
+    user = identity.first_by_role(session, role)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"No user exists with role '{role.value}'. Seed accounts with "
+                "`python -m app.db.seed`."
+            ),
+        )
+    return user
+
+
+def authenticate_user(
+    session: Session,
+    *,
+    authorization: str | None,
+    actor_role: str | None,
+) -> User:
+    """Resolve the caller via JWT, else optional dev header bypass."""
+    user = _user_from_bearer(session, authorization)
+    if user is None:
+        user = _user_from_dev_header(session, actor_role)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Authentication required. Send Authorization: Bearer <token>, "
+                f"or enable AUTH_DEV_HEADER_BYPASS and send {ACTOR_ROLE_HEADER}."
+            ),
+        )
+    return user
 
 
 def require_role(*allowed: UserRole) -> Callable[..., UserRole]:
-    """Build a dependency that admits only callers holding one of ``allowed``.
+    """Admit callers whose role is in ``allowed`` (JWT or dev bypass)."""
 
-    THE IDENTITY PORTION OF THIS GUARD IS A STUB. It trusts a request header to
-    state the caller's role, which a client can trivially forge. It is NOT
-    authentication and must not be described as such.
-
-    It exists in this form because this build has no session handling and no
-    identity provider (``PRD.md`` NG3 defers external identity providers). The
-    ``users`` table now exists, so a request can be attached to a real row via
-    :func:`resolve_seeded_actor`, but the row is chosen by the claimed role rather
-    than proven by a credential. The call site is real and the role-to-endpoint
-    mapping is real; only the identity source is stubbed.
-
-    REPLACE BEFORE ANY NON-LOCAL DEPLOYMENT. The replacement resolves the caller
-    from an authenticated session or token and reads ``users.role`` from that
-    user's row. When it lands, this docstring, the header constant, and
-    :func:`resolve_seeded_actor` all go away. Deployment of any kind is out of
-    scope this phase per ``PRD.md`` NG4.
-
-    Behavior that is not stubbed and should be preserved by the replacement: the
-    guard fails closed. Absent, blank, and unrecognized roles are refused, and an
-    empty ``allowed`` set refuses everyone rather than admitting anyone.
-
-    Args:
-        *allowed: Roles permitted to call the endpoint.
-
-    Returns:
-        A FastAPI dependency yielding the caller's :class:`UserRole`.
-    """
     permitted = frozenset(allowed)
 
     def dependency(
+        session: DbSession,
+        authorization: Annotated[str | None, Header()] = None,
         actor_role: Annotated[str | None, Header(alias=ACTOR_ROLE_HEADER)] = None,
     ) -> UserRole:
-        role = _parse_role(actor_role)
-        if role not in permitted:
+        user = authenticate_user(
+            session, authorization=authorization, actor_role=actor_role
+        )
+        if user.role not in permitted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Caller role is not permitted to perform this action.",
             )
-        return role
+        _current_user_id.set(user.id)
+        return user.role
 
     return dependency
 
 
 def resolve_seeded_actor(session: Session, role: UserRole) -> User:
-    """Return the ``users`` row this request will be attributed to.
+    """Return the authenticated user for this request, or the seeded role user.
 
-    PART OF THE PHASE 1 IDENTITY STUB, see :func:`require_role`. It resolves the
-    claimed role to the development account seeded for it, so that writes which
-    reference ``users.id`` (``documents.uploaded_by``, ``audit_log.actor_id``) have
-    a real row to point at.
-
-    Args:
-        session: Active session.
-        role: The role the caller presented and the guard admitted.
-
-    Returns:
-        The seeded :class:`~app.db.models.User` for that role.
-
-    Raises:
-        HTTPException: 503 when no user holds the role. Deliberately not a
-            silently-created user: writing a row on the fly here would mean an
-            unauthenticated request could populate the identity table, and a
-            forged header would then always resolve to something. Failing tells
-            the operator to run ``python -m app.db.seed``.
+    JWT path: returns the token subject. Dev header bypass: returns the seeded
+    account for ``role`` (same as before).
     """
+    current_id = _current_user_id.get()
+    if current_id is not None:
+        user = session.get(User, current_id)
+        if user is not None:
+            return user
     actor = identity.first_by_role(session, role)
     if actor is None:
         raise HTTPException(
@@ -139,17 +159,11 @@ def resolve_seeded_actor(session: Session, role: UserRole) -> User:
     return actor
 
 
-#: Roles allowed to register a document, per ``PRD.md`` Section 5: Data Owners
-#: upload documents, and Security Admins act across the whole document set.
 RegisterDocumentCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.DATA_OWNER, UserRole.SECURITY_ADMIN)),
 ]
 
-#: Roles allowed to submit a classification request, per ``PRD.md`` Section 5:
-#: Data Owners upload documents, and Security Analysts and Admins review and
-#: re-run classifications. Compliance Officers and Auditors are deliberately
-#: excluded, neither persona's stated need involves submitting documents.
 ClassifyCaller = Annotated[
     UserRole,
     Depends(
@@ -161,62 +175,36 @@ ClassifyCaller = Annotated[
     ),
 ]
 
-#: Roles allowed to trigger a contextual risk recompute, ``PRD.md`` FR-2.
-#: Security Analysts recompute before an override (FR-12); Security Admins
-#: recompute for the dashboard (FR-14). Compliance, CISO, data owners, and
-#: auditors are excluded: their stated needs do not include firing this engine.
 RiskScoreCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
 
-#: Roles allowed to author override rules, ``PRD.md`` FR-13. Compliance Officers
-#: define hard rules the AI cannot bypass. Nobody else authors them.
 PolicyRuleCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.COMPLIANCE_OFFICER)),
 ]
 
-#: Roles allowed to trigger a policy-gate evaluation, ``PRD.md`` FR-5.
-#: Compliance Officers check that a rule fires; Security Admins run it for
-#: the dashboard. Analysts, owners, CISO, and auditors do not trigger the gate.
 PolicyDecisionCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.COMPLIANCE_OFFICER, UserRole.SECURITY_ADMIN)),
 ]
 
-#: Roles allowed to trigger a trust-score consensus, ``PRD.md`` FR-4.
-#: Same allow-list as contextual risk: analysts recompute the assessment,
-#: admins recompute for the dashboard. 3.4 has not landed, so this is the
-#: write path for the five caller-asserted agent scores as well.
 TrustScoreCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
 
-#: Roles allowed to persist a crypto-profile selection, ``PRD.md`` FR-6.
-#: Same allow-list as the assessment chain (3.3, 3.5): analysts select after
-#: scoring; admins select for the dashboard. This is the mapping, not
-#: encryption of bytes.
 CryptoProfileCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
 
-#: Roles allowed to persist a manual classification override, ``PRD.md`` FR-12.
-#: Security Analysts own the override screen; Security Admins act across the
-#: document set. Data Owners see the outcome (FR-16) but do not relabel.
-#: Compliance authors rules (FR-13); they do not write this table.
 OverrideCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ANALYST, UserRole.SECURITY_ADMIN)),
 ]
 
-#: Roles allowed to read the document inventory, ``PRD.md`` FR-14.
-#: Security Admins own the aggregate view. Analysts pick a document to
-#: override (FR-12). Auditors pick a document for the chain viewer (FR-15).
-#: Data owners see one document's summary (FR-16), not the whole set.
-#: Compliance authors rules; they do not list documents.
 DocumentInventoryCaller = Annotated[
     UserRole,
     Depends(
@@ -224,6 +212,20 @@ DocumentInventoryCaller = Annotated[
             UserRole.SECURITY_ADMIN,
             UserRole.SECURITY_ANALYST,
             UserRole.AUDITOR,
+            UserRole.CISO,
+            UserRole.ENGINEER,
+        )
+    ),
+]
+
+AuditCaller = Annotated[
+    UserRole,
+    Depends(
+        require_role(
+            UserRole.AUDITOR,
+            UserRole.SECURITY_ADMIN,
+            UserRole.SECURITY_ANALYST,
+            UserRole.CISO,
         )
     ),
 ]

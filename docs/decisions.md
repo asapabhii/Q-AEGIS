@@ -6,11 +6,23 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Pending
 
-- **Neo4j Bolt TLS** for local compose (`AGENTS.md` TLS-in-transit). Neo4j still speaks plaintext Bolt on loopback.
+_(none — pgvector decided with FR-11; Neo4j Bolt TLS closed on this branch;
+Postgres/Redis/API TLS landed via #27)_
 
 ---
 
 ## Log
+
+### 2026-09-14: Neo4j Bolt TLS for local compose
+
+Decided by: Abhinav, closing the Pending item from AGENTS.md TLS-in-transit for the knowledge graph.
+
+- Compose sets `NEO4J_server_bolt_tls__level=REQUIRED` and the bolt SSL policy under `/var/lib/neo4j/certificates/bolt`.
+- Certs come from `scripts/generate-local-certs.*` → `infra/certs/` (gitignored). Entrypoint copies from `/certs-ro` and `chmod 400` the private key so Windows bind mounts do not break Neo4j's permission check.
+- App URI is `bolt+s://127.0.0.1:7687` with `QAEGIS_NEO4J_SSL_CA_CERTS` pointing at the local CA. The Python driver rewrites `bolt+s` → `bolt` + `encrypted=True` + `TrustCustomCAs` because neo4j-python forbids `trusted_certificates` on `+s` URI schemes. Healthcheck uses `bolt+ssc://` so cypher-shell does not need a custom Java truststore.
+- Neo4j Browser HTTP on `:7474` stays plaintext on loopback (Bolt is the application path). Postgres/Redis TLS remains on `feature/auth-upload-sse-tls-personas` / PR #27, not duplicated on the FR-10/11 branch.
+
+Rejected: leaving Bolt plaintext with “loopback only” as enough. Rejected: requiring operators to import the CA into the JVM for the healthcheck.
 
 ### 2026-09-14: FR-10 Neo4j attack paths; FR-11 agentic RAG on pgvector
 
@@ -21,6 +33,17 @@ Decided by: Abhinav, implementing `SPEC.md` 3.11 / 3.12 (PRD FR-10, FR-11). FR-1
 - **FR-12–16:** No API contract changes. Nav already covered Override / Rules / Dashboard / Audit / Summary (/migration is FR-9). Added `/graph` and `/ask`.
 
 Rejected: Qdrant (no measured latency problem; one fewer service). Rejected: a single LLM prompt for RAG (SPEC requires four nodes). Rejected: returning unverified generated text (PRD FR-11).
+
+### 2026-09-14: Local JWT auth, disk upload, SSE, self-signed TLS
+
+Decided by: Abhinav, closing the P0 auth/upload/live-UI gaps called out after FR-12–15 / P0 merge.
+
+- **Auth:** email/password → JWT (`Authorization: Bearer`). Seeded users take `QAEGIS_DEV_SEED_PASSWORD` from the environment (see `.env.example`); nothing hard-codes a shared password in application source. `X-Q-AEGIS-Actor-Role` stays as a **dev-only** bypass behind `AUTH_DEV_HEADER_BYPASS` (Settings default **false**; `.env.example` opts in for local).
+- **Upload:** local disk under `DOCUMENT_STORAGE_DIR` (not object storage this phase). 50 MiB cap, enforced by chunked reads server-side and a matching client-side gate. All common document types accepted; paste classify remains.
+- **Live dashboard:** SSE on `GET /api/v1/events/stream` (Redis Streams when configured, inventory poll otherwise). Stream fan-out validates via `parse_stream_fields`. Clients use `fetch` so Bearer headers work.
+- **TLS:** self-signed CA via `scripts/generate-local-certs.*`; Postgres SSL, Redis TLS, API HTTPS `:8443` in compose. Neo4j Bolt TLS is completed on the FR-10/11 branch (see entry above / Neo4j Bolt TLS log).
+- **Personas:** `/login`, `/ciso`, `/engineer` screens; agent deep-dive at `GET /documents/{id}/agents`.
+Rejected: IdP/OIDC for local Phase 1 (heavier than needed). Rejected: S3/MinIO for upload this phase. Rejected: WebSockets (SSE is enough for inventory refresh). Rejected: dropping the role header entirely (tests and quick local demos still need a bypass).
 
 ### 2026-09-14: FR-8 shred overwrites wrapped_dek; FR-9 ranks with QAOA+baselines; FR-16 exports CSV/PDF
 

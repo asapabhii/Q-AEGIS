@@ -65,6 +65,23 @@ things have to stay internally consistent or a service will not start:
    `QAEGIS_NEO4J_PASSWORD`. If they diverge, Neo4j starts but never reports
    healthy.
 
+**Generate local TLS certs before the first Neo4j start** (Bolt is TLS-only):
+
+```powershell
+# Windows PowerShell (from repo root)
+.\scripts\generate-local-certs.ps1
+```
+
+```bash
+# bash / Git Bash / WSL
+./scripts/generate-local-certs.sh
+```
+
+That writes `infra/certs/` (gitignored). Set
+`QAEGIS_NEO4J_URI=bolt+s://127.0.0.1:7687` and
+`QAEGIS_NEO4J_SSL_CA_CERTS=../infra/certs/ca.crt` (path relative to `backend/`
+when you run uvicorn there). See `.env.example`.
+
 **Use `127.0.0.1`, not `localhost`, in all three URLs.** `.env.example` already
 does. On Windows `localhost` resolves to the IPv6 address `::1` first, while the
 containers publish on IPv4 only, so a connection does not fail, it hangs until it
@@ -90,7 +107,8 @@ Variables and what reads them:
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | the Redis container and its healthcheck |
 | `REDIS_URL` | the application, once the event bus lands (`SPEC.md` 3.1) |
 | `NEO4J_AUTH` | the Neo4j container's entrypoint, sets the initial password |
-| `QAEGIS_NEO4J_URI`, `QAEGIS_NEO4J_USER`, `QAEGIS_NEO4J_PASSWORD` | the application, and the Neo4j healthcheck |
+| `QAEGIS_NEO4J_URI`, `QAEGIS_NEO4J_USER`, `QAEGIS_NEO4J_PASSWORD` | the application, and the Neo4j healthcheck (password only) |
+| `QAEGIS_NEO4J_SSL_CA_CERTS` | the application Neo4j driver (`bolt+s://` trust) |
 | `APP_ENV`, `LOG_LEVEL` | the application (`backend/app/config.py`) |
 | `CLASSIFIER_CONFIDENCE_THRESHOLD` | the classifier, confidence below it defaults to the **more** sensitive label (`SPEC.md` 3.2) |
 
@@ -118,7 +136,7 @@ Published ports, all bound to `127.0.0.1` only:
 | Postgres | 5432 |
 | Redis | 6379 |
 | Neo4j HTTP (browser at <http://127.0.0.1:7474>) | 7474 |
-| Neo4j Bolt | 7687 |
+| Neo4j Bolt (TLS required, `bolt+s://`) | 7687 |
 
 Useful commands:
 
@@ -130,13 +148,14 @@ docker compose down -v         # stop and delete data, use when a container is w
 
 The backend is deliberately **not** a service in this compose file. It connects
 to Postgres now, but you run it from your shell with `--reload` while working, so
-containerizing it would mean rebuilding an image to see a code change. Redis and
-Neo4j are still unused by any module.
+containerizing it would mean rebuilding an image to see a code change.
 
-Known gap, stated rather than hidden: these three services speak plaintext on
-loopback, while `AGENTS.md` requires TLS in transit everywhere. Binding to
-`127.0.0.1` reduces exposure, it does not satisfy the requirement. See the
-comment block at the top of `infra/docker-compose.yml`.
+**TLS on this branch:** Neo4j Bolt is encrypted (`tls_level=REQUIRED`). Postgres
+and Redis still speak plaintext on loopback here; PR #27
+(`feature/auth-upload-sse-tls-personas`) adds Postgres/Redis/API TLS. Binding to
+`127.0.0.1` reduces exposure for the remaining plaintext services. See
+`docs/decisions.md` and the comment block at the top of
+`infra/docker-compose.yml`.
 
 ---
 
@@ -175,14 +194,14 @@ python -m app.db.seed
 
 The first builds all twelve tables from empty and installs the append-only
 triggers. The second creates one development user per role, and is idempotent, so
-running it again is harmless.
+running it again is harmless. Set `QAEGIS_DEV_SEED_PASSWORD` in the repository-root
+`.env` first (copy from `.env.example`); the seed refuses to run without it.
 
 The seed is a **stub** and is labelled one in its own module. It exists because
 `documents.uploaded_by`, `audit_log.actor_id`, `manual_overrides.overridden_by`
-and `policy_rules.created_by` are real foreign keys to `users.id`, while the API's
-identity source is still a header-trusting stub that knows a caller's role and
-nothing else. Without a row per role, every write fails its foreign key. Skip this
-step and requests come back `503` telling you to run it.
+and `policy_rules.created_by` are real foreign keys to `users.id`. Without a row
+per role, every write fails its foreign key. Skip this step and requests come
+back `503` telling you to run it.
 
 Both commands are also what the test suite runs, so if `pytest` passes, your
 schema is current. Re-run `alembic upgrade head` after every `git pull` that
