@@ -73,5 +73,9 @@ def test_rank_endpoint_returns_baselines(client, db_session, registered_document
     assert "baselines" in body
     assert len(body["baselines"]) == 2
     assert body["primary"]["method"].startswith("qaoa")
+    assert "qiskit" not in body["primary"]["method"]
     assert "budget" in body["constraint_snapshot"]
     assert "baselines" in body["constraint_snapshot"]
+    assert body["constraint_snapshot"]["window_days"] == 30
+    assert body["schedule"]
+    assert body["schedule"][0]["scheduled_upgrade_date"] is not None

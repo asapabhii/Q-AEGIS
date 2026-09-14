@@ -67,7 +67,12 @@ def shred_document(
             ),
         )
 
-    document = documents_repo.get_document(session, request.document_id)
+    # Lock the document for the whole shred transaction so a concurrent
+    # assessment cannot append ciphertext after we list keys. Encrypt also
+    # takes this lock and refuses ARCHIVED documents.
+    document = documents_repo.get_document(
+        session, request.document_id, for_update=True
+    )
     if document is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

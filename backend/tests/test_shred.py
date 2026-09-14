@@ -102,3 +102,22 @@ def test_shred_requires_confirmation(
         headers={"X-Q-AEGIS-Actor-Role": UserRole.DATA_OWNER.value},
     )
     assert response.status_code == 422
+
+
+def test_shred_archives_document_status(
+    client: TestClient,
+    db_session: Session,
+    registered_document,
+    master_key: bytes,
+) -> None:
+    _seed_ciphertext(db_session, registered_document, master_key)
+    response = client.post(
+        "/api/v1/shred",
+        json={"document_id": str(registered_document.id), "confirmed": True},
+        headers={"X-Q-AEGIS-Actor-Role": UserRole.COMPLIANCE_OFFICER.value},
+    )
+    assert response.status_code == 200, response.text
+    db_session.refresh(registered_document)
+    from app.db.enums import DocumentStatus
+
+    assert registered_document.current_status is DocumentStatus.ARCHIVED

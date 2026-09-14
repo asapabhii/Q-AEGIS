@@ -87,6 +87,20 @@ def build_summary(session: Session, document_id: UUID) -> SummaryBundle | None:
     )
 
 
+def escape_csv_cell(value: str) -> str:
+    """Neutralize spreadsheet formula injection in exported CSV cells.
+
+    Excel / Sheets treat cells starting with ``=``, ``+``, ``-``, or ``@`` as
+    formulas. Prefix those (and tab/CR) with a single quote so the value is
+    treated as text. Harmless values are returned unchanged.
+    """
+    if not value:
+        return value
+    if value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{value}"
+    return value
+
+
 def render_csv(bundle: SummaryBundle) -> bytes:
     """UTF-8 CSV bytes for one summary."""
     buffer = io.StringIO()
@@ -109,11 +123,17 @@ def render_csv(bundle: SummaryBundle) -> bytes:
         ("shredded", bundle.shredded),
         ("generated_at", bundle.generated_at),
     ]:
-        writer.writerow([field, value])
+        writer.writerow([field, escape_csv_cell(value)])
     writer.writerow([])
     writer.writerow(["agent_type", "score", "rationale"])
     for agent_type, score, rationale in bundle.agent_rows:
-        writer.writerow([agent_type, score, rationale])
+        writer.writerow(
+            [
+                escape_csv_cell(agent_type),
+                escape_csv_cell(score),
+                escape_csv_cell(rationale),
+            ]
+        )
     return buffer.getvalue().encode("utf-8")
 
 

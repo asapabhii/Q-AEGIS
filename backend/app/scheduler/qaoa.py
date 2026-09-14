@@ -206,12 +206,12 @@ def _qiskit_qaoa_select(
 
     n = len(candidates)
     if n == 0:
-        return SelectionResult("qaoa_qiskit", (), 0.0, 0.0, ())
+        return SelectionResult("qaoa_numpy", (), 0.0, 0.0, ())
     if n > 12:
-        # Same large-n escape as numpy path.
+        # Same large-n escape as numpy path. Do not claim a Qiskit run.
         approx = _large_n_qaoa_approx(candidates, budget=budget, seed=seed)
         return SelectionResult(
-            method="qaoa_qiskit_approx",
+            method="qaoa_numpy_approx",
             selected_ids=approx.selected_ids,
             total_score=approx.total_score,
             total_cost=approx.total_cost,
@@ -229,10 +229,9 @@ def _qiskit_qaoa_select(
         bits = [(index >> i) & 1 for i in range(n)]
         energies.append(_bitstring_cost(bits, scores, costs, budget, penalty))
 
-    # Cost Hamiltonian as diagonal SparsePauliOp in computational basis is
-    # heavy to build symbolically; sample the QAOA-inspired angles with the
-    # numpy mixer which matches our fallback, then label method qiskit when
-    # the import path succeeded (circuit constructed for auditability).
+    # Construct a Qiskit cost ansatz to prove the stack imports, then evaluate
+    # the full QUBO with the numpy path. Method must report numpy — we never
+    # run a Qiskit sampler/optimizer on these energies in this build.
     pauli_labels = []
     pauli_coeffs = []
     # Constant + Z terms approximating linear scores (enough to wire Qiskit).
@@ -245,12 +244,11 @@ def _qiskit_qaoa_select(
     ansatz = QAOAAnsatz(cost_op, reps=p)
     _ = StatevectorSampler()  # prove primitives import
     _ = np.zeros(ansatz.num_parameters)
+    _ = energies  # energy table retained for future sampler wiring
 
-    # Use the numpy QAOA on the full QUBO energy (exact for this size) and
-    # attribute the run to qiskit once the circuit stack imported cleanly.
     result = _numpy_qaoa_select(candidates, budget=budget, seed=seed, p=p)
     return SelectionResult(
-        method="qaoa_qiskit",
+        method="qaoa_numpy",
         selected_ids=result.selected_ids,
         total_score=result.total_score,
         total_cost=result.total_cost,

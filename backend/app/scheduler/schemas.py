@@ -1,6 +1,6 @@
 """Pydantic models for migration ranking, ``SPEC.md`` 3.10 / FR-9."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -36,6 +36,7 @@ class MigrationScheduleItem(BaseModel):
     id: UUID
     document_id: UUID
     priority_rank: int
+    scheduled_upgrade_date: date | None
     status: str
     constraint_snapshot: dict[str, Any]
 

@@ -74,6 +74,7 @@ def rank_migration(
                 id=row.id,
                 document_id=row.document_id,
                 priority_rank=row.priority_rank,
+                scheduled_upgrade_date=row.scheduled_upgrade_date,
                 status=row.status.value,
                 constraint_snapshot=row.constraint_snapshot,
             )

@@ -95,15 +95,24 @@ def replace_schedule(
     *,
     ordered: list[MigrationCandidate],
     constraint_snapshot: dict[str, Any],
+    window_days: int = 30,
 ) -> list[MigrationSchedule]:
     """Replace pending schedule rows with a new ranking.
 
     Prior ``pending`` rows for ranked documents are marked ``done`` so history
     is retained without UPDATEing priority on an old row. New ranks are inserts.
+
+    ``window_days`` spreads ``scheduled_upgrade_date`` from today across the
+    window: rank 1 is soonest, last rank lands at ``today + (window_days - 1)``.
     """
+    from datetime import date, timedelta
+
     from sqlalchemy import select
 
     from app.db.models import MigrationSchedule as MS
+
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
 
     pending = list(
         session.scalars(select(MS).where(MS.status == MigrationStatus.PENDING)).all()
@@ -112,12 +121,20 @@ def replace_schedule(
         row.status = MigrationStatus.DONE
     session.flush()
 
+    today = date.today()
+    span = max(window_days - 1, 0)
+    last_index = max(len(ordered) - 1, 1)
+
     created: list[MigrationSchedule] = []
     for rank, item in enumerate(ordered, start=1):
+        if len(ordered) == 1:
+            day_offset = 0
+        else:
+            day_offset = int(round((rank - 1) * span / last_index))
         row = MigrationSchedule(
             document_id=item.document_id,
             priority_rank=rank,
-            scheduled_upgrade_date=None,
+            scheduled_upgrade_date=today + timedelta(days=day_offset),
             status=MigrationStatus.PENDING,
             constraint_snapshot=constraint_snapshot,
         )

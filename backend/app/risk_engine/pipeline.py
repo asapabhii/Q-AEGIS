@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.agents import AssessmentInput, run_assessment
 from app.crypto.engine import encrypt_document_bytes
 from app.crypto.selector import select_crypto_profile
-from app.db.enums import AuditEventType, CryptoProfileType, PolicyAction
+from app.db.enums import AuditEventType, CryptoProfileType, DocumentStatus, PolicyAction
 from app.db.models import User
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import ciphertexts as ciphertext_repo
@@ -75,9 +75,13 @@ def run_full_assessment(
         CryptoConfigurationError / LiboqsUnavailableError: encrypt path.
         IntegrityError: duplicate agent outputs for the same risk row.
     """
-    document = documents_repo.get_document(session, document_id)
+    document = documents_repo.get_document(session, document_id, for_update=True)
     if document is None:
         raise LookupError(f"No document registered with id {document_id}.")
+    if document.current_status is DocumentStatus.ARCHIVED:
+        raise ValueError(
+            "Document is archived (crypto-shredded). New encryption is refused."
+        )
 
     effective = override_repo.effective_for_document(session, document_id)
     if effective is None:

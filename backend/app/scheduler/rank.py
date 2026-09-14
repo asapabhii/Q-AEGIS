@@ -105,6 +105,7 @@ def rank_and_persist(
         session,
         ordered=list(primary.ordered),
         constraint_snapshot=constraint_snapshot,
+        window_days=window_days,
     )
     return RankOutcome(
         rows=rows,

@@ -63,7 +63,7 @@ def shred_document_keys(
         ``(rows, newly_destroyed)`` where ``newly_destroyed`` is how many rows
         were not already shredded before this call.
     """
-    rows = ciphertext_repo.list_for_document(session, document_id)
+    rows = ciphertext_repo.list_for_document(session, document_id, for_update=True)
     newly_destroyed = 0
     for row in rows:
         if is_shredded(row.wrapped_dek):

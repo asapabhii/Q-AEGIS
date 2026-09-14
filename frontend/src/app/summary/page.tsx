@@ -121,6 +121,7 @@ export function SummaryScreen({
             onChange={(e) => {
               setDocumentId(e.target.value);
               setShredResult(null);
+              setConfirmed(false);
             }}
             placeholder="uuid"
           />
