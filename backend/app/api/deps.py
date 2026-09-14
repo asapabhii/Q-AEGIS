@@ -227,3 +227,32 @@ DocumentInventoryCaller = Annotated[
         )
     ),
 ]
+
+#: Roles allowed to crypto-shred a document's keys, ``PRD.md`` FR-8.
+#: Data Owners request erasure; Compliance Officers handle erasure requests;
+#: Security Admins act across the fleet. Analysts and auditors do not shred.
+ShredCaller = Annotated[
+    UserRole,
+    Depends(
+        require_role(
+            UserRole.DATA_OWNER,
+            UserRole.COMPLIANCE_OFFICER,
+            UserRole.SECURITY_ADMIN,
+        )
+    ),
+]
+
+#: Roles allowed to export one document's summary, ``PRD.md`` FR-16.
+#: Data Owners and Security Admins. Auditors use FR-15; they do not export.
+SummaryCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.DATA_OWNER, UserRole.SECURITY_ADMIN)),
+]
+
+#: Roles allowed to run migration ranking, ``PRD.md`` FR-9.
+#: Security Admins own fleet protection upgrades. Compliance may observe
+#: priority but does not author the schedule in v1.
+MigrationCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.SECURITY_ADMIN)),
+]
