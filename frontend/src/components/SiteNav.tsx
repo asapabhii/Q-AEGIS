@@ -4,13 +4,18 @@ const LINKS = [
   { href: "/", label: "Classify" },
   { href: "/override", label: "Override" },
   { href: "/rules", label: "Rules" },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/audit", label: "Audit" },
 ] as const;
 
 export type SiteNavHref = (typeof LINKS)[number]["href"];
 
 export function SiteNav({ active }: { active: SiteNavHref }) {
   return (
-    <nav aria-label="Screens" className="flex items-center gap-4 text-sm">
+    <nav
+      aria-label="Screens"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm"
+    >
       {LINKS.map((link) => (
         <Link
           key={link.href}

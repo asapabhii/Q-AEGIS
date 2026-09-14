@@ -230,6 +230,16 @@ export interface AuditChainResponse {
   entries: AuditEntry[];
 }
 
+/** GET /api/v1/audit/verify — independent prefix check. Not a list field. */
+export interface AuditVerifyResponse {
+  is_valid: boolean;
+  computed_root: string;
+  stored_root: string;
+  end_index: number;
+  entry_count: number;
+  document_id: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
