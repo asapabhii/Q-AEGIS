@@ -149,3 +149,6 @@ class AuditEventType(str, Enum):
     POLICY_DECISION_RECORDED = "policy_decision_recorded"
     POLICY_RULE_CREATED = "policy_rule_created"
     CRYPTO_PROFILE_SELECTED = "crypto_profile_selected"
+    CRYPTO_SHREDDED = "crypto_shredded"
+    MIGRATION_SCHEDULED = "migration_scheduled"
+    DOCUMENT_SUMMARY_EXPORTED = "document_summary_exported"

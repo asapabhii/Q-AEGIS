@@ -6,6 +6,8 @@ const LINKS = [
   { href: "/rules", label: "Rules" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/audit", label: "Audit" },
+  { href: "/summary", label: "Summary" },
+  { href: "/migration", label: "Migration" },
 ] as const;
 
 export type SiteNavHref = (typeof LINKS)[number]["href"];

@@ -50,3 +50,17 @@ def latest_for_document(
         .order_by(DocumentCiphertext.created_at.desc(), DocumentCiphertext.id.desc())
         .limit(1)
     ).one_or_none()
+
+
+def list_for_document(session: Session, document_id: UUID) -> list[DocumentCiphertext]:
+    """All ciphertext rows for a document, oldest first.
+
+    SECURITY CAVEAT: liboqs is NOT independently audited.
+    """
+    return list(
+        session.scalars(
+            select(DocumentCiphertext)
+            .where(DocumentCiphertext.document_id == document_id)
+            .order_by(DocumentCiphertext.created_at.asc(), DocumentCiphertext.id.asc())
+        ).all()
+    )
