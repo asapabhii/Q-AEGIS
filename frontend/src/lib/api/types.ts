@@ -268,6 +268,50 @@ export interface AssessmentResponse {
   reselected: boolean;
 }
 
+/** POST /api/v1/shred — request / response (FR-8). */
+export interface ShredRequest {
+  document_id: string;
+  confirmed: boolean;
+}
+
+export interface ShredResponse {
+  document_id: string;
+  ciphertext_count: number;
+  newly_destroyed: number;
+  already_shredded: boolean;
+  irreversible: boolean;
+}
+
+/** POST /api/v1/migration-schedule/rank (FR-9). */
+export interface MigrationRankRequest {
+  budget: number;
+  window_days?: number;
+  seed?: number;
+}
+
+export interface BaselineComparison {
+  method: string;
+  selected_ids: string[];
+  total_score: number;
+  total_cost: number;
+}
+
+export interface MigrationScheduleItem {
+  id: string;
+  document_id: string;
+  priority_rank: number;
+  status: string;
+  constraint_snapshot: Record<string, unknown>;
+}
+
+export interface MigrationRankResponse {
+  schedule: MigrationScheduleItem[];
+  primary: BaselineComparison;
+  baselines: BaselineComparison[];
+  constraint_snapshot: Record<string, unknown>;
+  ranked_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
