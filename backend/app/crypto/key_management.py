@@ -15,10 +15,11 @@ from __future__ import annotations
 import base64
 import os
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.config import get_settings
-from app.crypto.exceptions import CryptoConfigurationError
+from app.crypto.exceptions import CryptoConfigurationError, CryptoDecryptError
 
 DEK_SIZE = 32
 MASTER_KEY_SIZE = 32
@@ -31,6 +32,9 @@ WRAP_VERSION_POST_QUANTUM = 3
 
 def decode_master_key(raw: str) -> bytes:
     """Decode a base64url ``CRYPTO_MASTER_KEY`` value to 32 bytes.
+
+    SECURITY CAVEAT: liboqs is NOT independently audited. This key wraps DEKs
+    for all profiles, including those that use liboqs.
 
     Args:
         raw: Base64url-encoded master key from the environment.
@@ -58,6 +62,8 @@ def decode_master_key(raw: str) -> bytes:
 def get_master_key() -> bytes:
     """Load and validate the configured master key.
 
+    SECURITY CAVEAT: liboqs is NOT independently audited.
+
     Raises:
         CryptoConfigurationError: when ``CRYPTO_MASTER_KEY`` is unset or invalid.
     """
@@ -69,6 +75,8 @@ def get_master_key() -> bytes:
 
 def wrap_dek(payload: bytes, master_key: bytes | None = None) -> bytes:
     """Encrypt a DEK or profile-specific secret payload under the master key.
+
+    SECURITY CAVEAT: liboqs is NOT independently audited.
 
     The returned blob is ``nonce || ciphertext || tag`` suitable for storage in
     ``document_ciphertexts.wrapped_dek``.
@@ -92,6 +100,8 @@ def wrap_dek(payload: bytes, master_key: bytes | None = None) -> bytes:
 def unwrap_dek(wrapped: bytes, master_key: bytes | None = None) -> bytes:
     """Decrypt a master-key-wrapped DEK or secret payload.
 
+    SECURITY CAVEAT: liboqs is NOT independently audited.
+
     Args:
         wrapped: ``nonce || ciphertext || tag`` produced by :func:`wrap_dek`.
         master_key: Optional override for tests; defaults to ``CRYPTO_MASTER_KEY``.
@@ -101,11 +111,14 @@ def unwrap_dek(wrapped: bytes, master_key: bytes | None = None) -> bytes:
 
     Raises:
         CryptoConfigurationError: when no usable master key is available.
-        Exception: when authentication fails (propagated from ``cryptography``).
+        CryptoDecryptError: when authentication fails.
     """
     if len(wrapped) < WRAP_NONCE_SIZE + 16:
-        raise ValueError("wrapped_dek is too short to contain nonce and tag.")
+        raise CryptoDecryptError("wrapped_dek is too short to contain nonce and tag.")
     key = master_key if master_key is not None else get_master_key()
     nonce = wrapped[:WRAP_NONCE_SIZE]
     ciphertext = wrapped[WRAP_NONCE_SIZE:]
-    return AESGCM(key).decrypt(nonce, ciphertext, None)
+    try:
+        return AESGCM(key).decrypt(nonce, ciphertext, None)
+    except InvalidTag as exc:
+        raise CryptoDecryptError("Wrapped key authentication failed.") from exc

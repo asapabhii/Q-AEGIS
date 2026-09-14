@@ -60,6 +60,33 @@ def test_aes256_encrypt_decrypt_roundtrip(master_key: bytes) -> None:
     assert recovered == plaintext
 
 
+def test_aes256_tampered_ciphertext_raises_crypto_decrypt_error(
+    master_key: bytes,
+) -> None:
+    """Public decrypt boundary maps InvalidTag to CryptoDecryptError."""
+    from app.crypto.exceptions import CryptoDecryptError
+    from app.crypto.schemas import EncryptResult
+
+    result = encrypt_document_bytes(
+        b"secret",
+        CryptoProfileType.AES256,
+        master_key=master_key,
+    )
+    tampered = EncryptResult(
+        ciphertext=result.ciphertext[:-1] + bytes([result.ciphertext[-1] ^ 0xFF]),
+        nonce=result.nonce,
+        wrapped_dek=result.wrapped_dek,
+        algorithm=result.algorithm,
+        kem_ciphertext=result.kem_ciphertext,
+    )
+    with pytest.raises(CryptoDecryptError):
+        decrypt_document_bytes(
+            tampered,
+            CryptoProfileType.AES256,
+            master_key=master_key,
+        )
+
+
 @pytest.mark.parametrize(
     "profile",
     [CryptoProfileType.HYBRID, CryptoProfileType.POST_QUANTUM],

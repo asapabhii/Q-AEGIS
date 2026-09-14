@@ -47,17 +47,26 @@ def _run_scorer_with_timeout(
     assessment_input: AssessmentInput,
     agent_type: AgentType,
 ) -> tuple[AgentScore, AgentFailureRecord | None]:
-    """Run one scorer, returning a failure score and record on timeout."""
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    """Run one scorer, returning a failure score and record on timeout.
+
+    After a timeout the executor is shut down with ``wait=False`` and
+    ``cancel_futures=True`` so the fail-safe does not block for the slow
+    scorer to finish.
+    """
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
         future = executor.submit(scorer, assessment_input)
         try:
             return future.result(timeout=AGENT_TIMEOUT_SECONDS), None
         except FuturesTimeoutError:
+            future.cancel()
             message = f"timed out after {AGENT_TIMEOUT_SECONDS:g}s"
             return failure_score(agent_type, message), AgentFailureRecord(
                 agent_type=agent_type,
                 message=message,
             )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _make_agent_node(agent_type: AgentType) -> Callable[[AssessmentState], dict]:

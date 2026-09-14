@@ -26,7 +26,7 @@ from app.db.repositories import overrides as override_repo
 from app.db.repositories import policy as policy_repo
 from app.db.repositories import risk as risk_repo
 from app.db.repositories import trust as trust_repo
-from app.event_bus import EventType, publish_event
+from app.event_bus import EventType, schedule_publish
 from app.policy.engine import evaluate
 from app.policy.schemas import facts_from_persisted
 from app.risk_engine.scorer import ContextSnapshot, score
@@ -138,7 +138,8 @@ def run_full_assessment(
             output_ids=[item.id for item in output_rows],
         ),
     )
-    publish_event(
+    schedule_publish(
+        session,
         EventType.TRUST_UPDATED,
         {
             "document_id": str(document.id),

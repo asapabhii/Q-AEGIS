@@ -11,7 +11,7 @@ from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import classification as classification_repo
 from app.db.repositories import documents as documents_repo
-from app.event_bus import EventType, publish_event
+from app.event_bus import EventType, schedule_publish
 
 router = APIRouter(tags=["classifier"])
 
@@ -70,7 +70,8 @@ def classify_document(
     )
     documents_repo.mark_classified(session, document)
 
-    publish_event(
+    schedule_publish(
+        session,
         EventType.DOCUMENT_CLASSIFIED,
         {
             "document_id": str(document.id),

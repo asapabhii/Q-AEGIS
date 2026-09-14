@@ -19,6 +19,7 @@ class EventType(str, Enum):
     DOCUMENT_CLASSIFIED = "document.classified"
     RISK_TRIGGER = "risk.trigger"
     TRUST_UPDATED = "trust.updated"
+    SCHEDULE_TICK = "schedule.tick"
 
 
 class EventEnvelope(BaseModel):
@@ -72,3 +73,12 @@ class TrustUpdatedPayload(BaseModel):
     document_id: UUID
     trust_score_id: UUID
     consensus_value: str
+
+
+class ScheduleTickPayload(BaseModel):
+    """Periodic FR-2 heartbeat; consumers recompute each document's latest snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scheduled: bool = True
+    tick_at: datetime

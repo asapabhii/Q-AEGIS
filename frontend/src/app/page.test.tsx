@@ -5,9 +5,11 @@ import DashboardPage from "./page";
 import {
   checkHealth,
   registerAndClassify,
+  runAssessment,
   ApiError,
 } from "@/lib/api/client";
 import type {
+  AssessmentResponse,
   ClassificationResponse,
   DocumentResponse,
   HealthResponse,
@@ -20,11 +22,13 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
     ...actual,
     checkHealth: vi.fn(),
     registerAndClassify: vi.fn(),
+    runAssessment: vi.fn(),
   };
 });
 
 const mockCheckHealth = vi.mocked(checkHealth);
 const mockRegisterAndClassify = vi.mocked(registerAndClassify);
+const mockRunAssessment = vi.mocked(runAssessment);
 
 const sampleDocument: DocumentResponse = {
   id: "doc-uuid-12345",
@@ -52,6 +56,22 @@ const sampleHealth: HealthResponse = {
   status: "ok",
   service: "q-aegis-shield-backend",
   version: "0.1.0",
+};
+
+const sampleAssessment: AssessmentResponse = {
+  document_id: "doc-uuid-12345",
+  risk_score_id: "risk-uuid-1",
+  trust_score_id: "trust-uuid-1",
+  consensus_value: "0.720",
+  ai_recommendation: "force_pqc",
+  policy_decision_id: "policy-uuid-1",
+  final_decision: "force_pqc",
+  overridden: false,
+  crypto_profile_id: "crypto-uuid-1",
+  profile_type: "post_quantum",
+  ciphertext_id: "cipher-uuid-1",
+  encrypted: true,
+  reselected: false,
 };
 
 describe("DashboardPage workbench", () => {
@@ -257,6 +277,85 @@ describe("DashboardPage workbench", () => {
 
     expect(
       screen.getByText(/API 503: Postgres connection refused/i)
+    ).toBeInTheDocument();
+  });
+
+  it("runs assessment with the selected analyst role and shows trust", async () => {
+    const user = userEvent.setup();
+    mockRegisterAndClassify.mockResolvedValueOnce({
+      document: sampleDocument,
+      classification: sampleClassification,
+    });
+    mockRunAssessment.mockResolvedValueOnce(sampleAssessment);
+
+    render(<DashboardPage />);
+    await user.selectOptions(
+      screen.getByLabelText(/caller role/i),
+      "security_analyst"
+    );
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
+    await user.click(
+      screen.getByRole("button", { name: /run full assessment/i })
+    );
+
+    expect(mockRunAssessment).toHaveBeenCalledWith(
+      expect.objectContaining({ document_id: "doc-uuid-12345" }),
+      "security_analyst"
+    );
+    expect(screen.getByText("0.720")).toBeInTheDocument();
+  });
+
+  it("disables assessment for data_owner and never elevates the role", async () => {
+    const user = userEvent.setup();
+    mockRegisterAndClassify.mockResolvedValueOnce({
+      document: sampleDocument,
+      classification: sampleClassification,
+    });
+
+    render(<DashboardPage />);
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
+
+    const assessButton = screen.getByRole("button", {
+      name: /run full assessment/i,
+    });
+    expect(assessButton).toBeDisabled();
+    expect(mockRunAssessment).not.toHaveBeenCalled();
+  });
+
+  it("surfaces assessment API failures without elevating role", async () => {
+    const user = userEvent.setup();
+    mockRegisterAndClassify.mockResolvedValueOnce({
+      document: sampleDocument,
+      classification: sampleClassification,
+    });
+    mockRunAssessment.mockRejectedValueOnce(
+      new ApiError(403, "Forbidden", {
+        detail: "role security_admin required",
+      })
+    );
+
+    render(<DashboardPage />);
+    await user.selectOptions(
+      screen.getByLabelText(/caller role/i),
+      "security_admin"
+    );
+    await user.click(
+      screen.getByRole("button", { name: /register & classify/i })
+    );
+    await user.click(
+      screen.getByRole("button", { name: /run full assessment/i })
+    );
+
+    expect(mockRunAssessment).toHaveBeenCalledWith(
+      expect.objectContaining({ document_id: "doc-uuid-12345" }),
+      "security_admin"
+    );
+    expect(
+      screen.getByText(/API 403: role security_admin required/i)
     ).toBeInTheDocument();
   });
 });

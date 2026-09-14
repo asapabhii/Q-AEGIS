@@ -9,7 +9,7 @@ from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import documents as documents_repo
 from app.db.repositories import risk as risk_repo
-from app.event_bus import EventType, publish_event
+from app.event_bus import EventType, schedule_publish
 from app.risk_engine.schemas import RiskScoreRequest, RiskScoreResponse
 from app.risk_engine.scorer import score
 
@@ -79,8 +79,9 @@ def trigger_risk_recompute(
 ) -> RiskScoreResponse:
     """FR-2 immediate recompute on new-device / after-hours style events.
 
-    Publishes ``risk.trigger`` on the Redis Streams bus (no-op when Redis is
-    unset), then scores and persists the same way as ``POST /risk-scores``.
+    Queues ``risk.trigger`` for after-commit publish on the Redis Streams bus
+    (validated no-op when Redis is unset), then scores and persists the same
+    way as ``POST /risk-scores``.
     """
     document = documents_repo.get_document(session, request.document_id)
     if document is None:
@@ -89,7 +90,8 @@ def trigger_risk_recompute(
             detail=_unknown_document_detail(request.document_id),
         )
 
-    publish_event(
+    schedule_publish(
+        session,
         EventType.RISK_TRIGGER,
         {
             "document_id": str(request.document_id),

@@ -19,6 +19,8 @@ ML_DSA_87 = "ML-DSA-87"
 def oqs_available() -> bool:
     """Return whether ``liboqs-python`` is installed and its native library loads.
 
+    SECURITY CAVEAT: liboqs is NOT independently audited.
+
     ``liboqs-python`` may attempt a source build on import when the shared
     library is missing; that path raises ``SystemExit`` on some platforms. This
     helper catches that and reports unavailable rather than aborting callers.
@@ -46,6 +48,8 @@ def _enabled_sig_mechanisms() -> tuple[str, ...]:
 
 def require_oqs_for_profile(profile_type: CryptoProfileType) -> None:
     """Refuse hybrid or post-quantum encryption when liboqs is unavailable.
+
+    SECURITY CAVEAT: liboqs is NOT independently audited.
 
     AES-256 does not call this helper. Hybrid and post-quantum profiles fail
     closed and never silently fall back to classical AES.

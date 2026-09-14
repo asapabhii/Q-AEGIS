@@ -87,8 +87,9 @@ def trust_score_audit_payload(
 ) -> dict[str, Any]:
     """Audit payload for one consensus pass. JSON primitives only.
 
-    Includes the weights and the agent-output ids so the stored number remains
-    attributable after the formula changes.
+    Includes the weights, agent-output ids, and the immutable agent scores and
+    rationales so FR-7 Merkle verification covers individual agent outputs, not
+    only the aggregate consensus value.
     """
     return {
         "trust_score_id": str(trust_score_id),
@@ -97,5 +98,13 @@ def trust_score_audit_payload(
         "consensus_value": str(result.consensus_value),
         "consensus_version": result.consensus_version,
         "agent_output_ids": [str(item) for item in output_ids],
+        "agent_outputs": [
+            {
+                "agent_type": item.agent_type.value,
+                "score": str(item.score),
+                "rationale": item.rationale,
+            }
+            for item in result.outputs
+        ],
         "weights": {agent.value: str(weight) for agent, weight in WEIGHTS.items()},
     }

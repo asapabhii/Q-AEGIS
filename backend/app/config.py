@@ -84,10 +84,6 @@ class Settings(BaseSettings):
     # app/classifier/stub_classifier.py.
     classifier_confidence_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
 
-    # Crypto engine, SPEC.md 3.7 / Section 6. Base64url-encoded 32-byte master
-    # secret for wrapping DEKs (PRD.md NG5: environment-configured, not an HSM).
-    crypto_master_key: str | None = None
-
     def cors_origin_list(self) -> list[str]:
         """Parse ``cors_origins`` into a list of non-empty origins."""
         return [part.strip() for part in self.cors_origins.split(",") if part.strip()]

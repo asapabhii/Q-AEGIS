@@ -96,15 +96,14 @@ export default function DashboardPage() {
     }
   }, [filename, content, role]);
 
+  const canAssess =
+    role === "security_analyst" || role === "security_admin";
+
   const handleAssess = useCallback(async () => {
-    if (!registeredDocument) return;
+    if (!registeredDocument || !canAssess) return;
     setAssessLoading(true);
     setAssessError(null);
     setAssessment(null);
-    const assessRole: UserRole =
-      role === "security_analyst" || role === "security_admin"
-        ? role
-        : "security_admin";
     try {
       const result = await runAssessment(
         {
@@ -115,7 +114,7 @@ export default function DashboardPage() {
           after_hours: false,
           content,
         },
-        assessRole
+        role
       );
       setAssessment(result);
     } catch (err) {
@@ -123,7 +122,7 @@ export default function DashboardPage() {
     } finally {
       setAssessLoading(false);
     }
-  }, [registeredDocument, role, content]);
+  }, [registeredDocument, role, content, canAssess]);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -458,7 +457,7 @@ export default function DashboardPage() {
                         type="button"
                         id="assess-btn"
                         onClick={() => void handleAssess()}
-                        disabled={assessLoading}
+                        disabled={assessLoading || !canAssess}
                         className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
                       >
                         {assessLoading
@@ -467,7 +466,8 @@ export default function DashboardPage() {
                       </button>
                       <p className="text-xs text-[var(--color-text-muted)]">
                         Risk → five agents → trust → policy → crypto encrypt.
-                        Uses security_admin when the classify role cannot assess.
+                        Requires security_analyst or security_admin; the server
+                        enforces the same roles.
                       </p>
                       {assessError && (
                         <p className="text-sm text-red-400">{assessError}</p>

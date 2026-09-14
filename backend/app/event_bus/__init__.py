@@ -7,11 +7,14 @@ Publish and consume validate the same envelope schema. Downstream modules
 subscribe independently rather than being called directly from each other.
 """
 
-from app.event_bus.publisher import publish_event
+from app.event_bus.outbox import schedule_publish
+from app.event_bus.publisher import publish_event, validate_event_payload
 from app.event_bus.schemas import EventEnvelope, EventType
 
 __all__ = [
     "EventEnvelope",
     "EventType",
     "publish_event",
+    "schedule_publish",
+    "validate_event_payload",
 ]

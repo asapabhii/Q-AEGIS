@@ -30,7 +30,10 @@ from app.policy.schemas import (
     PolicyRuleTestResponse,
     facts_from_persisted,
 )
-from app.trust_engine.recommendation import recommend_from_consensus
+from app.trust_engine.recommendation import (
+    RECOMMENDATION_VERSION,
+    recommend_from_consensus,
+)
 
 router = APIRouter(tags=["policy"])
 
@@ -201,8 +204,10 @@ def evaluate_policy(
         )
 
     ai_recommendation = request.ai_recommendation
+    recommendation_version: str | None = None
     if ai_recommendation is None:
         ai_recommendation = recommend_from_consensus(trust_row.consensus_value)
+        recommendation_version = RECOMMENDATION_VERSION
 
     facts = facts_from_persisted(
         sensitivity_label=effective.label,
@@ -238,22 +243,25 @@ def evaluate_policy(
     row = policy_repo.append_decision(
         session, document_id=trust_row.document_id, result=result
     )
+    audit_payload = policy_repo.decision_audit_payload(
+        document_id=trust_row.document_id,
+        result=result,
+        decision_id=row.id,
+        facts=facts.as_json(),
+        trust_score_id=trust_row.id,
+        risk_score_id=risk_row.id,
+        classification_id=effective.classification.id,
+        override_id=effective.override_id,
+        label_source=effective.source,
+    )
+    if recommendation_version is not None:
+        audit_payload["recommendation_version"] = recommendation_version
     audit_repo.append_entry(
         session,
         event_type=AuditEventType.POLICY_DECISION_RECORDED.value,
         document_id=trust_row.document_id,
         actor_id=actor.id,
-        payload=policy_repo.decision_audit_payload(
-            document_id=trust_row.document_id,
-            result=result,
-            decision_id=row.id,
-            facts=facts.as_json(),
-            trust_score_id=trust_row.id,
-            risk_score_id=risk_row.id,
-            classification_id=effective.classification.id,
-            override_id=effective.override_id,
-            label_source=effective.source,
-        ),
+        payload=audit_payload,
     )
     return PolicyDecisionResponse.from_row(
         decision_id=row.id,

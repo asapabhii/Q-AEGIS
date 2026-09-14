@@ -13,20 +13,48 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
-from app.event_bus.schemas import EventEnvelope, EventType
+from app.event_bus.schemas import (
+    DocumentClassifiedPayload,
+    DocumentUploadedPayload,
+    EventEnvelope,
+    EventType,
+    RiskTriggerPayload,
+    ScheduleTickPayload,
+    TrustUpdatedPayload,
+)
 
 logger = logging.getLogger(__name__)
 
 #: Single stream for P0. Consumer groups fan out by module later.
 STREAM_KEY = "qaegis:events"
 
+_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
+    EventType.DOCUMENT_UPLOADED: DocumentUploadedPayload,
+    EventType.DOCUMENT_CLASSIFIED: DocumentClassifiedPayload,
+    EventType.RISK_TRIGGER: RiskTriggerPayload,
+    EventType.TRUST_UPDATED: TrustUpdatedPayload,
+    EventType.SCHEDULE_TICK: ScheduleTickPayload,
+}
+
 
 def is_bus_configured() -> bool:
     """True when a Redis URL is present and a client can be created."""
     return bool(get_settings().redis_url)
+
+
+def validate_event_payload(
+    event_type: EventType, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate ``payload`` against the closed model for ``event_type``.
+
+    Returns JSON-serialisable primitives (UUIDs and datetimes as strings via
+    ``model_dump(mode="json")``).
+    """
+    model = _PAYLOAD_MODELS[event_type]
+    return model.model_validate(payload).model_dump(mode="json")
 
 
 def publish_event(
@@ -38,25 +66,26 @@ def publish_event(
     """Validate and append one event to the stream.
 
     Returns the Redis stream entry id, or ``None`` when the bus is not
-    configured. Always validates ``payload`` against :class:`EventEnvelope`
+    configured. Always validates ``payload`` against the event-specific model
     before any I/O so mis-shaped events fail locally.
 
     Args:
         event_type: One of the closed :class:`EventType` values.
-        payload: Event body. Must be JSON-serialisable primitives.
+        payload: Event body matching the type's Pydantic model.
         occurred_at: Event time; defaults to UTC now.
 
     Returns:
         Stream id string, or ``None`` if Redis is not configured.
 
     Raises:
-        ValidationError: if the envelope is invalid.
+        ValidationError: if the payload or envelope is invalid.
         RuntimeError: if Redis is configured but the write fails.
     """
+    validated = validate_event_payload(event_type, payload)
     envelope = EventEnvelope(
         event_type=event_type,
         occurred_at=occurred_at or datetime.now(timezone.utc),
-        payload=payload,
+        payload=validated,
     )
     if not is_bus_configured():
         logger.debug(
@@ -94,11 +123,13 @@ def publish_event(
 def parse_stream_fields(fields: dict[str, str]) -> EventEnvelope:
     """Rebuild an envelope from Redis stream field map. Validates on the way in."""
     try:
-        payload = json.loads(fields["payload"])
+        raw_payload = json.loads(fields["payload"])
+        event_type = EventType(fields["event_type"])
+        validated = validate_event_payload(event_type, raw_payload)
         return EventEnvelope(
-            event_type=EventType(fields["event_type"]),
+            event_type=event_type,
             occurred_at=datetime.fromisoformat(fields["occurred_at"]),
-            payload=payload,
+            payload=validated,
         )
     except (KeyError, ValueError, json.JSONDecodeError, ValidationError) as exc:
         raise ValueError(f"invalid stream fields: {exc}") from exc
