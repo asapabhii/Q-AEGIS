@@ -481,10 +481,15 @@ Each of these differs from the CIA-I Section 4 dictionary on purpose.
     places, same reason as `confidence_score`. The version column is what makes a
     stored score attributable after the placeholder weights change.
 
-## Why Neo4j and the vector store are not here
+## Why Neo4j and the vector store are modelled differently
 
-Forcing a multi-hop attack-path query or a similarity search into relational
-tables would work and would misrepresent how either is actually queried. Both
-reference `documents.id` conceptually, but as an application-level link, not a
-database-enforced foreign key. Polyglot persistence means giving up that
-guarantee deliberately in exchange for the right query model per problem.
+Neo4j (`SPEC.md` 3.11 / FR-10) stays outside this relational dictionary: multi-hop
+attack paths are Cypher, and `documents.id` is an application-level property on
+graph nodes, not a database-enforced foreign key.
+
+**pgvector (`SPEC.md` 3.12 / FR-11)** lands in Postgres as table `rag_chunks`
+(Alembic `e1a9c3f70b22`). It stores chunk text plus a `vector(64)` embedding for
+similarity search. That table is an implementation of the vector store decision
+(see `docs/decisions.md`); it is not one of the twelve core domain tables in
+Section 5 of `SPEC.md`, and it must not be used as a substitute for Neo4j path
+queries.

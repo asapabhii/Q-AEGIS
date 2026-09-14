@@ -6,11 +6,21 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Pending
 
-- **Vector store: pgvector vs Qdrant** (`SPEC.md` 2.4, `SPEC.md` 3.12). Default assumption is pgvector until a measured latency or filtered-search problem appears.
+- **Neo4j Bolt TLS** for local compose (`AGENTS.md` TLS-in-transit). Neo4j still speaks plaintext Bolt on loopback.
 
 ---
 
 ## Log
+
+### 2026-09-14: FR-10 Neo4j attack paths; FR-11 agentic RAG on pgvector
+
+Decided by: Abhinav, implementing `SPEC.md` 3.11 / 3.12 (PRD FR-10, FR-11). FR-12–16 screens were already on `main`; this change adds Graph + Ask screens and keeps those APIs unchanged.
+
+- **FR-10:** Neo4j via `QAEGIS_NEO4J_*`. Demo seed + Cypher multi-hop paths (`GET /graph/documents/{id}/paths`, `GET /graph/attack-paths`). Nodes: Employee, Document, Repository, Vendor, CloudAsset. Application-level `document_id` property, not a Postgres FK.
+- **FR-11:** Four LangGraph nodes Planner → Retriever → Reasoner → Verifier. Vector store **pgvector** (closes `SPEC.md` 2.4 for this phase). Table `rag_chunks`. Embeddings are the labelled stub `stub-hash-v1` (deterministic hash vectors) so CI needs no remote embedder. Answers are refused when the Verifier cannot ground the draft in retrieved chunks. Compose Postgres image is `pgvector/pgvector:pg17`.
+- **FR-12–16:** No API contract changes. Nav already covered Override / Rules / Dashboard / Audit / Summary (/migration is FR-9). Added `/graph` and `/ask`.
+
+Rejected: Qdrant (no measured latency problem; one fewer service). Rejected: a single LLM prompt for RAG (SPEC requires four nodes). Rejected: returning unverified generated text (PRD FR-11).
 
 ### 2026-09-14: FR-8 shred overwrites wrapped_dek; FR-9 ranks with QAOA+baselines; FR-16 exports CSV/PDF
 

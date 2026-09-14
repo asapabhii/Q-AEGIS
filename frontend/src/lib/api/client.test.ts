@@ -21,6 +21,11 @@ import {
   shredDocument,
   rankMigration,
   downloadDocumentSummary,
+  getGraphStatus,
+  seedGraph,
+  getDocumentAttackPaths,
+  ingestRagDocument,
+  askRag,
   ApiError,
 } from "./client";
 
@@ -560,5 +565,60 @@ describe("downloadDocumentSummary", () => {
     ).toBe("data_owner");
     expect(click).toHaveBeenCalledOnce();
     createElement.mockRestore();
+  });
+});
+
+describe("graph and rag clients", () => {
+  it("reads graph status", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ configured: true }));
+    await expect(getGraphStatus()).resolves.toEqual({ configured: true });
+  });
+
+  it("seeds the graph and loads document paths", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { nodes_upserted: 5, relationships_upserted: 6, demo: true },
+          201
+        )
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ document_id: "doc-1", paths: [], note: null })
+      );
+    await seedGraph({ document_id: "doc-1" }, "security_admin");
+    await getDocumentAttackPaths("doc-1", "security_admin");
+    expect(mockFetch.mock.calls[0][0]).toBe("http://127.0.0.1:8000/api/v1/graph/seed");
+    expect(String(mockFetch.mock.calls[1][0])).toContain(
+      "/api/v1/graph/documents/doc-1/paths"
+    );
+  });
+
+  it("ingests and asks RAG questions", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            document_id: "doc-1",
+            chunks_written: 2,
+            embedding_model: "stub-hash-v1",
+          },
+          201
+        )
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          question: "status?",
+          answer: "ok",
+          verified: true,
+          plan: "plan",
+          citations: [],
+          embedding_model: "stub-hash-v1",
+          refusal_reason: null,
+        })
+      );
+    await ingestRagDocument("doc-1", "security_admin");
+    await askRag({ question: "status?", document_id: "doc-1" }, "auditor");
+    expect(String(mockFetch.mock.calls[0][0])).toContain("/api/v1/rag/ingest/doc-1");
+    expect(mockFetch.mock.calls[1][0]).toBe("http://127.0.0.1:8000/api/v1/rag/ask");
   });
 });

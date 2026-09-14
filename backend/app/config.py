@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     # Comma-separated browser origins for CORS (frontend local dev).
     cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
 
+    # Knowledge graph, SPEC.md 3.11 / PRD FR-10. Optional: graph routes return
+    # 503 when unset so CI smoke does not require Neo4j.
+    qaegis_neo4j_uri: str | None = None
+    qaegis_neo4j_user: str | None = None
+    qaegis_neo4j_password: str | None = None
+
+    # RAG embedding width for the stub hasher + pgvector column, SPEC.md 3.12.
+    rag_embedding_dims: int = Field(default=64, ge=8, le=1024)
+
     # Sensitivity classifier, SPEC.md 3.2.
     # A classification scoring below this threshold is escalated to the more
     # sensitive label. Load-bearing for the system's security posture, see
