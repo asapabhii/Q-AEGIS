@@ -35,6 +35,10 @@ import type {
   PolicyRuleTestResponse,
   UploadResponse,
   UserRole,
+  MigrationRankRequest,
+  MigrationRankResponse,
+  ShredRequest,
+  ShredResponse,
 } from "./types";
 
 const API_BASE_URL: string =
@@ -370,6 +374,67 @@ export async function runAssessment(
   role?: UserRole
 ): Promise<AssessmentResponse> {
   return request<AssessmentResponse>("/api/v1/assessments", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST /api/v1/shred — destroy wrapped DEKs for one document (FR-8).
+ * Irreversible. confirmed must be true.
+ */
+export async function shredDocument(
+  body: ShredRequest,
+  role?: UserRole
+): Promise<ShredResponse> {
+  return request<ShredResponse>("/api/v1/shred", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * GET /api/v1/documents/{id}/summary — download CSV or PDF (FR-16).
+ * Triggers a browser download; does not return parsed JSON.
+ */
+export async function downloadDocumentSummary(
+  documentId: string,
+  format: "csv" | "pdf",
+  role?: UserRole
+): Promise<void> {
+  const url = `${API_BASE_URL}/api/v1/documents/${encodeURIComponent(
+    documentId
+  )}/summary?format=${format}`;
+  const response = await fetch(url, { headers: authHeaders(role) });
+  if (!response.ok) {
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    throw new ApiError(response.status, response.statusText, body);
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = `qaegis-summary-${documentId}.${format}`;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
+/**
+ * POST /api/v1/migration-schedule/rank — QAOA + baselines (FR-9).
+ * Role: security_admin.
+ */
+export async function rankMigration(
+  body: MigrationRankRequest,
+  role?: UserRole
+): Promise<MigrationRankResponse> {
+  return request<MigrationRankResponse>("/api/v1/migration-schedule/rank", {
     method: "POST",
     headers: jsonHeaders(role),
     body: JSON.stringify(body),

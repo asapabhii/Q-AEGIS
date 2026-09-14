@@ -44,12 +44,7 @@ langgraph==0.6.11
 cryptography==45.0.7
 liboqs-python==0.16.0
 
-# --- Deliberately NOT yet included ---
-# The full dependency set in SPEC.md Section 8 is not installed at Phase 1,
-# because no module imports any of it and several carry heavy or native build
-# requirements that would slow CI for no benefit. Each is added by the pull
-# request that first imports it:
-#
-#   neo4j                -> knowledge graph (SPEC.md 3.11)
-#   pgvector             -> agentic RAG (SPEC.md 3.12)
-#   qiskit               -> migration scheduler (SPEC.md 3.10)
+# Migration scheduler QAOA, SPEC.md 3.10 / PRD FR-9. Optional at runtime: the
+# ranker falls back to an explicit numpy-style statevector QAOA when import
+# fails. Pin and re-test ranking after any bump.
+qiskit==1.4.3

@@ -187,9 +187,26 @@ export default function ClassifyPage() {
           </div>
           {healthError && <p className="text-sm text-red-400">{healthError}</p>}
           {health && (
-            <p className="text-sm font-mono">
-              {health.status} · {health.service} · {health.version}
-            </p>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <span className="text-[var(--color-text-muted)] block text-xs mb-1">
+                  Status
+                </span>
+                <span className="text-emerald-400 font-medium">{health.status}</span>
+              </div>
+              <div>
+                <span className="text-[var(--color-text-muted)] block text-xs mb-1">
+                  Service
+                </span>
+                <span className="font-medium">{health.service}</span>
+              </div>
+              <div>
+                <span className="text-[var(--color-text-muted)] block text-xs mb-1">
+                  Version
+                </span>
+                <span className="font-medium">{health.version}</span>
+              </div>
+            </div>
           )}
         </section>
 
@@ -211,7 +228,10 @@ export default function ClassifyPage() {
                     htmlFor="role-select"
                     className="block text-xs font-medium mb-1.5"
                   >
-                    Dev role bypass
+                    Caller Role
+                    <span className="ml-1 text-[var(--color-text-muted)]">
+                      (DEV-ONLY bypass when no JWT)
+                    </span>
                   </label>
                   <select
                     id="role-select"
@@ -271,7 +291,10 @@ export default function ClassifyPage() {
                   htmlFor="content-input"
                   className="block text-xs font-medium mb-1.5"
                 >
-                  Paste content (fallback if upload has no extractable text)
+                  Document Content
+                  <span className="ml-1 text-[var(--color-text-muted)]">
+                    (fallback if upload has no extractable text)
+                  </span>
                 </label>
                 <textarea
                   id="content-input"
@@ -320,6 +343,18 @@ export default function ClassifyPage() {
                     <span>Sensitivity</span>
                     <LabelBadge label={classification.sensitivity_label} />
                   </div>
+                  {classification.is_defaulted && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span>Escalated from</span>
+                      <span className="flex items-center gap-2">
+                        <LabelBadge label={classification.base_label} />
+                        <span className="text-amber-400 text-xs">fail-safe</span>
+                      </span>
+                    </div>
+                  )}
+                  <p className="text-xs font-mono">
+                    {(classification.confidence * 100).toFixed(1)}%
+                  </p>
                   <p className="text-xs text-[var(--color-text-muted)]">
                     {classification.rationale}
                   </p>
@@ -329,7 +364,7 @@ export default function ClassifyPage() {
                         href={`/override?document_id=${registeredDocument.id}`}
                         className="text-sm text-cyan-400 hover:underline"
                       >
-                        Override
+                        Override this classification
                       </Link>
                       <button
                         type="button"

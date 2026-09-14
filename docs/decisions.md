@@ -25,6 +25,16 @@ Decided by: Abhinav, closing the P0 auth/upload/live-UI gaps called out after FR
 
 Rejected: IdP/OIDC for local Phase 1 (heavier than needed). Rejected: S3/MinIO for upload this phase. Rejected: WebSockets (SSE is enough for inventory refresh). Rejected: dropping the role header entirely (tests and quick local demos still need a bypass).
 
+### 2026-09-14: FR-8 shred overwrites wrapped_dek; FR-9 ranks with QAOA+baselines; FR-16 exports CSV/PDF
+
+Decided by: Abhinav, implementing `SPEC.md` 3.9 / 3.10 / 3.13 (FR-8, FR-9, FR-16) in one PR after P0 encrypt.
+
+- **FR-8:** `POST /api/v1/shred` with `{document_id, confirmed: true}`. Overwrites `document_ciphertexts.wrapped_dek` in place with a marker + random pad (same length, column stays NOT NULL). Ciphertext and `audit_log` stay. Idempotent re-shred is allowed and audited. Roles: data_owner, compliance_officer, security_admin. Document status moves to `archived`.
+- **FR-9:** `POST /api/v1/migration-schedule/rank` with budget/window/seed. Collects candidates that have a non-PQ profile. Runs greedy, simulated annealing, and QAOA on the same set. Persists the QAOA order into `migration_schedule` with full `constraint_snapshot` (including baseline totals). Qiskit is preferred when importable; numpy statevector QAOA is the fallback so CI/Windows still rank. No claim that QAOA beats baselines — totals are returned for the required comparison.
+- **FR-16:** `GET /api/v1/documents/{id}/summary?format=csv|pdf`. Roles: data_owner, security_admin. Minimal PDF writer (no reportlab) so the export path has no extra native dep. Export is audited.
+
+Rejected: nullable `wrapped_dek` (would need a data-dictionary + migration change for no gain). Rejected: deleting ciphertext on shred (FR-8 keeps evidence). Rejected: shipping FR-9 without baseline totals in the same response.
+
 ### 2026-09-14: Event bus is Redis Streams; P0 pipeline runs agents then gate then encrypt
 
 Decided by: Abhinav, closing `SPEC.md` 2.3 while implementing P0 (FR-2 schedule/triggers, FR-3 agents, FR-6 encrypt).

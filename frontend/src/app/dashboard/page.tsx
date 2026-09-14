@@ -132,7 +132,7 @@ export function DashboardScreen() {
                     htmlFor="dashboard-role"
                     className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
                   >
-                    Dev role bypass
+                    Caller Role
                   </label>
                   <select
                     id="dashboard-role"
@@ -163,6 +163,12 @@ export function DashboardScreen() {
           </div>
 
           {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+
+          {inventory && inventory.count === 0 && (
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              No documents registered
+            </p>
+          )}
 
           {inventory && (
             <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-3">
