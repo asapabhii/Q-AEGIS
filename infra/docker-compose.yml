@@ -1,78 +1,67 @@
-# Local development stack for Q-AEGIS Shield: Postgres, Redis, Neo4j.
+# Local development stack for Q-AEGIS Shield: Postgres, Redis, Neo4j, API.
 #
-# Run from this directory, with no extra flags:
+# Run from this directory:
 #
-#     docker compose up -d
-#     docker compose ps
-#     docker compose down
+#     # First time (or after rotating certs): generate infra/certs/
+#     #   PowerShell: ..\scripts\generate-local-certs.ps1
+#     #   bash:       ../scripts/generate-local-certs.sh
+#
+#     docker compose --env-file ../.env up -d
+#     docker compose --env-file ../.env ps
+#     docker compose --env-file ../.env down
 #
 # Copy ../.env.example to ../.env and fill in local values first.
+# Generate TLS material before bringing the stack up; certs are gitignored.
 #
-# Credentials reach the containers via each service's `env_file: ../.env`
-# rather than through `${VAR}` interpolation in this file. That distinction
-# matters in practice: interpolation is resolved by the compose CLI against the
-# .env in ITS OWN directory, so an interpolating compose file here would need
-# `--env-file ../.env` on every single invocation, and forgetting it on a
-# read-only command like `docker compose ps` fails with a confusing "required
-# variable is missing" error. `env_file` is resolved relative to this file, so
-# it works from any working directory and on every subcommand.
+# Credentials reach most containers via `env_file: ../.env`. The backend
+# service also needs `--env-file ../.env` so compose can rewrite DATABASE_URL /
+# REDIS_URL to in-network hostnames with TLS query params. Datastore-only
+# workflows can still use `docker compose up` without interpolation.
 #
-# Ports are hardcoded to loopback rather than parameterized, for the same
-# reason: a `${PORT}` here would reintroduce the interpolation dependency.
-# Edit them directly if one collides with something already running.
+# Ports are hardcoded to loopback. Edit them directly if one collides.
 #
 # Tradeoff accepted for local development: `env_file` hands each container the
-# entire .env, so the Postgres container can also read the Redis and Neo4j
-# passwords. Least privilege would give each service only its own credential
-# via a per-service env file. That is acceptable here because all three are
-# throwaway local values on a single developer machine, and no deployment is in
-# scope this phase (PRD.md NG4). Split them per service before this file is
-# adapted for anything shared or remote.
+# entire .env. Acceptable because these are throwaway local values (PRD NG4).
 #
-# That same behavior has one sharp edge worth knowing about: the neo4j image
-# maps every NEO4J_-prefixed variable to a server config setting and strict-
-# validates it, so an unrelated NEO4J_URI or NEO4J_USER in .env reaches this
-# container and crash-loops it with "Unrecognized setting". Application-side
-# Neo4j values are therefore QAEGIS_-prefixed in .env. See the warning in
-# .env.example before adding anything under the NEO4J_ prefix.
-#
-# ---------------------------------------------------------------------------
-# OUTSTANDING, and deliberately not papered over: AGENTS.md requires TLS in
-# transit for every service, including these local ones. These three services
-# currently speak plaintext on the loopback interface. Closing that gap needs a
-# certificate authority and per-service key material, and keys must never be
-# committed (AGENTS.md), so it requires a generation step and a documented
-# local trust process rather than a change to this file alone. Treat this as a
-# known open item, not as a satisfied requirement.
-#
-# Partial mitigation in place: every port below is published to 127.0.0.1 only,
-# so no service is reachable from the local network even though the traffic is
-# unencrypted. This reduces exposure; it does not satisfy the requirement.
-# ---------------------------------------------------------------------------
-#
-# The backend itself is not a service here yet. It connects to none of these
-# stores at Phase 1, and adding it would imply a wiring that does not exist.
-# It joins this file in the pull request that first opens a connection.
+# Partial local TLS only: Postgres, Redis, and the API terminate TLS with the
+# shared local CA under infra/certs/. Neo4j Bolt remains plaintext on loopback
+# until a bolt SSL policy is wired — do not treat this stack as TLS-complete
+# (see docs/decisions.md Pending).
 
 name: q-aegis-shield
 
 services:
   postgres:
-    # Relational store for the twelve core tables in SPEC.md Section 5.
-    # Plain postgres, not the pgvector image: the vector store choice is still
-    # open (SPEC.md 2.4) and nothing needs embeddings until SPEC.md 3.12.
     image: postgres:17-alpine
     container_name: qaegis-postgres
     restart: unless-stopped
-    # Supplies POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD. The image refuses
-    # to initialize without a password, so a missing value fails loudly here
-    # rather than starting an unauthenticated database.
     env_file:
       - ../.env
+    # Windows bind mounts often present keys as mode 0777; Postgres refuses that.
+    # Copy into the container filesystem, chmod 0600, then start.
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        mkdir -p /var/lib/postgresql/certs
+        && cp /certs-ro/server.crt /certs-ro/server.key /certs-ro/ca.crt
+        /var/lib/postgresql/certs/
+        && chown postgres:postgres /var/lib/postgresql/certs/*
+        && chmod 600 /var/lib/postgresql/certs/server.key
+        && chmod 644 /var/lib/postgresql/certs/server.crt
+        /var/lib/postgresql/certs/ca.crt
+        && exec docker-entrypoint.sh postgres
+        -c ssl=on
+        -c ssl_cert_file=/var/lib/postgresql/certs/server.crt
+        -c ssl_key_file=/var/lib/postgresql/certs/server.key
+        -c ssl_ca_file=/var/lib/postgresql/certs/ca.crt
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./certs/server.crt:/certs-ro/server.crt:ro
+      - ./certs/server.key:/certs-ro/server.key:ro
+      - ./certs/ca.crt:/certs-ro/ca.crt:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -81,75 +70,52 @@ services:
       start_period: 10s
 
   redis:
-    # Event bus, SPEC.md 3.1. Redis Streams is the starting choice per
-    # SPEC.md 2.3, with Kafka held back until a concrete scale need appears.
     image: redis:7-alpine
     container_name: qaegis-redis
     restart: unless-stopped
     env_file:
       - ../.env
-    # Wrapped in `sh -c` so REDIS_PASSWORD is expanded inside the container
-    # from env_file, instead of by the compose CLI. `$$` escapes the dollar so
-    # compose passes it through untouched.
-    #
-    # The `:?` guard is a shell parameter expansion, not a compose feature: if
-    # REDIS_PASSWORD is empty or unset the container exits with that message.
-    # Without it, `--requirepass ""` would start Redis with authentication
-    # silently disabled, which is the dangerous failure, not a loud one.
-    #
-    # appendonly so an event stream survives a restart; an in-memory-only bus
-    # would lose events on every container bounce and make local behavior
-    # diverge from the durability the event bus is meant to provide.
     command:
       - sh
       - -c
       - >-
         exec redis-server
+        --tls-port 6379
+        --port 0
+        --tls-cert-file /certs/server.crt
+        --tls-key-file /certs/server.key
+        --tls-ca-cert-file /certs/ca.crt
+        --tls-dh-params-file /certs/redis.dh
+        --tls-auth-clients no
         --requirepass "$${REDIS_PASSWORD:?REDIS_PASSWORD is not set in .env}"
         --appendonly yes
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
+      - ./certs/server.crt:/certs/server.crt:ro
+      - ./certs/server.key:/certs/server.key:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ./certs/redis.dh:/certs/redis.dh:ro
     healthcheck:
-      # REDISCLI_AUTH rather than `redis-cli -a <password>`. This narrows where
-      # the password is readable; it does not make it unreadable, so do not
-      # treat it as more than it is:
-      #
-      #   -a <password>  puts it in the process command line, exposed via
-      #                  /proc/<pid>/cmdline, `docker top`, and any process
-      #                  listing inside the container.
-      #   REDISCLI_AUTH  puts it in that one probe process's environment,
-      #                  exposed via /proc/<pid>/environ, still readable by root
-      #                  or the same UID in the container while the probe runs.
-      #
-      # The gain is narrower exposure, not secrecy: command lines are readable
-      # by any process, whereas a process's environ is not, and it is no longer
-      # part of the service-wide environment. It also drops the "using a
-      # password with -a is insecure" warning printed on every probe.
       test:
         - CMD-SHELL
-        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG
+        - >-
+          REDISCLI_AUTH="$${REDIS_PASSWORD}"
+          redis-cli --tls --cert /certs/server.crt --key /certs/server.key
+          --cacert /certs/ca.crt ping | grep -q PONG
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
 
   neo4j:
-    # Knowledge graph, SPEC.md 3.11. Kept separate from the relational schema
-    # on purpose: multi-hop relationship queries at depth are a poor fit for
-    # SQL joins.
     image: neo4j:5-community
     container_name: qaegis-neo4j
     restart: unless-stopped
-    # Supplies NEO4J_AUTH (as "neo4j/<password>") and QAEGIS_NEO4J_PASSWORD.
-    # Both live in .env because this image reads NEO4J_AUTH directly, so no
-    # interpolation is needed to assemble it here.
     env_file:
       - ../.env
     environment:
-      # Modest heap and page cache. The default sizing assumes a dedicated
-      # host and will contend with Postgres and the application on a laptop.
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 512m
       NEO4J_server_memory_pagecache_size: 256m
@@ -160,26 +126,6 @@ services:
       - neo4j-data:/data
       - neo4j-logs:/logs
     healthcheck:
-      # Runs a real query rather than checking that the port is open, because
-      # Neo4j accepts connections before it finishes opening the database.
-      #
-      # NEO4J_USERNAME and NEO4J_PASSWORD are what cypher-shell reads, set as a
-      # prefix on this one command rather than passed via `-p`. Same tradeoff as
-      # the Redis probe above: this keeps the password out of the process
-      # command line, but it is still present in that process's environment,
-      # so it is narrower exposure rather than none.
-      #
-      # They must stay scoped to this command, for a second and harder reason:
-      # moving them into the service's `environment:` block hands them to the
-      # Neo4j server too, which maps every NEO4J_-prefixed variable to a config
-      # setting and strict-validates the result. Verified against
-      # neo4j:5-community, the container then refuses to start with:
-      #
-      #   Failed to read config: Unrecognized setting. No declared setting with
-      #   name: PASSWORD.
-      #
-      # That is also why the value is sourced from QAEGIS_NEO4J_PASSWORD in .env
-      # rather than a NEO4J_-prefixed name.
       test:
         - CMD-SHELL
         - NEO4J_USERNAME=neo4j NEO4J_PASSWORD="$${QAEGIS_NEO4J_PASSWORD}" cypher-shell "RETURN 1" || exit 1
@@ -188,8 +134,66 @@ services:
       retries: 10
       start_period: 30s
 
+  backend:
+    build:
+      context: ../backend
+    container_name: qaegis-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      # In-network hosts + TLS. Credentials must match ../.env.
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=verify-ca&sslrootcert=/certs/ca.crt"
+      REDIS_URL: "rediss://:${REDIS_PASSWORD}@redis:6379/0"
+      REDIS_SSL_CA_CERTS: /certs/ca.crt
+      SSL_CERT_FILE: /certs/ca.crt
+      AUTH_DEV_HEADER_BYPASS: "true"
+      DOCUMENT_STORAGE_DIR: /data/documents
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set in .env}
+      QAEGIS_DEV_SEED_PASSWORD: ${QAEGIS_DEV_SEED_PASSWORD:?QAEGIS_DEV_SEED_PASSWORD is not set in .env}
+    ports:
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - ./certs/server.crt:/certs/server.crt:ro
+      - ./certs/server.key:/certs/server.key:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
+      - backend-documents:/data/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8443"
+      - --ssl-certfile
+      - /certs/server.crt
+      - --ssl-keyfile
+      - /certs/server.key
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >
+          import ssl,urllib.request,sys;
+          ctx=ssl.create_default_context();
+          ctx.check_hostname=False;
+          ctx.verify_mode=ssl.CERT_NONE;
+          sys.exit(0 if urllib.request.urlopen('https://127.0.0.1:8443/api/v1/health',
+          context=ctx,timeout=4).status==200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   postgres-data:
   redis-data:
   neo4j-data:
   neo4j-logs:
+  backend-documents:

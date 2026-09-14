@@ -137,6 +137,7 @@ which is why none of them carries a "current" flag.
 | `name` | `varchar(120)` | no | |
 | `email` | `varchar(255)` unique | no | Login identity |
 | `role` | `user_role` | no | `data_owner`, `security_analyst`, `security_admin`, `compliance_officer`, `auditor`, `ciso`, `engineer` |
+| `password_hash` | `varchar(255)` | **yes** | bcrypt hash for local JWT login. Null until set (seeded accounts get a known local-only password). Never store plaintext |
 | `created_at` | `timestamptz` | no | Defaults to `now()` |
 
 ## `documents`
