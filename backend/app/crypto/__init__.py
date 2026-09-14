@@ -3,7 +3,7 @@
 ``POST /api/v1/crypto-profiles`` persists a ``crypto_profiles`` row and an
 audit entry from a real ``trust_score_id``. The score-to-profile map in
 :mod:`app.crypto.selector` is still a stub: its thresholds are uncalibrated
-placeholders. This package does not encrypt or decrypt bytes.
+placeholders. Byte encryption lives in :mod:`app.crypto.engine`.
 
 SECURITY CAVEAT, restate this in every docstring in this package: liboqs is NOT
 independently audited, and OQS-OpenSSL is documented by its own maintainers as
@@ -32,3 +32,15 @@ suite after any version bump; this library's API has changed before.
 
 Owner: Udhav. Required reviewer on any change here, regardless of author.
 """
+
+from app.crypto.engine import decrypt_document_bytes, encrypt_document_bytes
+from app.crypto.key_management import unwrap_dek, wrap_dek
+from app.crypto.schemas import EncryptResult
+
+__all__ = [
+    "EncryptResult",
+    "decrypt_document_bytes",
+    "encrypt_document_bytes",
+    "unwrap_dek",
+    "wrap_dek",
+]

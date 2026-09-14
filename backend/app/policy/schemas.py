@@ -67,13 +67,15 @@ class PolicyDecisionRequest(BaseModel):
     """Evaluate the gate from one persisted trust-score row.
 
     ``document_id`` is taken from that row. The client cannot supply the
-    label, the risk value, or the trust score.
+    label, the risk value, or the trust score. ``ai_recommendation`` may be
+    omitted; when omitted it is derived from the consensus via
+    :func:`app.trust_engine.recommendation.recommend_from_consensus`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     trust_score_id: UUID
-    ai_recommendation: PolicyAction
+    ai_recommendation: PolicyAction | None = None
 
 
 class PolicyDecisionResponse(BaseModel):

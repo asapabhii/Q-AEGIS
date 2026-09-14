@@ -1,10 +1,13 @@
-"""``crypto_profiles`` and ``migration_schedule``, ``SPEC.md`` 3.7 and 3.10."""
+"""``crypto_profiles``, ``document_ciphertexts``, and ``migration_schedule``.
+
+``SPEC.md`` 3.7 and 3.10.
+"""
 
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey
+from sqlalchemy import CheckConstraint, Date, ForeignKey, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, created_timestamp, jsonb_column, uuid_primary_key
@@ -43,6 +46,38 @@ class CryptoProfile(Base):
         CRYPTO_PROFILE_TYPE, nullable=False
     )
     selected_at: Mapped[datetime] = created_timestamp(index=True)
+
+
+class DocumentCiphertext(Base):
+    """Encrypted document bytes plus a master-key-wrapped DEK for shredding.
+
+    ``PRD.md`` FR-8 destroys keys, not audit rows. Storing ``wrapped_dek`` here
+    lets shredding delete or overwrite that column later while ciphertext and
+    audit history remain.
+
+    SECURITY CAVEAT: liboqs is not independently audited; hybrid and
+    post-quantum rows depend on it when those profiles are used.
+    """
+
+    __tablename__ = "document_ciphertexts"
+
+    id: Mapped[UUID] = uuid_primary_key()
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    crypto_profile_id: Mapped[UUID] = mapped_column(
+        ForeignKey("crypto_profiles.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    wrapped_dek: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    kem_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    algorithm: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = created_timestamp(index=True)
 
 
 class MigrationSchedule(Base):

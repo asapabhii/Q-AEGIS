@@ -26,6 +26,8 @@ filterwarnings = [
     # `anyio.abc.BlockingPortal` alias at module import time. Triggered by
     # starlette itself, not by app code.
     "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+    # langgraph checkpoint serde pending default change; third-party import.
+    "ignore:The default value of `allowed_objects` will change:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
 ]
 
 [tool.coverage.run]

@@ -240,6 +240,34 @@ export interface AuditVerifyResponse {
   document_id: string | null;
 }
 
+/** POST /api/v1/assessments — full P0 pipeline. */
+export interface AssessmentRequest {
+  document_id: string;
+  device_id: string;
+  device_is_new: boolean;
+  accessed_at: string;
+  after_hours: boolean;
+  content?: string;
+  ai_recommendation?: PolicyAction;
+}
+
+/** POST /api/v1/assessments — response. */
+export interface AssessmentResponse {
+  document_id: string;
+  risk_score_id: string;
+  trust_score_id: string;
+  consensus_value: string;
+  ai_recommendation: PolicyAction;
+  policy_decision_id: string;
+  final_decision: PolicyAction;
+  overridden: boolean;
+  crypto_profile_id: string;
+  profile_type: CryptoProfileType;
+  ciphertext_id: string | null;
+  encrypted: boolean;
+  reselected: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------

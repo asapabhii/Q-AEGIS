@@ -9,6 +9,7 @@ from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import documents as documents_repo
 from app.db.repositories import risk as risk_repo
+from app.event_bus import EventType, schedule_publish
 from app.risk_engine.schemas import RiskScoreRequest, RiskScoreResponse
 from app.risk_engine.scorer import score
 
@@ -63,6 +64,45 @@ def compute_risk_score(
         result=result,
         computed_at=row.computed_at,
     )
+
+
+@router.post(
+    "/risk-triggers",
+    response_model=RiskScoreResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Publish a risk trigger and recompute immediately",
+)
+def trigger_risk_recompute(
+    request: RiskScoreRequest,
+    session: DbSession,
+    caller: RiskScoreCaller,
+) -> RiskScoreResponse:
+    """FR-2 immediate recompute on new-device / after-hours style events.
+
+    Queues ``risk.trigger`` for after-commit publish on the Redis Streams bus
+    (validated no-op when Redis is unset), then scores and persists the same
+    way as ``POST /risk-scores``.
+    """
+    document = documents_repo.get_document(session, request.document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_unknown_document_detail(request.document_id),
+        )
+
+    schedule_publish(
+        session,
+        EventType.RISK_TRIGGER,
+        {
+            "document_id": str(request.document_id),
+            "actor_user_id": str(request.actor_user_id),
+            "device_id": request.device_id,
+            "device_is_new": request.device_is_new,
+            "after_hours": request.after_hours,
+            "accessed_at": request.accessed_at.isoformat(),
+        },
+    )
+    return compute_risk_score(request, session, caller)
 
 
 def _unknown_document_detail(document_id: UUID) -> str:

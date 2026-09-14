@@ -28,6 +28,8 @@ import type {
   PolicyRuleResponse,
   PolicyRuleTestResponse,
   UserRole,
+  AssessmentRequest,
+  AssessmentResponse,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -298,6 +300,22 @@ export async function testPolicyRule(
   role: UserRole
 ): Promise<PolicyRuleTestResponse> {
   return request<PolicyRuleTestResponse>("/api/v1/policy-rules/test", {
+    method: "POST",
+    headers: roleHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST /api/v1/assessments — risk → agents → trust → policy → crypto → encrypt.
+ *
+ * Roles: security_analyst, security_admin. Pass content to store ciphertext.
+ */
+export async function runAssessment(
+  body: AssessmentRequest,
+  role: UserRole
+): Promise<AssessmentResponse> {
+  return request<AssessmentResponse>("/api/v1/assessments", {
     method: "POST",
     headers: roleHeaders(role),
     body: JSON.stringify(body),

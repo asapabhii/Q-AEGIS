@@ -7,6 +7,7 @@ Routers are collected here rather than registered ad hoc in
 from fastapi import APIRouter
 
 from app.api.routes import (
+    assessments,
     audit,
     classify,
     crypto,
@@ -30,6 +31,7 @@ api_router.include_router(classify.router)
 api_router.include_router(overrides.router)
 api_router.include_router(audit.router)
 api_router.include_router(risk.router)
+api_router.include_router(assessments.router)
 api_router.include_router(policy.router)
 api_router.include_router(trust.router)
 api_router.include_router(crypto.router)

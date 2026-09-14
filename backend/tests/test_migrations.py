@@ -28,6 +28,7 @@ EXPECTED_TABLES = frozenset(
         "policy_rules",
         "policy_decisions",
         "crypto_profiles",
+        "document_ciphertexts",
         "migration_schedule",
         "audit_log",
     }
