@@ -96,6 +96,17 @@ class Settings(BaseSettings):
     document_storage_dir: str = "data/documents"
     upload_max_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
 
+    # Knowledge graph, SPEC.md 3.11 / PRD FR-10. Optional: graph routes return
+    # 503 when unset so CI smoke does not require Neo4j.
+    qaegis_neo4j_uri: str | None = None
+    qaegis_neo4j_user: str | None = None
+    qaegis_neo4j_password: str | None = None
+    # PEM CA for bolt+s:// (local compose). Optional when using bolt+ssc://.
+    qaegis_neo4j_ssl_ca_certs: str | None = None
+
+    # RAG embedding width for the stub hasher + pgvector column, SPEC.md 3.12.
+    rag_embedding_dims: int = Field(default=64, ge=8, le=1024)
+
     # Sensitivity classifier, SPEC.md 3.2.
     # A classification scoring below this threshold is escalated to the more
     # sensitive label. Load-bearing for the system's security posture, see

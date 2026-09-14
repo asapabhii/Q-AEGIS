@@ -1,15 +1,21 @@
 """Agentic retrieval and Q&A, ``SPEC.md`` 3.12, implements ``PRD.md`` FR-11.
 
-NOT IMPLEMENTED. Scheduled for Phase 4 (``SPEC.md`` Section 7). This package
-exists so the module boundary is fixed before code is written; it contains no
-logic, stubbed or otherwise.
-
-When built: four distinct LangGraph nodes, Planner, Retriever, Reasoner,
-Verifier, not one prompt attempting all four responsibilities. Answers must be
-grounded in and verified against actual system records, never returned as an
-unverified generated response. Vector store choice between pgvector and Qdrant
-is an open decision (``SPEC.md`` 2.4) to be logged to ``docs/decisions.md``.
-Depends on ``PRD.md`` FR-4 and FR-7 being stable first.
+Four LangGraph nodes — Planner, Retriever, Reasoner, Verifier — answer
+natural-language questions only when grounded in retrieved system records.
+Vector store is pgvector (see ``docs/decisions.md``). Embeddings are a
+deterministic local stub until a labelled embedding model is wired; the stub
+is labelled as such in code and tests.
 
 Owner: Abhinav (``WORK_DIVISION.md``).
 """
+
+from app.rag.ingest import ingest_document_records
+from app.rag.pipeline import ask_question
+from app.rag.schemas import RagAnswer, RagIngestResult
+
+__all__ = [
+    "RagAnswer",
+    "RagIngestResult",
+    "ask_question",
+    "ingest_document_records",
+]

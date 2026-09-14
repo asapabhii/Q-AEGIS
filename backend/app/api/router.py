@@ -15,10 +15,12 @@ from app.api.routes import (
     crypto,
     documents,
     events,
+    graph,
     health,
     migration,
     overrides,
     policy,
+    rag,
     risk,
     shred,
     summary,
@@ -47,3 +49,5 @@ api_router.include_router(crypto.router)
 api_router.include_router(shred.router)
 api_router.include_router(summary.router)
 api_router.include_router(migration.router)
+api_router.include_router(graph.router)
+api_router.include_router(rag.router)

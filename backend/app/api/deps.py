@@ -258,3 +258,33 @@ MigrationCaller = Annotated[
     UserRole,
     Depends(require_role(UserRole.SECURITY_ADMIN)),
 ]
+
+#: Roles allowed to query / seed the knowledge graph, ``PRD.md`` FR-10.
+#: Security Analysts and Admins explore attack paths; CISO reviews posture;
+#: Engineers inspect topology. Data owners and auditors use other screens.
+GraphCaller = Annotated[
+    UserRole,
+    Depends(
+        require_role(
+            UserRole.SECURITY_ANALYST,
+            UserRole.SECURITY_ADMIN,
+            UserRole.CISO,
+            UserRole.ENGINEER,
+        )
+    ),
+]
+
+#: Roles allowed to ask grounded RAG questions, ``PRD.md`` FR-11.
+#: Security Analysts / Admins investigate events; Auditors verify answers
+#: against records; CISO asks fleet questions. Data owners use FR-16 summary.
+RagCaller = Annotated[
+    UserRole,
+    Depends(
+        require_role(
+            UserRole.SECURITY_ANALYST,
+            UserRole.SECURITY_ADMIN,
+            UserRole.AUDITOR,
+            UserRole.CISO,
+        )
+    ),
+]

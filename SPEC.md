@@ -53,9 +53,9 @@ Three corrections that came out of making the call, recorded here so this paragr
 
 **Decided 2026-09-14: Redis Streams.** Full reasoning in `docs/decisions.md`. Kafka only if partitioned multi-consumer-group scale appears as a measured need.
 
-### 2.4 Vector store: pgvector vs Qdrant, decided at implementation time
+### 2.4 Vector store: pgvector vs Qdrant — **decided: pgvector** (2026-09-14)
 
-Start with pgvector, since PostgreSQL is already in the stack and expected vector volume is well under the scale where a dedicated vector database earns its operational cost. Move to Qdrant only when RAG query latency or filtered-search performance becomes a measured problem.
+Start with pgvector, since PostgreSQL is already in the stack and expected vector volume is well under the scale where a dedicated vector database earns its operational cost. Move to Qdrant only when RAG query latency or filtered-search performance becomes a measured problem. Decision log: `docs/decisions.md` (FR-11 entry). Compose uses `pgvector/pgvector:pg17`.
 
 ---
 
@@ -178,9 +178,9 @@ Status markers below describe what is actually merged to `main`, not what was pl
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
 2. Data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. Complete. Persist of selected profiles landed in item 3.
 3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). Complete for the decision/persist path. **P0 completion (2026-09-14):** Redis Streams event bus (2.3 decided), `POST /risk-triggers` plus optional scheduled heartbeat, LangGraph five-agent assessment (`POST /assessments`), consensus-derived `ai_recommendation` when omitted, AES-256-GCM encrypt with hybrid/PQ via liboqs (fail-closed without it), `document_ciphertexts` storage, CORS for the frontend. FR-12–15 screens are on `main`. Selector thresholds remain uncalibrated placeholders. Classifier remains the keyword stub until a labelled dataset exists (PRD §9).
-4. Crypto-shredding (3.9 / FR-8), document summary export (3.13 / FR-16), migration ranking with QAOA + greedy/annealing baselines (3.10 / FR-9). Agentic RAG (3.12) and knowledge graph (3.11) remain later.
+4. Crypto-shredding (3.9 / FR-8), document summary export (3.13 / FR-16), migration ranking with QAOA + greedy/annealing baselines (3.10 / FR-9). **Complete on `main` (2026-09-14).** Knowledge graph (3.11 / FR-10) and agentic RAG (3.12 / FR-11, pgvector) are implemented on `feature/fr10-fr11-graph-rag` (Neo4j Bolt TLS included); merge closes this item.
 5. Further agent sophistication beyond heuristic FR-3 scorers. Full LangGraph for FR-3 already landed in item 3.
-6. Full evaluation against PRD Section 8's success metrics. Real auth, TLS on compose, calibrated thresholds, and FR-1 labelled classifier remain open dependencies.
+6. Full evaluation against PRD Section 8's success metrics. Open dependencies: real labelled classifier (FR-1 / PRD §9), calibrated crypto thresholds, JWT/auth + full-stack TLS (PR #27 / `feature/auth-upload-sse-tls-personas`), then metrics run.
 
 ## 8. Environment setup
 

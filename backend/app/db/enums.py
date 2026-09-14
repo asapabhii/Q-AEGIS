@@ -152,3 +152,6 @@ class AuditEventType(str, Enum):
     CRYPTO_SHREDDED = "crypto_shredded"
     MIGRATION_SCHEDULED = "migration_scheduled"
     DOCUMENT_SUMMARY_EXPORTED = "document_summary_exported"
+    GRAPH_SEEDED = "graph_seeded"
+    RAG_ANSWERED = "rag_answered"
+    RAG_INGESTED = "rag_ingested"

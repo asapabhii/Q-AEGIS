@@ -79,6 +79,9 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("JWT_SECRET", "SET_LOCALLY")
     monkeypatch.setenv("AUTH_DEV_HEADER_BYPASS", "true")
     monkeypatch.setenv("QAEGIS_DEV_SEED_PASSWORD", "SET_LOCALLY")
+    # Host .env often points at a live Redis (possibly TLS). Tests must not
+    # start the risk-consumer thread against that instance.
+    monkeypatch.setenv("REDIS_URL", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
