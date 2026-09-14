@@ -32,9 +32,9 @@ const sampleChain: AuditChainResponse = {
     {
       id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
       index: 0,
-      actor_id: null,
+      actor_id: "11111111-1111-1111-1111-111111111111",
       event_type: "document_registered",
-      payload: {},
+      payload: { filename: "payroll.pdf" },
       payload_hash: "abc123",
       prev_hash: null,
       merkle_root_at_time: "root1",
@@ -75,6 +75,12 @@ describe("AuditScreen", () => {
     await user.click(screen.getByRole("button", { name: /load chain/i }));
     expect(await screen.findByText("document_registered")).toBeInTheDocument();
     expect(screen.getByText("abc123")).toBeInTheDocument();
+    expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
+    expect(screen.getByText("root1")).toBeInTheDocument();
+    expect(screen.getByText("2026-09-10T00:00:00Z")).toBeInTheDocument();
+    expect(screen.getByText("Prev hash").parentElement).toHaveTextContent("—");
+    await user.click(screen.getByText("Payload"));
+    expect(screen.getByText(/payroll\.pdf/)).toBeInTheDocument();
     expect(screen.queryByText("Independent verification")).not.toBeInTheDocument();
     expect(mockList).toHaveBeenCalledWith(documentId, "auditor");
     expect(mockVerify).not.toHaveBeenCalled();
@@ -121,6 +127,39 @@ describe("AuditScreen", () => {
     render(<AuditScreen initialDocumentId={documentId} />);
     expect(await screen.findByText("document_registered")).toBeInTheDocument();
     expect(mockList).toHaveBeenCalledWith(documentId, "auditor");
+  });
+
+  it("clears verification when the document id changes", async () => {
+    const user = userEvent.setup();
+    mockVerify.mockResolvedValueOnce(sampleVerdict);
+    render(<AuditScreen />);
+    await user.type(screen.getByLabelText(/^document id/i), documentId);
+    await user.click(screen.getByRole("button", { name: /verify chain/i }));
+    expect(await screen.findByText("Independent verification")).toBeInTheDocument();
+    await user.clear(screen.getByLabelText(/^document id/i));
+    await user.type(
+      screen.getByLabelText(/^document id/i),
+      "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    );
+    expect(screen.queryByText("Independent verification")).not.toBeInTheDocument();
+    expect(screen.getByText(/verify is a separate request/i)).toBeInTheDocument();
+  });
+
+  it("clears a verify error when the document id changes", async () => {
+    const user = userEvent.setup();
+    mockVerify.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", { detail: "Broken chain." })
+    );
+    render(<AuditScreen />);
+    await user.type(screen.getByLabelText(/^document id/i), documentId);
+    await user.click(screen.getByRole("button", { name: /verify chain/i }));
+    expect(await screen.findByText(/API 409: Broken chain/i)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText(/^document id/i));
+    await user.type(
+      screen.getByLabelText(/^document id/i),
+      "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    );
+    expect(screen.queryByText(/API 409: Broken chain/i)).not.toBeInTheDocument();
   });
 
   it("hides a stale chain when the document id changes", async () => {

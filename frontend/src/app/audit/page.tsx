@@ -39,6 +39,8 @@ export function AuditScreen({
 
   const trimmedId = documentId.trim();
   const chainMatches = chain !== null && chain.document_id === trimmedId;
+  const verdictMatches =
+    verdict !== null && verdict.document_id === trimmedId;
   const canQuery = Boolean(trimmedId) && !loadingChain && !verifying;
 
   useEffect(() => {
@@ -160,7 +162,11 @@ export function AuditScreen({
                 id="audit-document-id"
                 type="text"
                 value={documentId}
-                onChange={(event) => setDocumentId(event.target.value)}
+                onChange={(event) => {
+                  setDocumentId(event.target.value);
+                  setVerdict(null);
+                  setVerifyError(null);
+                }}
                 className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm font-mono focus:border-[var(--color-border-focus)] focus:outline-none"
                 placeholder="UUID"
               />
@@ -209,15 +215,52 @@ export function AuditScreen({
                       {chain.entries.map((entry) => (
                         <li
                           key={entry.id}
-                          className="rounded-md border border-[var(--color-border)] px-2 py-2"
+                          className="rounded-md border border-[var(--color-border)] px-2 py-2 space-y-2"
                         >
                           <div className="flex justify-between gap-2">
                             <span className="font-mono">{entry.index}</span>
                             <span>{entry.event_type}</span>
                           </div>
-                          <div className="text-[var(--color-text-muted)] font-mono break-all">
-                            {entry.payload_hash}
-                          </div>
+                          <dl className="space-y-1 text-[var(--color-text-muted)]">
+                            <div className="flex justify-between gap-2">
+                              <dt>Actor</dt>
+                              <dd className="font-mono break-all">
+                                {entry.actor_id ?? "—"}
+                              </dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt>Created</dt>
+                              <dd className="font-mono break-all">
+                                {entry.created_at}
+                              </dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt>Prev hash</dt>
+                              <dd className="font-mono break-all">
+                                {entry.prev_hash ?? "—"}
+                              </dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt>Payload hash</dt>
+                              <dd className="font-mono break-all">
+                                {entry.payload_hash}
+                              </dd>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <dt>Merkle root</dt>
+                              <dd className="font-mono break-all">
+                                {entry.merkle_root_at_time}
+                              </dd>
+                            </div>
+                          </dl>
+                          <details>
+                            <summary className="cursor-pointer text-[var(--color-text-secondary)]">
+                              Payload
+                            </summary>
+                            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-[var(--color-text-muted)]">
+                              {JSON.stringify(entry.payload, null, 2)}
+                            </pre>
+                          </details>
                         </li>
                       ))}
                     </ol>
@@ -239,7 +282,7 @@ export function AuditScreen({
             </div>
 
             <div>
-              {verdict && (
+              {verdictMatches && (
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
                   <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
                     Independent verification
@@ -277,7 +320,7 @@ export function AuditScreen({
                 </div>
               )}
 
-              {!verdict && !verifyError && (
+              {!verdictMatches && !verifyError && (
                 <div className="flex items-center justify-center h-40 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
                   Verify is a separate request
                 </div>
