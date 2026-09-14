@@ -15,7 +15,7 @@ one where it genuinely earns its place, not by reflex.
 
 from app.db.models.audit import AuditLog
 from app.db.models.classification import ClassificationMetadata, ManualOverride
-from app.db.models.crypto import CryptoProfile, MigrationSchedule
+from app.db.models.crypto import CryptoProfile, DocumentCiphertext, MigrationSchedule
 from app.db.models.documents import Document
 from app.db.models.identity import User
 from app.db.models.policy import PolicyDecision, PolicyRule
@@ -43,6 +43,7 @@ __all__ = [
     "CryptoProfile",
     "DELETE_REJECTED_TABLES",
     "Document",
+    "DocumentCiphertext",
     "ManualOverride",
     "MigrationSchedule",
     "PolicyDecision",

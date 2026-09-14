@@ -11,8 +11,10 @@ A partial set is refused, not filled in. Inventing a missing agent's score
 would be fail-open toward a number we cannot defend. Ambiguity therefore
 produces no trust score, never a quietly higher one.
 
-LangGraph orchestration (``SPEC.md`` 3.4) is Phase 5. Until it exists the five
-scores are caller-asserted, the same treatment as 3.3's ``after_hours``.
+LangGraph orchestration (``SPEC.md`` 3.4) produces the five scores via
+:func:`app.agents.run_assessment`. ``POST /trust-scores`` still accepts
+caller-supplied outputs for direct tests; the assessment pipeline prefers
+agent-produced scores.
 """
 
 from __future__ import annotations
