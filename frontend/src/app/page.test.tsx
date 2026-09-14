@@ -92,6 +92,14 @@ describe("DashboardPage workbench", () => {
       "href",
       "/rules"
     );
+    expect(screen.getByRole("link", { name: /^dashboard$/i })).toHaveAttribute(
+      "href",
+      "/dashboard"
+    );
+    expect(screen.getByRole("link", { name: /^audit$/i })).toHaveAttribute(
+      "href",
+      "/audit"
+    );
 
     expect(mockRegisterAndClassify).toHaveBeenCalledTimes(1);
     expect(mockRegisterAndClassify).toHaveBeenCalledWith(

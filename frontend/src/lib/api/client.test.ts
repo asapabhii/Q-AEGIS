@@ -13,6 +13,7 @@ import {
   listDocuments,
   getDocument,
   listAuditEntries,
+  verifyAudit,
   classifyDocument,
   overrideClassification,
   createPolicyRule,
@@ -357,6 +358,35 @@ describe("listAuditEntries", () => {
     expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
       "auditor"
     );
+    expect(options.body).toBeUndefined();
+  });
+});
+
+describe("verifyAudit", () => {
+  it("sends GET to /api/v1/audit/verify with document_id and no end_index", async () => {
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const responseBody = {
+      is_valid: true,
+      computed_root: "aa",
+      stored_root: "aa",
+      end_index: 0,
+      entry_count: 1,
+      document_id: id,
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody));
+
+    const result = await verifyAudit(id, "auditor");
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `http://127.0.0.1:8000/api/v1/audit/verify?document_id=${id}`
+    );
+    expect(url).not.toContain("end_index");
+    expect(options.method).toBe("GET");
+    expect(
+      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+    ).toBe("auditor");
     expect(options.body).toBeUndefined();
   });
 });
