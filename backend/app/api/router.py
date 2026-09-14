@@ -13,9 +13,12 @@ from app.api.routes import (
     crypto,
     documents,
     health,
+    migration,
     overrides,
     policy,
     risk,
+    shred,
+    summary,
     trust,
 )
 
@@ -35,3 +38,6 @@ api_router.include_router(assessments.router)
 api_router.include_router(policy.router)
 api_router.include_router(trust.router)
 api_router.include_router(crypto.router)
+api_router.include_router(shred.router)
+api_router.include_router(summary.router)
+api_router.include_router(migration.router)

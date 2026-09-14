@@ -18,6 +18,9 @@ import {
   overrideClassification,
   createPolicyRule,
   testPolicyRule,
+  shredDocument,
+  rankMigration,
+  downloadDocumentSummary,
   ApiError,
 } from "./client";
 
@@ -461,5 +464,101 @@ describe("testPolicyRule", () => {
       "compliance_officer"
     );
     expect(JSON.parse(options.body as string)).toEqual(body);
+  });
+});
+
+describe("shredDocument", () => {
+  it("posts confirmed shred with the caller role", async () => {
+    const responseBody = {
+      document_id: "doc-1",
+      ciphertext_count: 1,
+      newly_destroyed: 1,
+      already_shredded: false,
+      irreversible: true,
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody));
+
+    const result = await shredDocument(
+      { document_id: "doc-1", confirmed: true },
+      "compliance_officer"
+    );
+
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/shred");
+    expect(options.method).toBe("POST");
+    expect(
+      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+    ).toBe("compliance_officer");
+  });
+});
+
+describe("rankMigration", () => {
+  it("posts budgeted ranking as security_admin", async () => {
+    const responseBody = {
+      schedule: [],
+      primary: {
+        method: "qaoa_numpy",
+        selected_ids: [],
+        total_score: 0,
+        total_cost: 0,
+      },
+      baselines: [],
+      constraint_snapshot: { budget: 2 },
+      ranked_at: "2026-09-14T00:00:00Z",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(responseBody, 201));
+
+    const result = await rankMigration(
+      { budget: 2, window_days: 30, seed: 42 },
+      "security_admin"
+    );
+    expect(result).toEqual(responseBody);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/migration-schedule/rank");
+    expect(options.method).toBe("POST");
+  });
+});
+
+describe("downloadDocumentSummary", () => {
+  it("fetches summary CSV and triggers a download", async () => {
+    const click = vi.fn();
+    const createElement = vi.spyOn(document, "createElement");
+    createElement.mockImplementation(((tag: string) => {
+      if (tag === "a") {
+        return { href: "", download: "", click } as unknown as HTMLAnchorElement;
+      }
+      return document.createElement(tag);
+    }) as typeof document.createElement);
+
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => "blob:summary"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ...jsonResponse({}),
+      ok: true,
+      status: 200,
+      blob: () => Promise.resolve(new Blob(["field,value"])),
+      headers: new Headers({ "content-type": "text/csv" }),
+    } as Response);
+
+    await downloadDocumentSummary("doc-1", "csv", "data_owner");
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/documents/doc-1/summary?format=csv");
+    expect(
+      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+    ).toBe("data_owner");
+    expect(click).toHaveBeenCalledOnce();
+    createElement.mockRestore();
   });
 });

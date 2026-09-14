@@ -50,3 +50,24 @@ def latest_for_document(
         .order_by(DocumentCiphertext.created_at.desc(), DocumentCiphertext.id.desc())
         .limit(1)
     ).one_or_none()
+
+
+def list_for_document(
+    session: Session, document_id: UUID, *, for_update: bool = False
+) -> list[DocumentCiphertext]:
+    """All ciphertext rows for a document, oldest first.
+
+    ``for_update`` locks the matching rows for the rest of the transaction
+    (used by crypto-shredding so concurrent inserts wait on the document lock
+    plus these rows).
+
+    SECURITY CAVEAT: liboqs is NOT independently audited.
+    """
+    statement = (
+        select(DocumentCiphertext)
+        .where(DocumentCiphertext.document_id == document_id)
+        .order_by(DocumentCiphertext.created_at.asc(), DocumentCiphertext.id.asc())
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    return list(session.scalars(statement).all())
