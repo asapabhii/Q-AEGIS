@@ -7,12 +7,14 @@ import { SiteNav } from "@/components/SiteNav";
 import {
   checkHealth,
   registerAndClassify,
+  runAssessment,
   ApiError,
 } from "@/lib/api/client";
 import type {
   HealthResponse,
   ClassificationResponse,
   DocumentResponse,
+  AssessmentResponse,
   UserRole,
 } from "@/lib/api/types";
 
@@ -52,6 +54,9 @@ export default function DashboardPage() {
     useState<ClassificationResponse | null>(null);
   const [classifyError, setClassifyError] = useState<string | null>(null);
   const [classifyLoading, setClassifyLoading] = useState(false);
+  const [assessment, setAssessment] = useState<AssessmentResponse | null>(null);
+  const [assessError, setAssessError] = useState<string | null>(null);
+  const [assessLoading, setAssessLoading] = useState(false);
 
   // ------ Health check ------
   const handleHealthCheck = useCallback(async () => {
@@ -75,6 +80,8 @@ export default function DashboardPage() {
     setClassifyError(null);
     setRegisteredDocument(null);
     setClassification(null);
+    setAssessment(null);
+    setAssessError(null);
     try {
       const { document: doc, classification: cls } =
         await registerAndClassify(filename, content, role);
@@ -88,6 +95,35 @@ export default function DashboardPage() {
       setClassifyLoading(false);
     }
   }, [filename, content, role]);
+
+  const handleAssess = useCallback(async () => {
+    if (!registeredDocument) return;
+    setAssessLoading(true);
+    setAssessError(null);
+    setAssessment(null);
+    const assessRole: UserRole =
+      role === "security_analyst" || role === "security_admin"
+        ? role
+        : "security_admin";
+    try {
+      const result = await runAssessment(
+        {
+          document_id: registeredDocument.id,
+          device_id: "workstation-01",
+          device_is_new: false,
+          accessed_at: new Date().toISOString(),
+          after_hours: false,
+          content,
+        },
+        assessRole
+      );
+      setAssessment(result);
+    } catch (err) {
+      setAssessError(err instanceof ApiError ? err.message : "Network error");
+    } finally {
+      setAssessLoading(false);
+    }
+  }, [registeredDocument, role, content]);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -411,12 +447,75 @@ export default function DashboardPage() {
                     </div>
                   </dl>
                   {registeredDocument && (
-                    <Link
-                      href={`/override?document_id=${registeredDocument.id}`}
-                      className="mt-4 inline-block text-sm text-cyan-400 hover:underline"
-                    >
-                      Override this classification
-                    </Link>
+                    <div className="mt-4 flex flex-col gap-2">
+                      <Link
+                        href={`/override?document_id=${registeredDocument.id}`}
+                        className="inline-block text-sm text-cyan-400 hover:underline"
+                      >
+                        Override this classification
+                      </Link>
+                      <button
+                        type="button"
+                        id="assess-btn"
+                        onClick={() => void handleAssess()}
+                        disabled={assessLoading}
+                        className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                      >
+                        {assessLoading
+                          ? "Running pipeline…"
+                          : "Run full assessment"}
+                      </button>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Risk → five agents → trust → policy → crypto encrypt.
+                        Uses security_admin when the classify role cannot assess.
+                      </p>
+                      {assessError && (
+                        <p className="text-sm text-red-400">{assessError}</p>
+                      )}
+                      {assessment && (
+                        <dl className="space-y-1 text-xs">
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-[var(--color-text-secondary)]">
+                              Trust
+                            </dt>
+                            <dd className="font-mono">{assessment.consensus_value}</dd>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-[var(--color-text-secondary)]">
+                              AI / final
+                            </dt>
+                            <dd>
+                              {assessment.ai_recommendation} →{" "}
+                              {assessment.final_decision}
+                            </dd>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-[var(--color-text-secondary)]">
+                              Profile
+                            </dt>
+                            <dd className="font-mono">{assessment.profile_type}</dd>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-[var(--color-text-secondary)]">
+                              Encrypted
+                            </dt>
+                            <dd>{assessment.encrypted ? "yes" : "no"}</dd>
+                          </div>
+                          <Link
+                            href={`/dashboard`}
+                            className="inline-block text-cyan-400 hover:underline pt-1"
+                          >
+                            Open dashboard
+                          </Link>
+                          <Link
+                            href={`/audit?document_id=${assessment.document_id}`}
+                            className="inline-block text-cyan-400 hover:underline ml-3"
+                          >
+                            Open audit chain
+                          </Link>
+                        </dl>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

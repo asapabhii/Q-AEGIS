@@ -58,6 +58,22 @@ def mark_classified(session: Session, document: Document) -> Document:
     return document
 
 
+def mark_protected(session: Session, document: Document) -> Document:
+    """Advance a document's lifecycle pointer to ``PROTECTED``.
+
+    Called after a ciphertext row is stored for the selected profile. Idempotent
+    for an already-protected document. Does not move ``ARCHIVED`` backwards.
+    """
+    if document.current_status in (
+        DocumentStatus.REGISTERED,
+        DocumentStatus.UPLOADED,
+        DocumentStatus.CLASSIFIED,
+    ):
+        document.current_status = DocumentStatus.PROTECTED
+        session.flush()
+    return document
+
+
 def list_documents(session: Session) -> list[Document]:
     """Every document, newest ``uploaded_at`` first, then ``id``.
 

@@ -11,10 +11,27 @@ edge; wiring TLS is an infrastructure task and is called out as outstanding in
 requirement being met.
 """
 
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api import api_router
+from app.config import get_settings
+
+
+@asynccontextmanager
+async def _lifespan(_application: FastAPI) -> AsyncIterator[None]:
+    """Start optional FR-2 scheduler; stop on shutdown."""
+    from app.risk_engine.scheduler import start_risk_scheduler, stop_risk_scheduler
+
+    start_risk_scheduler()
+    try:
+        yield
+    finally:
+        stop_risk_scheduler()
 
 
 def create_app() -> FastAPI:
@@ -24,6 +41,7 @@ def create_app() -> FastAPI:
     isolated instance, and so configuration can be varied per instance without
     import-time side effects.
     """
+    settings = get_settings()
     application = FastAPI(
         title="Q-AEGIS Shield",
         version=__version__,
@@ -32,14 +50,19 @@ def create_app() -> FastAPI:
             "protection, and tamper-evident audit logging."
         ),
         description=(
-            "Phase 3 start. Live endpoints are the health check, document "
-            "registration, the classifier stub, manual overrides, "
-            "audit-chain verification, contextual risk scoring, the policy "
-            "gate (persisted facts), policy-rule dry-run, trust-score "
-            "consensus, and crypto-profile persist. See SPEC.md Section 7 "
-            "for the full "
-            "build order."
+            "P0 pipeline: register/classify, contextual risk (scheduled and "
+            "triggered via Redis Streams), LangGraph five-agent assessment, "
+            "trust consensus, OPA policy gate, crypto profile selection and "
+            "byte encryption, Merkle audit. See SPEC.md Section 7."
         ),
+        lifespan=_lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list(),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     application.include_router(api_router)
     return application

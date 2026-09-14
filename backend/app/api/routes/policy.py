@@ -30,6 +30,7 @@ from app.policy.schemas import (
     PolicyRuleTestResponse,
     facts_from_persisted,
 )
+from app.trust_engine.recommendation import recommend_from_consensus
 
 router = APIRouter(tags=["policy"])
 
@@ -156,8 +157,8 @@ def evaluate_policy(
     ``final_decision`` is computed here. It is not accepted from the client.
     ``sensitivity_label`` is the effective label (latest override, else latest
     classification). ``risk_value`` and ``trust_score`` come from the risk row
-    behind this trust score and the trust row itself. ``ai_recommendation`` is
-    still caller-supplied until 3.4 exists to produce it.
+    behind this trust score and the trust row itself. ``ai_recommendation`` may
+    be supplied by the client or derived from the consensus when omitted.
 
     Raises:
         HTTPException: 404 if the trust score is unknown, 422 if classification
@@ -199,11 +200,15 @@ def evaluate_policy(
             ),
         )
 
+    ai_recommendation = request.ai_recommendation
+    if ai_recommendation is None:
+        ai_recommendation = recommend_from_consensus(trust_row.consensus_value)
+
     facts = facts_from_persisted(
         sensitivity_label=effective.label,
         risk=risk_row,
         trust=trust_row,
-        ai_recommendation=request.ai_recommendation,
+        ai_recommendation=ai_recommendation,
     )
 
     actor = resolve_seeded_actor(session, caller)
