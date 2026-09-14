@@ -19,9 +19,6 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-
-# Required by ``seed_development_users``; never a production secret.
-os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -41,6 +38,9 @@ from app.db.session import (
     require_database_url,
 )
 from app.main import create_app
+
+# Required by ``seed_development_users``; never a production secret.
+os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
 
 #: Repository-relative path to the Alembic configuration.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
