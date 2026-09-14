@@ -23,16 +23,18 @@
 # Tradeoff accepted for local development: `env_file` hands each container the
 # entire .env. Acceptable because these are throwaway local values (PRD NG4).
 #
-# Partial local TLS only: Postgres, Redis, and the API terminate TLS with the
-# shared local CA under infra/certs/. Neo4j Bolt remains plaintext on loopback
-# until a bolt SSL policy is wired — do not treat this stack as TLS-complete
-# (see docs/decisions.md Pending).
+# Local TLS: Postgres, Redis, API HTTPS, and Neo4j Bolt all terminate TLS with
+# the shared CA under infra/certs/ (scripts/generate-local-certs.*). Neo4j
+# values in .env stay QAEGIS_-prefixed — the neo4j image maps NEO4J_* to
+# server config and crash-loops on unknown names.
 
 name: q-aegis-shield
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # Relational store + pgvector for FR-11 RAG chunks (SPEC.md 3.12).
+    # Image ships the `vector` extension; decided in docs/decisions.md.
+    image: pgvector/pgvector:pg17
     container_name: qaegis-postgres
     restart: unless-stopped
     env_file:
@@ -110,6 +112,9 @@ services:
       start_period: 5s
 
   neo4j:
+    # Knowledge graph, SPEC.md 3.11. Bolt TLS required (AGENTS.md). Host bind
+    # mounts on Windows are often world-readable; Neo4j rejects that for
+    # private.key, so we copy from /certs-ro and chmod inside the container.
     image: neo4j:5-community
     container_name: qaegis-neo4j
     restart: unless-stopped
@@ -119,20 +124,48 @@ services:
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 512m
       NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_server_default__advertised__address: localhost
+      NEO4J_server_bolt_tls__level: REQUIRED
+      NEO4J_dbms_ssl_policy_bolt_enabled: "true"
+      NEO4J_dbms_ssl_policy_bolt_base__directory: /var/lib/neo4j/certificates/bolt
+      NEO4J_dbms_ssl_policy_bolt_private__key: private.key
+      NEO4J_dbms_ssl_policy_bolt_public__certificate: public.crt
+      NEO4J_dbms_ssl_policy_bolt_client__auth: NONE
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+        mkdir -p /var/lib/neo4j/certificates/bolt/trusted
+        cp /certs-ro/server.key /var/lib/neo4j/certificates/bolt/private.key
+        cp /certs-ro/server.crt /var/lib/neo4j/certificates/bolt/public.crt
+        cp /certs-ro/ca.crt /var/lib/neo4j/certificates/bolt/trusted/ca.crt
+        chown -R neo4j:neo4j /var/lib/neo4j/certificates
+        chmod 400 /var/lib/neo4j/certificates/bolt/private.key
+        chmod 644 /var/lib/neo4j/certificates/bolt/public.crt
+        chmod 644 /var/lib/neo4j/certificates/bolt/trusted/ca.crt
+        exec tini -g -- /startup/docker-entrypoint.sh neo4j
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"
     volumes:
       - neo4j-data:/data
       - neo4j-logs:/logs
+      - ./certs/server.key:/certs-ro/server.key:ro
+      - ./certs/server.crt:/certs-ro/server.crt:ro
+      - ./certs/ca.crt:/certs-ro/ca.crt:ro
     healthcheck:
+      # bolt+ssc trusts the local self-signed cert without a custom Java
+      # truststore. Application clients should use bolt+s:// + CA file.
       test:
         - CMD-SHELL
-        - NEO4J_USERNAME=neo4j NEO4J_PASSWORD="$${QAEGIS_NEO4J_PASSWORD}" cypher-shell "RETURN 1" || exit 1
+        - >-
+          NEO4J_USERNAME=neo4j NEO4J_PASSWORD="$${QAEGIS_NEO4J_PASSWORD}"
+          cypher-shell -a bolt+ssc://localhost:7687 "RETURN 1" || exit 1
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 30s
+      start_period: 40s
 
   backend:
     build:

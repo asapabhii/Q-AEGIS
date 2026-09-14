@@ -48,3 +48,9 @@ liboqs-python==0.16.0
 # ranker falls back to an explicit numpy-style statevector QAOA when import
 # fails. Pin and re-test ranking after any bump.
 qiskit==1.4.3
+
+# Knowledge graph, SPEC.md 3.11 / PRD FR-10.
+neo4j==5.28.1
+
+# Vector store for FR-11 RAG (pgvector type + SQLAlchemy VECTOR).
+pgvector==0.4.1
