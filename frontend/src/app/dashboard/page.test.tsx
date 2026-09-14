@@ -10,6 +10,7 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
   return {
     ...actual,
     listDocuments: vi.fn(),
+    subscribeEvents: vi.fn(() => () => undefined),
   };
 });
 

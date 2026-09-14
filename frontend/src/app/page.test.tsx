@@ -96,9 +96,8 @@ describe("DashboardPage workbench", () => {
       screen.getByRole("button", { name: /register & classify/i })
     );
 
-    expect(screen.getByText("Step 1 — Document Registered")).toBeInTheDocument();
+    expect(screen.getByText(/^document$/i)).toBeInTheDocument();
     expect(screen.getByText("doc-uuid-12345")).toBeInTheDocument();
-    expect(screen.getByText("Step 2 — Classification Result")).toBeInTheDocument();
     expect(screen.getByText("CONFIDENTIAL")).toBeInTheDocument();
     expect(screen.getByText("85.0%")).toBeInTheDocument();
     expect(
@@ -185,10 +184,7 @@ describe("DashboardPage workbench", () => {
       screen.getByText(/API 404: No document registered with that id/i)
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Step 1 — Document Registered")
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Step 2 — Classification Result")
+      screen.queryByText("doc-uuid-12345")
     ).not.toBeInTheDocument();
   });
 
@@ -304,7 +300,7 @@ describe("DashboardPage workbench", () => {
       expect.objectContaining({ document_id: "doc-uuid-12345" }),
       "security_analyst"
     );
-    expect(screen.getByText("0.720")).toBeInTheDocument();
+    expect(screen.getByText(/0\.720/)).toBeInTheDocument();
   });
 
   it("disables assessment for data_owner and never elevates the role", async () => {

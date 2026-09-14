@@ -21,6 +21,8 @@ import {
   shredDocument,
   rankMigration,
   downloadDocumentSummary,
+  login,
+  getDocumentAgents,
   ApiError,
 } from "./client";
 
@@ -54,7 +56,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   mockFetch.mockReset();
+  if (typeof window !== "undefined") {
+    window.localStorage.clear();
+  }
 });
+
+function headerValue(
+  headers: HeadersInit | undefined,
+  name: string
+): string | null {
+  if (!headers) return null;
+  return new Headers(headers).get(name);
+}
 
 // ---------------------------------------------------------------------------
 // checkHealth
@@ -73,8 +86,7 @@ describe("checkHealth", () => {
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit | undefined];
     expect(url).toBe("http://127.0.0.1:8000/api/v1/health");
     // Health is unauthenticated — no role header
-    const headers = options?.headers as Record<string, string> | undefined;
-    expect(headers?.["X-Q-AEGIS-Actor-Role"]).toBeUndefined();
+    expect(headerValue(options?.headers, "X-Q-AEGIS-Actor-Role")).toBeNull();
   });
 });
 
@@ -106,9 +118,8 @@ describe("registerDocument", () => {
     expect(url).toBe("http://127.0.0.1:8000/api/v1/documents");
     expect(options.method).toBe("POST");
 
-    const headers = options.headers as Record<string, string>;
-    expect(headers["X-Q-AEGIS-Actor-Role"]).toBe("data_owner");
-    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe("data_owner");
+    expect(headerValue(options.headers, "Content-Type")).toBe("application/json");
 
     const body = JSON.parse(options.body as string);
     expect(body).toEqual({ filename: "report.pdf" });
@@ -161,9 +172,8 @@ describe("classifyDocument", () => {
     expect(url).toBe("http://127.0.0.1:8000/api/v1/classify");
     expect(options.method).toBe("POST");
 
-    const headers = options.headers as Record<string, string>;
-    expect(headers["X-Q-AEGIS-Actor-Role"]).toBe("data_owner");
-    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe("data_owner");
+    expect(headerValue(options.headers, "Content-Type")).toBe("application/json");
 
     const body = JSON.parse(options.body as string);
     expect(body).toEqual({
@@ -275,8 +285,7 @@ describe("overrideClassification", () => {
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:8000/api/v1/manual-overrides");
     expect(options.method).toBe("POST");
-    const headers = options.headers as Record<string, string>;
-    expect(headers["X-Q-AEGIS-Actor-Role"]).toBe("security_analyst");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe("security_analyst");
     expect(JSON.parse(options.body as string)).toEqual({
       document_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       new_label: "INTERNAL",
@@ -296,7 +305,7 @@ describe("listDocuments", () => {
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:8000/api/v1/documents");
     expect(options.method).toBe("GET");
-    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
       "security_admin"
     );
     expect(options.body).toBeUndefined();
@@ -338,7 +347,7 @@ describe("getDocument", () => {
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`http://127.0.0.1:8000/api/v1/documents/${id}`);
     expect(options.method).toBe("GET");
-    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
       "auditor"
     );
   });
@@ -358,7 +367,7 @@ describe("listAuditEntries", () => {
       `http://127.0.0.1:8000/api/v1/audit/entries?document_id=${id}`
     );
     expect(options.method).toBe("GET");
-    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
       "auditor"
     );
     expect(options.body).toBeUndefined();
@@ -388,7 +397,7 @@ describe("verifyAudit", () => {
     expect(url).not.toContain("end_index");
     expect(options.method).toBe("GET");
     expect(
-      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+      headerValue(options.headers, "X-Q-AEGIS-Actor-Role")
     ).toBe("auditor");
     expect(options.body).toBeUndefined();
   });
@@ -428,7 +437,7 @@ describe("createPolicyRule", () => {
     expect(url).toBe("http://127.0.0.1:8000/api/v1/policy-rules");
     expect(options.method).toBe("POST");
     expect(
-      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+      headerValue(options.headers, "X-Q-AEGIS-Actor-Role")
     ).toBe("compliance_officer");
     expect(JSON.parse(options.body as string)).toEqual(body);
   });
@@ -460,7 +469,7 @@ describe("testPolicyRule", () => {
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:8000/api/v1/policy-rules/test");
     expect(options.method).toBe("POST");
-    expect((options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]).toBe(
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
       "compliance_officer"
     );
     expect(JSON.parse(options.body as string)).toEqual(body);
@@ -488,7 +497,7 @@ describe("shredDocument", () => {
     expect(url).toBe("http://127.0.0.1:8000/api/v1/shred");
     expect(options.method).toBe("POST");
     expect(
-      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+      headerValue(options.headers, "X-Q-AEGIS-Actor-Role")
     ).toBe("compliance_officer");
   });
 });
@@ -556,9 +565,77 @@ describe("downloadDocumentSummary", () => {
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/v1/documents/doc-1/summary?format=csv");
     expect(
-      (options.headers as Record<string, string>)["X-Q-AEGIS-Actor-Role"]
+      headerValue(options.headers, "X-Q-AEGIS-Actor-Role")
     ).toBe("data_owner");
     expect(click).toHaveBeenCalledOnce();
     createElement.mockRestore();
+  });
+});
+
+describe("login", () => {
+  it("posts credentials and stores the session token", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        access_token: "jwt-token",
+        token_type: "bearer",
+        user_id: "u1",
+        email: "security_admin@dev.qaegis.local",
+        role: "security_admin",
+        name: "Admin",
+      })
+    );
+    const result = await login({
+      email: "security_admin@dev.qaegis.local",
+      password: "local-dev-only-password",
+    });
+    expect(result.access_token).toBe("jwt-token");
+    expect(window.localStorage.getItem("qaegis.access_token")).toBe("jwt-token");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/auth/login");
+    expect(options.method).toBe("POST");
+  });
+});
+
+describe("getDocumentAgents", () => {
+  it("gets agent deep-dive with the role header", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        document_id: "doc-1",
+        risk_score_id: null,
+        assessed_at: null,
+        agents: [],
+        missing_agents: ["security"],
+        note: "none yet",
+      })
+    );
+    await getDocumentAgents("doc-1", "security_admin");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/documents/doc-1/agents");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
+      "security_admin"
+    );
+  });
+});
+
+describe("shredDocument", () => {
+  it("posts confirmed shred", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        document_id: "doc-1",
+        ciphertext_count: 1,
+        newly_destroyed: 1,
+        already_shredded: false,
+        irreversible: true,
+      })
+    );
+    await shredDocument(
+      { document_id: "doc-1", confirmed: true },
+      "compliance_officer"
+    );
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/shred");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
+      "compliance_officer"
+    );
   });
 });
