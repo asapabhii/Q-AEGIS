@@ -1,30 +1,15 @@
-"""Document registration, ``SPEC.md`` Section 5.
+"""Document registration and file upload, ``SPEC.md`` Section 5 / 3.13.
 
-PARTIAL IMPLEMENTATION OF ``PRD.md`` FR-1's INPUT PATH, and labelled as such
-because the gap matters to anyone building on it: this registers a document's
-metadata, it does not accept a file. There is no object storage in this build, so
-``storage_path`` stays null and ``current_status`` stays ``registered`` rather
-than ``uploaded``.
-
-It exists because ``classification_metadata.document_id`` is a foreign key to
-``documents.id``, so a classification cannot be recorded for a document the
-system has never heard of. The alternative was to leave ``/classify`` accepting
-any invented UUID, which is what it did before the schema existed.
-
-The file-upload half belongs to the classification request screen (``SPEC.md``
-3.13, Input Screen 1) and its 50 MB / PDF-DOCX-XLSX-TXT validation rules. When it
-lands, this endpoint gains a ``storage_path`` and this docstring loses its first
-paragraph.
-
-``GET /documents`` and ``GET /documents/{id}`` are the FR-14 read surface.
-They do not write. Stage fields stay null until that step has run.
+``POST /documents`` registers metadata. ``POST /documents/{id}/upload`` stores
+file bytes on local disk (50 MB max), extracts text for classification, and
+sets ``storage_path`` / ``uploaded`` status.
 """
 
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.api.deps import (
@@ -34,15 +19,18 @@ from app.api.deps import (
     resolve_seeded_actor,
 )
 from app.classifier.labels import SensitivityLabel, SensitivitySource
+from app.config import get_settings
 from app.db.enums import AuditEventType, CryptoProfileType, DocumentStatus, PolicyAction
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import documents as documents_repo
 from app.db.repositories import inventory as inventory_repo
 from app.db.repositories.inventory import DocumentSnapshot
+from app.documents.extract import extract_text
+from app.documents.storage import save_upload
+from app.event_bus import EventType, schedule_publish
 
 router = APIRouter(tags=["documents"])
 
-#: Upper bound on a filename, matching ``documents.filename``'s ``varchar(255)``.
 MAX_FILENAME_CHARS = 255
 
 
@@ -246,4 +234,105 @@ def register_document(
         current_status=document.current_status,
         uploaded_by=document.uploaded_by,
         uploaded_at=document.uploaded_at,
+    )
+
+
+class UploadResponse(BaseModel):
+    """Result of storing one file and extracting text for classification."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: UUID
+    filename: str
+    storage_path: str
+    current_status: DocumentStatus
+    size_bytes: int
+    extracted_text_chars: int
+    extracted_text_preview: str
+    #: Full extracted text (capped) so the client can call ``POST /classify``.
+    extracted_text: str
+
+
+@router.post(
+    "/documents/{document_id}/upload",
+    response_model=UploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload file bytes for a registered document (local disk, 50MB)",
+)
+async def upload_document_file(
+    document_id: UUID,
+    session: DbSession,
+    caller: RegisterDocumentCaller,
+    file: UploadFile = File(...),
+) -> UploadResponse:
+    """Store the file, mark the document uploaded, return extracted text.
+
+    Classification is a separate ``POST /classify`` call using the extracted
+    text (or paste). All common document types are accepted up to
+    ``UPLOAD_MAX_BYTES`` (default 50 MiB).
+    """
+    document = documents_repo.get_document(session, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{document_id}' was not found.",
+        )
+
+    settings = get_settings()
+    data = await file.read()
+    if len(data) > settings.upload_max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(f"File exceeds upload limit of {settings.upload_max_bytes} bytes."),
+        )
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty.",
+        )
+
+    filename = file.filename or document.filename
+    storage_path = save_upload(document_id=document.id, filename=filename, data=data)
+    documents_repo.attach_storage_path(session, document, storage_path)
+    if filename and filename != document.filename:
+        document.filename = filename[:MAX_FILENAME_CHARS]
+        session.flush()
+
+    text = extract_text(filename, data)
+    # Cap classify payload size; 50 MB binary can explode into huge text.
+    text_for_client = text[:500_000]
+    actor = resolve_seeded_actor(session, caller)
+    audit_repo.append_entry(
+        session,
+        event_type=AuditEventType.DOCUMENT_REGISTERED.value,
+        document_id=document.id,
+        actor_id=actor.id,
+        payload={
+            "document_id": str(document.id),
+            "event": "file_uploaded",
+            "filename": document.filename,
+            "storage_path": storage_path,
+            "size_bytes": len(data),
+            "extracted_text_chars": len(text),
+        },
+    )
+    schedule_publish(
+        session,
+        EventType.DOCUMENT_UPLOADED,
+        {
+            "document_id": str(document.id),
+            "uploaded_by": str(actor.id),
+            "storage_path": storage_path,
+        },
+    )
+
+    return UploadResponse(
+        document_id=document.id,
+        filename=document.filename,
+        storage_path=storage_path,
+        current_status=document.current_status,
+        size_bytes=len(data),
+        extracted_text_chars=len(text),
+        extracted_text_preview=text_for_client[:500],
+        extracted_text=text_for_client,
     )

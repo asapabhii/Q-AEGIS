@@ -70,6 +70,10 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     )
     monkeypatch.setenv("RISK_RECOMPUTE_INTERVAL_SECONDS", "0")
+    # Tests keep the forgeable role header as a DEV bypass; JWT still works
+    # when a test issues a token against this secret.
+    monkeypatch.setenv("JWT_SECRET", "test-only-jwt-secret-not-for-prod")
+    monkeypatch.setenv("AUTH_DEV_HEADER_BYPASS", "true")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

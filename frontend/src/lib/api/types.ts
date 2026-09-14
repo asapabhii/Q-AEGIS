@@ -18,11 +18,8 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Caller roles recognized by the backend's authorization guard.
- *
- * IMPORTANT: The guard is a STUB that trusts a forgeable header
- * (X-Q-AEGIS-Actor-Role). It is authorization plumbing, not authentication.
- * See backend/app/api/deps.py for the full explanation.
+ * Caller roles recognized by the backend.
+ * Prefer JWT login; X-Q-AEGIS-Actor-Role is a DEV-ONLY bypass.
  */
 export type UserRole =
   | "data_owner"
@@ -266,6 +263,64 @@ export interface AssessmentResponse {
   ciphertext_id: string | null;
   encrypted: boolean;
   reselected: boolean;
+}
+
+/** POST /api/v1/auth/login */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user_id: string;
+  email: string;
+  role: UserRole;
+  name: string;
+}
+
+/** GET /api/v1/auth/me */
+export interface MeResponse {
+  id: string;
+  email: string;
+  role: UserRole;
+  name: string;
+  auth_mode: string;
+}
+
+/** POST /api/v1/documents/{id}/upload */
+export interface UploadResponse {
+  document_id: string;
+  filename: string;
+  storage_path: string;
+  current_status: DocumentStatus;
+  size_bytes: number;
+  extracted_text_chars: number;
+  extracted_text_preview: string;
+  extracted_text: string;
+}
+
+export type AgentType =
+  | "security"
+  | "compliance"
+  | "contextual"
+  | "quantum"
+  | "sustainability";
+
+/** GET /api/v1/documents/{id}/agents */
+export interface AgentDeepDiveResponse {
+  document_id: string;
+  risk_score_id: string | null;
+  assessed_at: string | null;
+  agents: {
+    id: string;
+    agent_type: AgentType;
+    score: string;
+    rationale: string;
+  }[];
+  missing_agents: AgentType[];
+  note: string | null;
 }
 
 // ---------------------------------------------------------------------------

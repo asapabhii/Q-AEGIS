@@ -372,8 +372,6 @@ def test_document_inventory_admits_admin_analyst_and_auditor(
     [
         UserRole.DATA_OWNER,
         UserRole.COMPLIANCE_OFFICER,
-        UserRole.CISO,
-        UserRole.ENGINEER,
     ],
 )
 def test_document_inventory_refuses_roles_outside_the_allow_list(
@@ -381,6 +379,17 @@ def test_document_inventory_refuses_roles_outside_the_allow_list(
 ) -> None:
     response = client.get(DOCUMENTS_URL, headers={ACTOR_ROLE_HEADER: role.value})
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role",
+    [UserRole.CISO, UserRole.ENGINEER],
+)
+def test_document_inventory_allows_ciso_and_engineer(
+    client: TestClient, role: UserRole
+) -> None:
+    response = client.get(DOCUMENTS_URL, headers={ACTOR_ROLE_HEADER: role.value})
+    assert response.status_code == 200, response.text
 
 
 def test_document_inventory_item_rejects_a_caller_with_no_role(

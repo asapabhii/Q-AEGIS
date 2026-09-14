@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { LabelBadge } from "@/components/LabelBadge";
 import { SiteNav } from "@/components/SiteNav";
 import {
   checkHealth,
   registerAndClassify,
+  registerUploadAndClassify,
   runAssessment,
   ApiError,
 } from "@/lib/api/client";
@@ -17,10 +18,11 @@ import type {
   AssessmentResponse,
   UserRole,
 } from "@/lib/api/types";
-
-// ---------------------------------------------------------------------------
-// Role descriptions — authorization plumbing, NOT authentication
-// ---------------------------------------------------------------------------
+import {
+  getAccessToken,
+  getSessionUser,
+  setDevRole,
+} from "@/lib/auth/session";
 
 const AVAILABLE_ROLES: { value: UserRole; label: string }[] = [
   { value: "data_owner", label: "Data Owner" },
@@ -32,22 +34,20 @@ const AVAILABLE_ROLES: { value: UserRole; label: string }[] = [
   { value: "engineer", label: "Engineer" },
 ];
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+export default function ClassifyPage() {
+  const session = typeof window !== "undefined" ? getSessionUser() : null;
+  const hasJwt = typeof window !== "undefined" && Boolean(getAccessToken());
 
-export default function DashboardPage() {
-  // Health
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
-  // Classify flow
-  const [role, setRole] = useState<UserRole>("data_owner");
+  const [role, setRole] = useState<UserRole>(session?.role ?? "data_owner");
   const [filename, setFilename] = useState("quarterly-report.pdf");
   const [content, setContent] = useState(
     "This document contains confidential financial projections and restricted trade secrets."
   );
+  const [file, setFile] = useState<File | null>(null);
   const [registeredDocument, setRegisteredDocument] =
     useState<DocumentResponse | null>(null);
   const [classification, setClassification] =
@@ -58,23 +58,22 @@ export default function DashboardPage() {
   const [assessError, setAssessError] = useState<string | null>(null);
   const [assessLoading, setAssessLoading] = useState(false);
 
-  // ------ Health check ------
+  useEffect(() => {
+    if (!hasJwt) setDevRole(role);
+  }, [role, hasJwt]);
+
   const handleHealthCheck = useCallback(async () => {
     setHealthLoading(true);
     setHealthError(null);
     try {
-      const res = await checkHealth();
-      setHealth(res);
+      setHealth(await checkHealth());
     } catch (err) {
-      setHealthError(
-        err instanceof ApiError ? err.message : "Network error"
-      );
+      setHealthError(err instanceof ApiError ? err.message : "Network error");
     } finally {
       setHealthLoading(false);
     }
   }, []);
 
-  // ------ Register + Classify ------
   const handleClassify = useCallback(async () => {
     setClassifyLoading(true);
     setClassifyError(null);
@@ -83,21 +82,32 @@ export default function DashboardPage() {
     setAssessment(null);
     setAssessError(null);
     try {
-      const { document: doc, classification: cls } =
-        await registerAndClassify(filename, content, role);
-      setRegisteredDocument(doc);
-      setClassification(cls);
+      if (file) {
+        const result = await registerUploadAndClassify(file, content, role);
+        setRegisteredDocument(result.document);
+        setClassification(result.classification);
+        if (result.upload.extracted_text) {
+          setContent(result.upload.extracted_text);
+        }
+      } else {
+        const { document: doc, classification: cls } = await registerAndClassify(
+          filename,
+          content,
+          role
+        );
+        setRegisteredDocument(doc);
+        setClassification(cls);
+      }
     } catch (err) {
-      setClassifyError(
-        err instanceof ApiError ? err.message : "Network error"
-      );
+      setClassifyError(err instanceof ApiError ? err.message : "Network error");
     } finally {
       setClassifyLoading(false);
     }
-  }, [filename, content, role]);
+  }, [filename, content, role, file]);
 
+  const effectiveRole = session?.role ?? role;
   const canAssess =
-    role === "security_analyst" || role === "security_admin";
+    effectiveRole === "security_analyst" || effectiveRole === "security_admin";
 
   const handleAssess = useCallback(async () => {
     if (!registeredDocument || !canAssess) return;
@@ -105,18 +115,19 @@ export default function DashboardPage() {
     setAssessError(null);
     setAssessment(null);
     try {
-      const result = await runAssessment(
-        {
-          document_id: registeredDocument.id,
-          device_id: "workstation-01",
-          device_is_new: false,
-          accessed_at: new Date().toISOString(),
-          after_hours: false,
-          content,
-        },
-        role
+      setAssessment(
+        await runAssessment(
+          {
+            document_id: registeredDocument.id,
+            device_id: "workstation-01",
+            device_is_new: false,
+            accessed_at: new Date().toISOString(),
+            after_hours: false,
+            content,
+          },
+          role
+        )
       );
-      setAssessment(result);
     } catch (err) {
       setAssessError(err instanceof ApiError ? err.message : "Network error");
     } finally {
@@ -124,9 +135,12 @@ export default function DashboardPage() {
     }
   }, [registeredDocument, role, content, canAssess]);
 
+  const canClassify = file
+    ? !classifyLoading
+    : !classifyLoading && Boolean(filename.trim()) && Boolean(content.trim());
+
   return (
     <div className="flex-1 flex flex-col">
-      {/* ── Header ────────────────────────────────────────── */}
       <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
         <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -142,17 +156,12 @@ export default function DashboardPage() {
               </p>
             </div>
           </div>
-
           <div className="flex items-center gap-6">
             <SiteNav active="/" />
-
-            {/* Health status dot */}
             <div className="flex items-center gap-2 text-sm">
               <span
                 className={`inline-block h-2.5 w-2.5 rounded-full ${
-                  health
-                    ? "bg-emerald-400 animate-pulse-glow text-emerald-400"
-                    : "bg-slate-600"
+                  health ? "bg-emerald-400 animate-pulse-glow" : "bg-slate-600"
                 }`}
               />
               <span className="text-[var(--color-text-secondary)]">
@@ -163,102 +172,87 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* ── Main ──────────────────────────────────────────── */}
       <main className="flex-1 mx-auto w-full max-w-6xl px-6 py-8 space-y-8">
-        {/* ── Health Card ─────────────────────────────────── */}
-        <section
-          id="health-section"
-          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 card-shimmer"
-        >
+        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold">System Health</h2>
             <button
               id="health-check-btn"
               onClick={handleHealthCheck}
               disabled={healthLoading}
-              className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {healthLoading ? "Checking…" : "Check Health"}
             </button>
           </div>
-
-          {healthError && (
-            <p className="text-sm text-red-400">{healthError}</p>
-          )}
-
+          {healthError && <p className="text-sm text-red-400">{healthError}</p>}
           {health && (
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <span className="text-[var(--color-text-muted)] block text-xs uppercase tracking-wider mb-1">
-                  Status
-                </span>
-                <span className="text-emerald-400 font-medium">
-                  {health.status}
-                </span>
-              </div>
-              <div>
-                <span className="text-[var(--color-text-muted)] block text-xs uppercase tracking-wider mb-1">
-                  Service
-                </span>
-                <span className="font-medium">{health.service}</span>
-              </div>
-              <div>
-                <span className="text-[var(--color-text-muted)] block text-xs uppercase tracking-wider mb-1">
-                  Version
-                </span>
-                <span className="font-medium">{health.version}</span>
-              </div>
-            </div>
+            <p className="text-sm font-mono">
+              {health.status} · {health.service} · {health.version}
+            </p>
           )}
         </section>
 
-        {/* ── Classification Workbench ────────────────────── */}
-        <section
-          id="classify-section"
-          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 card-shimmer"
-        >
-          <h2 className="text-base font-semibold mb-1">
-            Document Classification
-          </h2>
+        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
+          <h2 className="text-base font-semibold mb-1">Document Classification</h2>
           <p className="text-sm text-[var(--color-text-muted)] mb-6">
-            Register a document then classify its sensitivity. Two API calls,
-            not one — <code className="text-xs">document_id</code> is a real
-            foreign key.
+            Upload a file (≤50 MB) or paste text. Prefer{" "}
+            <Link href="/login" className="text-cyan-400 hover:underline">
+              JWT login
+            </Link>
+            ; role selector is DEV-ONLY when no token is stored.
           </p>
 
           <div className="grid gap-5 md:grid-cols-2">
-            {/* Left: inputs */}
             <div className="space-y-4">
-              {/* Role selector */}
+              {!hasJwt && (
+                <div>
+                  <label
+                    htmlFor="role-select"
+                    className="block text-xs font-medium mb-1.5"
+                  >
+                    Dev role bypass
+                  </label>
+                  <select
+                    id="role-select"
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as UserRole)}
+                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
+                  >
+                    {AVAILABLE_ROLES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {hasJwt && session && (
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Signed in as {session.email} ({session.role})
+                </p>
+              )}
+
               <div>
-                <label
-                  htmlFor="role-select"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                >
-                  Caller Role
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    (authorization plumbing, not authentication)
-                  </span>
+                <label htmlFor="file-input" className="block text-xs font-medium mb-1.5">
+                  Upload file
                 </label>
-                <select
-                  id="role-select"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as UserRole)}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                >
-                  {AVAILABLE_ROLES.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
+                <input
+                  id="file-input"
+                  type="file"
+                  onChange={(e) => {
+                    const next = e.target.files?.[0] ?? null;
+                    setFile(next);
+                    if (next) setFilename(next.name);
+                  }}
+                  className="w-full text-sm"
+                />
               </div>
 
-              {/* Filename */}
               <div>
                 <label
                   htmlFor="filename-input"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
+                  className="block text-xs font-medium mb-1.5"
                 >
                   Filename
                 </label>
@@ -267,261 +261,106 @@ export default function DashboardPage() {
                   type="text"
                   value={filename}
                   onChange={(e) => setFilename(e.target.value)}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                  placeholder="e.g. quarterly-report.pdf"
+                  disabled={Boolean(file)}
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm disabled:opacity-60"
                 />
               </div>
 
-              {/* Content */}
               <div>
                 <label
                   htmlFor="content-input"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
+                  className="block text-xs font-medium mb-1.5"
                 >
-                  Document Content
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    (Phase 1: inline text, not file upload)
-                  </span>
+                  Paste content (fallback if upload has no extractable text)
                 </label>
                 <textarea
                   id="content-input"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   rows={4}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none resize-y"
-                  placeholder="Paste document text to classify…"
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm resize-y"
                 />
               </div>
 
               <button
                 id="classify-btn"
                 onClick={handleClassify}
-                disabled={
-                  classifyLoading || !filename.trim() || !content.trim()
-                }
-                className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!canClassify}
+                className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
               >
                 {classifyLoading
                   ? "Classifying…"
-                  : "Register & Classify"}
+                  : file
+                    ? "Upload, Register & Classify"
+                    : "Register & Classify"}
               </button>
-
               {classifyError && (
                 <p className="text-sm text-red-400">{classifyError}</p>
               )}
             </div>
 
-            {/* Right: results */}
             <div className="space-y-4">
               {registeredDocument && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
-                    Step 1 — Document Registered
-                  </h3>
-                  <dl className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        ID
-                      </dt>
-                      <dd className="font-mono text-xs">
-                        {registeredDocument.id}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Filename
-                      </dt>
-                      <dd>{registeredDocument.filename}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Status
-                      </dt>
-                      <dd className="text-cyan-400 font-medium">
-                        {registeredDocument.current_status}
-                      </dd>
-                    </div>
-                  </dl>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 text-sm space-y-2">
+                  <p className="text-xs uppercase text-[var(--color-text-muted)]">
+                    Document
+                  </p>
+                  <p className="font-mono text-xs">{registeredDocument.id}</p>
+                  <p>
+                    {registeredDocument.filename} ·{" "}
+                    <span className="text-cyan-400">
+                      {registeredDocument.current_status}
+                    </span>
+                  </p>
                 </div>
               )}
-
               {classification && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
-                    Step 2 — Classification Result
-                  </h3>
-                  <dl className="space-y-3 text-sm">
-                    <div className="flex justify-between items-center">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Sensitivity
-                      </dt>
-                      <dd>
-                        <LabelBadge
-                          label={classification.sensitivity_label}
-                        />
-                      </dd>
-                    </div>
-
-                    {classification.is_defaulted && (
-                      <div className="flex justify-between items-center">
-                        <dt className="text-[var(--color-text-secondary)]">
-                          Escalated from
-                        </dt>
-                        <dd className="flex items-center gap-2">
-                          <LabelBadge
-                            label={classification.base_label}
-                          />
-                          <span className="text-amber-400 text-xs">
-                            ⚠ fail-safe
-                          </span>
-                        </dd>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Confidence
-                      </dt>
-                      <dd className="flex items-center gap-2">
-                        <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"
-                            style={{
-                              width: `${classification.confidence * 100}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="font-mono text-xs">
-                          {(classification.confidence * 100).toFixed(1)}%
-                        </span>
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Threshold
-                      </dt>
-                      <dd className="font-mono text-xs">
-                        {(
-                          classification.confidence_threshold * 100
-                        ).toFixed(0)}
-                        %
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Model
-                      </dt>
-                      <dd className="font-mono text-xs">
-                        {classification.model_version}
-                      </dd>
-                    </div>
-
-                    {classification.matched_keywords.length > 0 && (
-                      <div>
-                        <dt className="text-[var(--color-text-secondary)] mb-1">
-                          Matched Keywords
-                        </dt>
-                        <dd className="flex flex-wrap gap-1.5">
-                          {classification.matched_keywords.map((kw) => (
-                            <span
-                              key={kw}
-                              className="inline-flex rounded-md bg-slate-700/60 px-2 py-0.5 text-xs font-mono"
-                            >
-                              {kw}
-                            </span>
-                          ))}
-                        </dd>
-                      </div>
-                    )}
-
-                    <div>
-                      <dt className="text-[var(--color-text-secondary)] mb-1">
-                        Rationale
-                      </dt>
-                      <dd className="text-xs text-[var(--color-text-muted)] leading-relaxed">
-                        {classification.rationale}
-                      </dd>
-                    </div>
-                  </dl>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 space-y-3">
+                  <div className="flex justify-between items-center text-sm">
+                    <span>Sensitivity</span>
+                    <LabelBadge label={classification.sensitivity_label} />
+                  </div>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {classification.rationale}
+                  </p>
                   {registeredDocument && (
-                    <div className="mt-4 flex flex-col gap-2">
+                    <div className="space-y-2">
                       <Link
                         href={`/override?document_id=${registeredDocument.id}`}
-                        className="inline-block text-sm text-cyan-400 hover:underline"
+                        className="text-sm text-cyan-400 hover:underline"
                       >
-                        Override this classification
+                        Override
                       </Link>
                       <button
                         type="button"
                         id="assess-btn"
                         onClick={() => void handleAssess()}
                         disabled={assessLoading || !canAssess}
-                        className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                        className="block w-full rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm disabled:opacity-50"
                       >
-                        {assessLoading
-                          ? "Running pipeline…"
-                          : "Run full assessment"}
+                        {assessLoading ? "Running…" : "Run full assessment"}
                       </button>
-                      <p className="text-xs text-[var(--color-text-muted)]">
-                        Risk → five agents → trust → policy → crypto encrypt.
-                        Requires security_analyst or security_admin; the server
-                        enforces the same roles.
-                      </p>
                       {assessError && (
                         <p className="text-sm text-red-400">{assessError}</p>
                       )}
                       {assessment && (
-                        <dl className="space-y-1 text-xs">
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-[var(--color-text-secondary)]">
-                              Trust
-                            </dt>
-                            <dd className="font-mono">{assessment.consensus_value}</dd>
-                          </div>
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-[var(--color-text-secondary)]">
-                              AI / final
-                            </dt>
-                            <dd>
-                              {assessment.ai_recommendation} →{" "}
-                              {assessment.final_decision}
-                            </dd>
-                          </div>
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-[var(--color-text-secondary)]">
-                              Profile
-                            </dt>
-                            <dd className="font-mono">{assessment.profile_type}</dd>
-                          </div>
-                          <div className="flex justify-between gap-2">
-                            <dt className="text-[var(--color-text-secondary)]">
-                              Encrypted
-                            </dt>
-                            <dd>{assessment.encrypted ? "yes" : "no"}</dd>
-                          </div>
+                        <p className="text-xs font-mono">
+                          trust {assessment.consensus_value} ·{" "}
+                          {assessment.profile_type} ·{" "}
                           <Link
-                            href={`/dashboard`}
-                            className="inline-block text-cyan-400 hover:underline pt-1"
+                            href={`/agents?document_id=${assessment.document_id}`}
+                            className="text-cyan-400 hover:underline"
                           >
-                            Open dashboard
+                            agents
                           </Link>
-                          <Link
-                            href={`/audit?document_id=${assessment.document_id}`}
-                            className="inline-block text-cyan-400 hover:underline ml-3"
-                          >
-                            Open audit chain
-                          </Link>
-                        </dl>
+                        </p>
                       )}
                     </div>
                   )}
                 </div>
               )}
-
               {!registeredDocument && !classification && !classifyError && (
-                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
+                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-sm text-[var(--color-text-muted)]">
                   Results will appear here
                 </div>
               )}
@@ -529,16 +368,6 @@ export default function DashboardPage() {
           </div>
         </section>
       </main>
-
-      {/* ── Footer ────────────────────────────────────────── */}
-      <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Q-AEGIS Shield · SPEC.md 3.13</span>
-          <span>
-            Authorization stub — server decides, UI reflects
-          </span>
-        </div>
-      </footer>
     </div>
   );
 }

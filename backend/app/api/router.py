@@ -7,11 +7,14 @@ Routers are collected here rather than registered ad hoc in
 from fastapi import APIRouter
 
 from app.api.routes import (
+    agents,
     assessments,
     audit,
+    auth,
     classify,
     crypto,
     documents,
+    events,
     health,
     overrides,
     policy,
@@ -26,7 +29,10 @@ API_V1_PREFIX = "/api/v1"
 
 api_router = APIRouter(prefix=API_V1_PREFIX)
 api_router.include_router(health.router)
+api_router.include_router(auth.router)
 api_router.include_router(documents.router)
+api_router.include_router(agents.router)
+api_router.include_router(events.router)
 api_router.include_router(classify.router)
 api_router.include_router(overrides.router)
 api_router.include_router(audit.router)

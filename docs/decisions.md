@@ -7,10 +7,23 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 ## Pending
 
 - **Vector store: pgvector vs Qdrant** (`SPEC.md` 2.4, `SPEC.md` 3.12). Default assumption is pgvector until a measured latency or filtered-search problem appears.
+- **Neo4j Bolt TLS** for local compose. Postgres, Redis, and the API terminate TLS with `infra/certs/`; Neo4j remains plaintext on loopback until a bolt SSL policy is wired the same way.
 
 ---
 
 ## Log
+
+### 2026-09-14: Local JWT auth, disk upload, SSE, self-signed TLS
+
+Decided by: Abhinav, closing the P0 auth/upload/live-UI gaps called out after FR-12–15 / P0 merge.
+
+- **Auth:** email/password → JWT (`Authorization: Bearer`). Seeded users get `local-dev-only-password`. `X-Q-AEGIS-Actor-Role` stays as a **dev-only** bypass behind `AUTH_DEV_HEADER_BYPASS` (default true in local `.env.example`, must be false outside local/CI).
+- **Upload:** local disk under `DOCUMENT_STORAGE_DIR` (not object storage this phase). 50 MiB cap. All common document types accepted; paste classify remains. Text extracted best-effort for `/classify`.
+- **Live dashboard:** SSE on `GET /api/v1/events/stream` (Redis Streams when configured, inventory poll otherwise). Clients use `fetch` so Bearer headers work.
+- **TLS:** self-signed CA via `scripts/generate-local-certs.*`; Postgres SSL, Redis TLS, API HTTPS `:8443` in compose. Neo4j Bolt TLS deferred (see Pending).
+- **Personas:** `/login`, `/ciso`, `/engineer` screens; agent deep-dive at `GET /documents/{id}/agents`.
+
+Rejected: IdP/OIDC for local Phase 1 (heavier than needed). Rejected: S3/MinIO for upload this phase. Rejected: WebSockets (SSE is enough for inventory refresh). Rejected: dropping the role header entirely (tests and quick local demos still need a bypass).
 
 ### 2026-09-14: Event bus is Redis Streams; P0 pipeline runs agents then gate then encrypt
 

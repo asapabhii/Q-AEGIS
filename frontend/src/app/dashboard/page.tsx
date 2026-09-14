@@ -4,27 +4,37 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LabelBadge } from "@/components/LabelBadge";
 import { SiteNav } from "@/components/SiteNav";
-import { ApiError, listDocuments } from "@/lib/api/client";
+import { ApiError, listDocuments, subscribeEvents } from "@/lib/api/client";
 import type { DocumentInventoryResponse, UserRole } from "@/lib/api/types";
+import { getAccessToken, getSessionUser, setDevRole } from "@/lib/auth/session";
 import { countLabeled, displayStage } from "@/lib/inventory";
 
 const DASHBOARD_ROLES: { value: UserRole; label: string }[] = [
   { value: "security_admin", label: "Security Admin" },
   { value: "security_analyst", label: "Security Analyst" },
   { value: "auditor", label: "Auditor" },
-  { value: "data_owner", label: "Data Owner" },
-  { value: "compliance_officer", label: "Compliance Officer" },
   { value: "ciso", label: "CISO" },
   { value: "engineer", label: "Engineer" },
 ];
 
 export function DashboardScreen() {
-  const [role, setRole] = useState<UserRole>("security_admin");
+  const session = typeof window !== "undefined" ? getSessionUser() : null;
+  const hasJwt = typeof window !== "undefined" && Boolean(getAccessToken());
+  const [role, setRole] = useState<UserRole>(
+    session?.role && DASHBOARD_ROLES.some((r) => r.value === session.role)
+      ? session.role
+      : "security_admin"
+  );
   const [inventory, setInventory] = useState<DocumentInventoryResponse | null>(
     null
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [live, setLive] = useState(false);
+
+  useEffect(() => {
+    if (!hasJwt) setDevRole(role);
+  }, [role, hasJwt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +56,22 @@ export function DashboardScreen() {
     };
   }, [role]);
 
+  useEffect(() => {
+    const stop = subscribeEvents((eventName) => {
+      if (eventName === "ready") {
+        setLive(true);
+        return;
+      }
+      if (eventName === "inventory" || eventName === "bus") {
+        void listDocuments(role)
+          .then((loaded) => setInventory(loaded))
+          .catch(() => undefined);
+      }
+      if (eventName === "error") setLive(false);
+    }, role);
+    return stop;
+  }, [role]);
+
   function handleRefresh() {
     setLoading(true);
     setError(null);
@@ -58,9 +84,7 @@ export function DashboardScreen() {
         setInventory(null);
         setError(err instanceof ApiError ? err.message : "Network error");
       })
-      .finally(() => {
-        setLoading(false);
-      });
+      .finally(() => setLoading(false));
   }
 
   const documents = inventory?.documents ?? [];
@@ -82,7 +106,7 @@ export function DashboardScreen() {
                 Risk Dashboard
               </h1>
               <p className="text-xs text-[var(--color-text-muted)]">
-                PRD.md FR-14 · latest snapshot only
+                FR-14 · {live ? "live updates on" : "connecting…"}
               </p>
             </div>
           </div>
@@ -98,40 +122,40 @@ export function DashboardScreen() {
                 Monitored documents
               </h2>
               <p className="text-sm text-[var(--color-text-muted)]">
-                Stage fields stay empty until that step has run. This screen
-                does not invent a label, score, or profile.
+                Stage fields stay empty until that step has run.
               </p>
             </div>
             <div className="flex items-end gap-3">
-              <div>
-                <label
-                  htmlFor="dashboard-role"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                >
-                  Caller Role
-                </label>
-                <select
-                  id="dashboard-role"
-                  value={role}
-                  onChange={(event) => {
-                    setLoading(true);
-                    setRole(event.target.value as UserRole);
-                  }}
-                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                >
-                  {DASHBOARD_ROLES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!hasJwt && (
+                <div>
+                  <label
+                    htmlFor="dashboard-role"
+                    className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
+                  >
+                    Dev role bypass
+                  </label>
+                  <select
+                    id="dashboard-role"
+                    value={role}
+                    onChange={(event) =>
+                      setRole(event.target.value as UserRole)
+                    }
+                    className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
+                  >
+                    {DASHBOARD_ROLES.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <button
                 type="button"
                 id="dashboard-refresh-btn"
                 onClick={handleRefresh}
                 disabled={loading}
-                className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 {loading ? "Loading…" : "Refresh"}
               </button>
@@ -163,12 +187,6 @@ export function DashboardScreen() {
                 </div>
               </div>
             </div>
-          )}
-
-          {inventory && inventory.count === 0 && (
-            <p className="text-sm text-[var(--color-text-muted)]">
-              No documents registered
-            </p>
           )}
 
           {documents.length > 0 && (
@@ -219,6 +237,12 @@ export function DashboardScreen() {
                       </td>
                       <td className="py-2 space-x-3 whitespace-nowrap">
                         <Link
+                          href={`/agents?document_id=${row.id}`}
+                          className="text-cyan-400 hover:underline"
+                        >
+                          Agents
+                        </Link>
+                        <Link
                           href={`/audit?document_id=${row.id}`}
                           className="text-cyan-400 hover:underline"
                         >
@@ -239,13 +263,6 @@ export function DashboardScreen() {
           )}
         </section>
       </main>
-
-      <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Q-AEGIS Shield · SPEC.md 3.13 · Output Screen 1</span>
-          <span>GET /documents — writes nothing</span>
-        </div>
-      </footer>
     </div>
   );
 }
