@@ -19,11 +19,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
 from app.api.deps import ACTOR_ROLE_HEADER, authenticate_user
-from app.config import get_settings
 from app.db.enums import UserRole
 from app.db.models import Document
 from app.db.session import session_scope
-from app.event_bus.publisher import STREAM_KEY, is_bus_configured
+from app.event_bus.publisher import STREAM_KEY, is_bus_configured, parse_stream_fields
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +59,9 @@ def _authorize(
 
 async def _redis_events(last_id: str) -> AsyncIterator[str]:
     """Yield SSE frames from Redis Streams ``XREAD``."""
-    import redis
+    from app.event_bus.client import redis_from_settings
 
-    settings = get_settings()
-    client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    client = redis_from_settings()
     cursor = last_id
     try:
         while True:
@@ -74,11 +72,19 @@ async def _redis_events(last_id: str) -> AsyncIterator[str]:
             for _stream, messages in rows:
                 for msg_id, fields in messages:
                     cursor = msg_id
+                    try:
+                        envelope = parse_stream_fields(fields)
+                    except ValueError:
+                        logger.warning(
+                            "skipping invalid stream entry %s on SSE fan-out",
+                            msg_id,
+                        )
+                        continue
                     payload = {
                         "id": msg_id,
-                        "event_type": fields.get("event_type"),
-                        "payload": json.loads(fields.get("payload") or "{}"),
-                        "occurred_at": fields.get("occurred_at"),
+                        "event_type": envelope.event_type.value,
+                        "payload": envelope.payload,
+                        "occurred_at": envelope.occurred_at.isoformat(),
                     }
                     yield (
                         "event: bus\n" f"data: {json.dumps(payload, default=str)}\n\n"

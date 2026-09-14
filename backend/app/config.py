@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # Optional: publish becomes a validated no-op when unset so CI smoke and
     # unit tests without Redis still import the app.
     redis_url: str | None = None
+    # PEM CA for ``rediss://`` (compose mounts infra/certs/ca.crt).
+    redis_ssl_ca_certs: str | None = None
 
     # FR-2 scheduled recompute interval in seconds. 0 disables the in-process
     # scheduler tick (tests, CI). Triggers via the bus still work.
@@ -86,8 +88,9 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = Field(default=480, ge=5, le=60 * 24 * 7)
 
     # When true, X-Q-AEGIS-Actor-Role is accepted as a DEV-ONLY identity bypass.
-    # Must be false outside local/CI. Never enable in a shared environment.
-    auth_dev_header_bypass: bool = True
+    # Default false: opt in explicitly via AUTH_DEV_HEADER_BYPASS=true in local
+    # .env / CI. Never enable in a shared environment.
+    auth_dev_header_bypass: bool = False
 
     # Uploaded document bytes on local disk (not object storage this phase).
     document_storage_dir: str = "data/documents"

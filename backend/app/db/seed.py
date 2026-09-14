@@ -1,9 +1,12 @@
 """Development-only seed data with local login passwords.
 
-Seeded accounts use a known local-only password (see ``DEV_PASSWORD``) so
-JWT login works after ``python -m app.db.seed``. Not for any shared or
-deployed environment.
+Seeded accounts get a password from ``QAEGIS_DEV_SEED_PASSWORD`` (see
+``.env.example``). Never use this seed against a shared or deployed database.
 """
+
+from __future__ import annotations
+
+import os
 
 from sqlalchemy.orm import Session
 
@@ -14,8 +17,37 @@ from app.db.session import session_scope
 
 DEV_EMAIL_DOMAIN = "dev.qaegis.local"
 
-#: Known password for every seeded account. Local/dev only.
-DEV_PASSWORD = "local-dev-only-password"
+
+def resolve_dev_password() -> str:
+    """Return the local seed password from the environment.
+
+    Requires ``QAEGIS_DEV_SEED_PASSWORD`` so a reusable credential is not
+    hard-coded in the repository. Local setup: copy from ``.env.example``.
+    Loads the repository-root ``.env`` when the variable is not already set
+    (same path ``Settings`` uses), so ``python -m app.db.seed`` from
+    ``backend/`` works without exporting vars by hand.
+    """
+    value = os.environ.get("QAEGIS_DEV_SEED_PASSWORD", "").strip()
+    if not value:
+        from app.config import ENV_FILE
+
+        if ENV_FILE.is_file():
+            for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                key, _, raw = stripped.partition("=")
+                if key.strip() == "QAEGIS_DEV_SEED_PASSWORD":
+                    value = raw.strip().strip('"').strip("'")
+                    break
+    if not value:
+        raise RuntimeError(
+            "QAEGIS_DEV_SEED_PASSWORD is not set. Add it to the repository-root "
+            ".env (see .env.example), then re-run `python -m app.db.seed`."
+        )
+    if len(value) < 8:
+        raise RuntimeError("QAEGIS_DEV_SEED_PASSWORD must be at least 8 characters.")
+    return value
 
 
 def dev_email(role: UserRole) -> str:
@@ -28,9 +60,12 @@ def dev_display_name(role: UserRole) -> str:
     return f"Dev {role.value.replace('_', ' ').title()} (seeded)"
 
 
-def seed_development_users(session: Session) -> dict[UserRole, str]:
+def seed_development_users(
+    session: Session, *, password: str | None = None
+) -> dict[UserRole, str]:
     """Ensure one seeded user exists per role, with a password hash."""
-    password_hash = hash_password(DEV_PASSWORD)
+    plain = password if password is not None else resolve_dev_password()
+    password_hash = hash_password(plain)
     seeded: dict[UserRole, str] = {}
     for role in UserRole:
         email = dev_email(role)
@@ -51,9 +86,10 @@ def seed_development_users(session: Session) -> dict[UserRole, str]:
 
 def main() -> None:
     """Seed the configured database and report what was ensured."""
+    plain = resolve_dev_password()
     with session_scope() as session:
-        seeded = seed_development_users(session)
-    print(f"password (all seeded accounts): {DEV_PASSWORD}")
+        seeded = seed_development_users(session, password=plain)
+    print("password: (from QAEGIS_DEV_SEED_PASSWORD)")
     for role, email in seeded.items():
         print(f"{role.value:20} {email}")
 

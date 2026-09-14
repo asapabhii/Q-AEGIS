@@ -10,8 +10,8 @@ import { clearSession, getSessionUser } from "@/lib/auth/session";
 export default function LoginPage() {
   const router = useRouter();
   const existing = typeof window !== "undefined" ? getSessionUser() : null;
-  const [email, setEmail] = useState("security_admin@dev.qaegis.local");
-  const [password, setPassword] = useState("local-dev-only-password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -107,8 +107,11 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
           <p className="text-xs text-[var(--color-text-muted)]">
-            Seeded password: local-dev-only-password. Role header remains a
-            DEV-ONLY bypass when no JWT is stored.
+            Use a seeded account from local setup (
+            <code className="text-[var(--color-text-secondary)]">
+              QAEGIS_DEV_SEED_PASSWORD
+            </code>
+            ). Role header remains a DEV-ONLY bypass when no JWT is stored.
           </p>
         </form>
       </main>

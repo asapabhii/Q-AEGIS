@@ -17,12 +17,11 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 Decided by: Abhinav, closing the P0 auth/upload/live-UI gaps called out after FR-12–15 / P0 merge.
 
-- **Auth:** email/password → JWT (`Authorization: Bearer`). Seeded users get `local-dev-only-password`. `X-Q-AEGIS-Actor-Role` stays as a **dev-only** bypass behind `AUTH_DEV_HEADER_BYPASS` (default true in local `.env.example`, must be false outside local/CI).
-- **Upload:** local disk under `DOCUMENT_STORAGE_DIR` (not object storage this phase). 50 MiB cap. All common document types accepted; paste classify remains. Text extracted best-effort for `/classify`.
-- **Live dashboard:** SSE on `GET /api/v1/events/stream` (Redis Streams when configured, inventory poll otherwise). Clients use `fetch` so Bearer headers work.
-- **TLS:** self-signed CA via `scripts/generate-local-certs.*`; Postgres SSL, Redis TLS, API HTTPS `:8443` in compose. Neo4j Bolt TLS deferred (see Pending).
+- **Auth:** email/password → JWT (`Authorization: Bearer`). Seeded users take `QAEGIS_DEV_SEED_PASSWORD` from the environment (see `.env.example`); nothing hard-codes a shared password in application source. `X-Q-AEGIS-Actor-Role` stays as a **dev-only** bypass behind `AUTH_DEV_HEADER_BYPASS` (Settings default **false**; `.env.example` opts in for local).
+- **Upload:** local disk under `DOCUMENT_STORAGE_DIR` (not object storage this phase). 50 MiB cap, enforced by chunked reads server-side and a matching client-side gate. All common document types accepted; paste classify remains.
+- **Live dashboard:** SSE on `GET /api/v1/events/stream` (Redis Streams when configured, inventory poll otherwise). Stream fan-out validates via `parse_stream_fields`. Clients use `fetch` so Bearer headers work.
+- **TLS:** self-signed CA via `scripts/generate-local-certs.*`; Postgres SSL, Redis TLS, API HTTPS `:8443` in compose. **Not TLS-complete:** Neo4j Bolt TLS deferred (see Pending).
 - **Personas:** `/login`, `/ciso`, `/engineer` screens; agent deep-dive at `GET /documents/{id}/agents`.
-
 Rejected: IdP/OIDC for local Phase 1 (heavier than needed). Rejected: S3/MinIO for upload this phase. Rejected: WebSockets (SSE is enough for inventory refresh). Rejected: dropping the role header entirely (tests and quick local demos still need a bypass).
 
 ### 2026-09-14: FR-8 shred overwrites wrapped_dek; FR-9 ranks with QAOA+baselines; FR-16 exports CSV/PDF

@@ -32,6 +32,25 @@ from app.event_bus import EventType, schedule_publish
 router = APIRouter(tags=["documents"])
 
 MAX_FILENAME_CHARS = 255
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_upload_capped(file: UploadFile, max_bytes: int) -> bytes:
+    """Read upload bytes in chunks; reject once ``max_bytes`` is exceeded."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds upload limit of {max_bytes} bytes.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class DocumentRegistrationRequest(BaseModel):
@@ -279,12 +298,7 @@ async def upload_document_file(
         )
 
     settings = get_settings()
-    data = await file.read()
-    if len(data) > settings.upload_max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=(f"File exceeds upload limit of {settings.upload_max_bytes} bytes."),
-        )
+    data = await _read_upload_capped(file, settings.upload_max_bytes)
     if not data:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -34,6 +34,9 @@ const AVAILABLE_ROLES: { value: UserRole; label: string }[] = [
   { value: "engineer", label: "Engineer" },
 ];
 
+/** Client-side mirror of ``UPLOAD_MAX_BYTES`` (50 MiB). */
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+
 export default function ClassifyPage() {
   const session = typeof window !== "undefined" ? getSessionUser() : null;
   const hasJwt = typeof window !== "undefined" && Boolean(getAccessToken());
@@ -136,7 +139,7 @@ export default function ClassifyPage() {
   }, [registeredDocument, role, content, canAssess]);
 
   const canClassify = file
-    ? !classifyLoading
+    ? !classifyLoading && file.size <= UPLOAD_MAX_BYTES
     : !classifyLoading && Boolean(filename.trim()) && Boolean(content.trim());
 
   return (
@@ -262,6 +265,15 @@ export default function ClassifyPage() {
                   type="file"
                   onChange={(e) => {
                     const next = e.target.files?.[0] ?? null;
+                    if (next && next.size > UPLOAD_MAX_BYTES) {
+                      setFile(null);
+                      setClassifyError(
+                        `File exceeds the ${UPLOAD_MAX_BYTES} byte (50 MiB) upload limit.`
+                      );
+                      e.target.value = "";
+                      return;
+                    }
+                    setClassifyError(null);
                     setFile(next);
                     if (next) setFilename(next.name);
                   }}

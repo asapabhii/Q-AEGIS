@@ -32,6 +32,7 @@ describe("MigrationPage", () => {
           document_id: "doc-1",
           priority_rank: 1,
           status: "pending",
+          scheduled_upgrade_date: "2026-10-14",
           constraint_snapshot: { budget: 2 },
         },
       ],

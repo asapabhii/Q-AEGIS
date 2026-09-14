@@ -58,8 +58,25 @@ foreach ($path in @($CaKey, $ServerKey, $CaCrt, $ServerCrt)) {
 }
 
 & $OpenSsl genrsa -out $CaKey 4096
-& $OpenSsl req -x509 -new -nodes -key $CaKey -sha256 -days 825 -out $CaCrt `
-  -subj "/CN=Q-AEGIS Local CA/O=Q-AEGIS Dev/C=US"
+$CaCnf = Join-Path $CertDir "ca.cnf"
+@"
+[req]
+distinguished_name = dn
+x509_extensions = v3_ca
+prompt = no
+
+[dn]
+CN = Q-AEGIS Local CA
+O = Q-AEGIS Dev
+C = US
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+"@ | Set-Content -Path $CaCnf -Encoding ascii
+& $OpenSsl req -x509 -new -nodes -key $CaKey -sha256 -days 825 -out $CaCrt -config $CaCnf
+if ($LASTEXITCODE -ne 0) { throw "Failed to create CA certificate" }
 
 @"
 authorityKeyIdentifier=keyid,issuer

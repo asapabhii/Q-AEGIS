@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import ACTOR_ROLE_HEADER
 from app.auth.security import hash_password, verify_password
 from app.db.enums import DocumentStatus, UserRole
-from app.db.seed import DEV_PASSWORD, seed_development_users
+from app.db.seed import resolve_dev_password, seed_development_users
 
 
 def test_login_and_me_with_jwt(client: TestClient, db_session: Session) -> None:
@@ -21,7 +21,7 @@ def test_login_and_me_with_jwt(client: TestClient, db_session: Session) -> None:
         "/api/v1/auth/login",
         json={
             "email": "security_admin@dev.qaegis.local",
-            "password": DEV_PASSWORD,
+            "password": resolve_dev_password(),
         },
     )
     assert login.status_code == 200, login.text
@@ -106,6 +106,34 @@ def test_upload_txt_and_classify(
         },
     )
     assert classified.status_code == 200, classified.text
+
+
+def test_upload_rejects_oversize_without_full_buffer(
+    client: TestClient, db_session: Session, tmp_path: Path, monkeypatch
+) -> None:
+    seed_development_users(db_session)
+    monkeypatch.setenv("DOCUMENT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("UPLOAD_MAX_BYTES", "1024")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    headers = {ACTOR_ROLE_HEADER: UserRole.DATA_OWNER.value}
+    registered = client.post(
+        "/api/v1/documents",
+        json={"filename": "big.bin"},
+        headers=headers,
+    )
+    assert registered.status_code == 201, registered.text
+    document_id = registered.json()["id"]
+
+    oversized = b"x" * 2048
+    upload = client.post(
+        f"/api/v1/documents/{document_id}/upload",
+        headers=headers,
+        files={"file": ("big.bin", oversized, "application/octet-stream")},
+    )
+    assert upload.status_code == 413, upload.text
 
 
 def test_password_hash_roundtrip() -> None:

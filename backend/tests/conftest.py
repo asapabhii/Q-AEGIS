@@ -12,12 +12,16 @@ A rollback discards the savepoint without ever issuing a statement the triggers
 would refuse.
 """
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+
+# Required by ``seed_development_users``; never a production secret.
+os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -74,6 +78,7 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # when a test issues a token against this secret.
     monkeypatch.setenv("JWT_SECRET", "test-only-jwt-secret-not-for-prod")
     monkeypatch.setenv("AUTH_DEV_HEADER_BYPASS", "true")
+    monkeypatch.setenv("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
