@@ -368,6 +368,63 @@ export interface MigrationRankResponse {
   ranked_at: string;
 }
 
+/** FR-10 knowledge graph */
+export interface GraphSeedResponse {
+  nodes_upserted: number;
+  relationships_upserted: number;
+  demo: boolean;
+}
+
+export interface GraphNode {
+  labels: string[];
+  key: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphPath {
+  hops: number;
+  nodes: GraphNode[];
+  relationships: string[];
+  summary: string;
+}
+
+export interface AttackPathResponse {
+  document_id: string | null;
+  paths: GraphPath[];
+  note: string | null;
+}
+
+/** FR-11 agentic RAG */
+export interface RagAskRequest {
+  question: string;
+  document_id?: string | null;
+}
+
+export interface RagCitation {
+  chunk_id: string;
+  source_type: string;
+  source_id: string | null;
+  document_id: string | null;
+  content: string;
+  score: number;
+}
+
+export interface RagAnswer {
+  question: string;
+  answer: string;
+  verified: boolean;
+  plan: string;
+  citations: RagCitation[];
+  embedding_model: string;
+  refusal_reason: string | null;
+}
+
+export interface RagIngestResult {
+  document_id: string;
+  chunks_written: number;
+  embedding_model: string;
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------

@@ -260,25 +260,33 @@ export default function ClassifyPage() {
                 <label htmlFor="file-input" className="block text-xs font-medium mb-1.5">
                   Upload file
                 </label>
-                <input
-                  id="file-input"
-                  type="file"
-                  onChange={(e) => {
-                    const next = e.target.files?.[0] ?? null;
-                    if (next && next.size > UPLOAD_MAX_BYTES) {
-                      setFile(null);
-                      setClassifyError(
-                        `File exceeds the ${UPLOAD_MAX_BYTES} byte (50 MiB) upload limit.`
-                      );
-                      e.target.value = "";
-                      return;
-                    }
-                    setClassifyError(null);
-                    setFile(next);
-                    if (next) setFilename(next.name);
-                  }}
-                  className="w-full text-sm"
-                />
+                <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-3">
+                  <input
+                    id="file-input"
+                    type="file"
+                    accept=".pdf,.txt,.md,.csv,.json,.doc,.docx,.png,.jpg,.jpeg,.webp"
+                    onChange={(e) => {
+                      const next = e.target.files?.[0] ?? null;
+                      if (next && next.size > UPLOAD_MAX_BYTES) {
+                        setFile(null);
+                        setClassifyError(
+                          `File exceeds the ${UPLOAD_MAX_BYTES} byte (50 MiB) upload limit.`
+                        );
+                        e.target.value = "";
+                        return;
+                      }
+                      setClassifyError(null);
+                      setFile(next);
+                      if (next) setFilename(next.name);
+                    }}
+                    className="block w-full text-sm text-[var(--color-text-primary)] file:mr-3 file:rounded-md file:border-0 file:bg-cyan-900/40 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cyan-200 hover:file:bg-cyan-900/60"
+                  />
+                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                    {file
+                      ? `Selected: ${file.name} (${file.size.toLocaleString()} bytes)`
+                      : "Choose a document to store on disk, then classify (≤50 MiB)."}
+                  </p>
+                </div>
               </div>
 
               <div>

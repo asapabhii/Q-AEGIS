@@ -19,6 +19,7 @@ from app.db.models.crypto import CryptoProfile, DocumentCiphertext, MigrationSch
 from app.db.models.documents import Document
 from app.db.models.identity import User
 from app.db.models.policy import PolicyDecision, PolicyRule
+from app.db.models.rag import RagChunk
 from app.db.models.risk import AgentOutput, RiskScore, TrustScore
 
 #: Every table that is append-only against UPDATE at the database level.
@@ -48,6 +49,7 @@ __all__ = [
     "MigrationSchedule",
     "PolicyDecision",
     "PolicyRule",
+    "RagChunk",
     "RiskScore",
     "TrustScore",
     "UPDATE_REJECTED_TABLES",

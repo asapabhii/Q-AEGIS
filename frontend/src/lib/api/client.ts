@@ -39,6 +39,11 @@ import type {
   MigrationRankResponse,
   ShredRequest,
   ShredResponse,
+  GraphSeedResponse,
+  AttackPathResponse,
+  RagAskRequest,
+  RagAnswer,
+  RagIngestResult,
 } from "./types";
 
 const API_BASE_URL: string =
@@ -435,6 +440,65 @@ export async function rankMigration(
   role?: UserRole
 ): Promise<MigrationRankResponse> {
   return request<MigrationRankResponse>("/api/v1/migration-schedule/rank", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/** GET /api/v1/graph/status — Neo4j configured? */
+export async function getGraphStatus(): Promise<{ configured: boolean }> {
+  return request<{ configured: boolean }>("/api/v1/graph/status");
+}
+
+/** POST /api/v1/graph/seed — demo attack-path graph (FR-10). */
+export async function seedGraph(
+  body: { document_id?: string | null },
+  role: UserRole
+): Promise<GraphSeedResponse> {
+  return request<GraphSeedResponse>("/api/v1/graph/seed", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/** GET /api/v1/graph/documents/{id}/paths — multi-hop paths (FR-10). */
+export async function getDocumentAttackPaths(
+  documentId: string,
+  role: UserRole,
+  maxHops = 4
+): Promise<AttackPathResponse> {
+  const query = new URLSearchParams({ max_hops: String(maxHops) });
+  return request<AttackPathResponse>(
+    `/api/v1/graph/documents/${encodeURIComponent(documentId)}/paths?${query}`,
+    {
+      method: "GET",
+      headers: authHeaders(role),
+    }
+  );
+}
+
+/** POST /api/v1/rag/ingest/{id} — index records for RAG (FR-11). */
+export async function ingestRagDocument(
+  documentId: string,
+  role: UserRole
+): Promise<RagIngestResult> {
+  return request<RagIngestResult>(
+    `/api/v1/rag/ingest/${encodeURIComponent(documentId)}`,
+    {
+      method: "POST",
+      headers: authHeaders(role),
+    }
+  );
+}
+
+/** POST /api/v1/rag/ask — grounded Q&A (FR-11). */
+export async function askRag(
+  body: RagAskRequest,
+  role: UserRole
+): Promise<RagAnswer> {
+  return request<RagAnswer>("/api/v1/rag/ask", {
     method: "POST",
     headers: jsonHeaders(role),
     body: JSON.stringify(body),
