@@ -35,6 +35,17 @@ def register_document(
     return document
 
 
+def attach_storage_path(
+    session: Session, document: Document, storage_path: str
+) -> Document:
+    """Set ``storage_path`` and advance status to ``UPLOADED`` when needed."""
+    document.storage_path = storage_path
+    if document.current_status is DocumentStatus.REGISTERED:
+        document.current_status = DocumentStatus.UPLOADED
+    session.flush()
+    return document
+
+
 def mark_classified(session: Session, document: Document) -> Document:
     """Advance a document's lifecycle pointer to ``CLASSIFIED``.
 

@@ -7,9 +7,21 @@ from app.db.enums import UserRole
 from app.db.models import User
 
 
-def create_user(session: Session, *, name: str, email: str, role: UserRole) -> User:
+def create_user(
+    session: Session,
+    *,
+    name: str,
+    email: str,
+    role: UserRole,
+    password_hash: str | None = None,
+) -> User:
     """Create a user row and return it, without committing."""
-    user = User(name=name, email=email, role=role)
+    user = User(
+        name=name,
+        email=email,
+        role=role,
+        password_hash=password_hash,
+    )
     session.add(user)
     session.flush()
     return user

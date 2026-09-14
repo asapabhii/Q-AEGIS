@@ -175,14 +175,14 @@ python -m app.db.seed
 
 The first builds all twelve tables from empty and installs the append-only
 triggers. The second creates one development user per role, and is idempotent, so
-running it again is harmless.
+running it again is harmless. Set `QAEGIS_DEV_SEED_PASSWORD` in the repository-root
+`.env` first (copy from `.env.example`); the seed refuses to run without it.
 
 The seed is a **stub** and is labelled one in its own module. It exists because
 `documents.uploaded_by`, `audit_log.actor_id`, `manual_overrides.overridden_by`
-and `policy_rules.created_by` are real foreign keys to `users.id`, while the API's
-identity source is still a header-trusting stub that knows a caller's role and
-nothing else. Without a row per role, every write fails its foreign key. Skip this
-step and requests come back `503` telling you to run it.
+and `policy_rules.created_by` are real foreign keys to `users.id`. Without a row
+per role, every write fails its foreign key. Skip this step and requests come
+back `503` telling you to run it.
 
 Both commands are also what the test suite runs, so if `pytest` passes, your
 schema is current. Re-run `alembic upgrade head` after every `git pull` that

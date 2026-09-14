@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # Optional: publish becomes a validated no-op when unset so CI smoke and
     # unit tests without Redis still import the app.
     redis_url: str | None = None
+    # PEM CA for ``rediss://`` (compose mounts infra/certs/ca.crt).
+    redis_ssl_ca_certs: str | None = None
 
     # FR-2 scheduled recompute interval in seconds. 0 disables the in-process
     # scheduler tick (tests, CI). Triggers via the bus still work.
@@ -75,8 +77,24 @@ class Settings(BaseSettings):
     # Base64url-encoded 32-byte key. Optional until encrypt is invoked.
     crypto_master_key: str | None = None
 
-    # Comma-separated browser origins for CORS (frontend local dev).
-    cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
+    # Comma-separated browser origins for CORS (frontend local/HTTPS local).
+    cors_origins: str = (
+        "http://127.0.0.1:3000,http://localhost:3000,"
+        "https://127.0.0.1:3443,https://localhost:3443"
+    )
+
+    # Local JWT auth. Required for login; tests set a dummy secret.
+    jwt_secret: str | None = None
+    jwt_expire_minutes: int = Field(default=480, ge=5, le=60 * 24 * 7)
+
+    # When true, X-Q-AEGIS-Actor-Role is accepted as a DEV-ONLY identity bypass.
+    # Default false: opt in explicitly via AUTH_DEV_HEADER_BYPASS=true in local
+    # .env / CI. Never enable in a shared environment.
+    auth_dev_header_bypass: bool = False
+
+    # Uploaded document bytes on local disk (not object storage this phase).
+    document_storage_dir: str = "data/documents"
+    upload_max_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
 
     # Sensitivity classifier, SPEC.md 3.2.
     # A classification scoring below this threshold is escalated to the more

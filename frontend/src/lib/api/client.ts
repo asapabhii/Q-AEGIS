@@ -1,18 +1,21 @@
 /**
  * Centralized API client for Q-AEGIS Shield.
  *
- * Every call to the backend goes through this module. No inline fetch() in
- * components — that rule is in AGENTS.md and exists so there is one place to
- * change when the backend's contract or the authorization mechanism changes.
- *
- * Authorization plumbing: the X-Q-AEGIS-Actor-Role header is a STUB that
- * trusts a forgeable header to state the caller's role. It is NOT
- * authentication. See backend/app/api/deps.py for the full explanation. Do
- * not build a login screen on this header and do not describe it as auth in
- * the UI or in the code.
+ * Primary auth: Authorization Bearer JWT from localStorage.
+ * Dev-only fallback: X-Q-AEGIS-Actor-Role when AUTH_DEV_HEADER_BYPASS is on
+ * and no token is stored.
  */
 
+import {
+  getAccessToken,
+  getDevRole,
+  setSession,
+  type SessionUser,
+} from "@/lib/auth/session";
 import type {
+  AgentDeepDiveResponse,
+  AssessmentRequest,
+  AssessmentResponse,
   AuditChainResponse,
   AuditVerifyResponse,
   ClassificationRequest,
@@ -22,44 +25,26 @@ import type {
   DocumentResponse,
   DocumentSnapshot,
   HealthResponse,
+  LoginRequest,
+  LoginResponse,
   ManualOverrideRequest,
   ManualOverrideResponse,
+  MeResponse,
   PolicyRuleRequest,
   PolicyRuleResponse,
   PolicyRuleTestResponse,
+  UploadResponse,
   UserRole,
-  AssessmentRequest,
-  AssessmentResponse,
   MigrationRankRequest,
   MigrationRankResponse,
   ShredRequest,
   ShredResponse,
 } from "./types";
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-/**
- * Base URL for the backend API. Reads from the NEXT_PUBLIC_API_URL
- * environment variable; falls back to the local dev server address.
- *
- * Uses 127.0.0.1 (not localhost) per docs/LOCAL_DEV.md: on Windows, localhost
- * resolves to ::1 first while the containers publish on IPv4 only, causing
- * hangs rather than clean refusals.
- */
 const API_BASE_URL: string =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
-/**
- * Header name for the caller-role stub. Defined once here and in the backend
- * at backend/app/api/deps.py as ACTOR_ROLE_HEADER.
- */
 const ACTOR_ROLE_HEADER = "X-Q-AEGIS-Actor-Role";
-
-// ---------------------------------------------------------------------------
-// Error handling
-// ---------------------------------------------------------------------------
 
 function formatDetail(detail: unknown): string {
   if (typeof detail === "string") return detail;
@@ -91,10 +76,6 @@ export class ApiError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
 async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -115,142 +96,214 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-function roleHeaders(role: UserRole): HeadersInit {
-  return {
-    "Content-Type": "application/json",
-    [ACTOR_ROLE_HEADER]: role,
-  };
+function authHeaders(
+  role?: UserRole,
+  extra?: HeadersInit
+): HeadersInit {
+  const headers = new Headers(extra);
+  const token = getAccessToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  } else {
+    const effective = role ?? getDevRole();
+    if (effective) {
+      headers.set(ACTOR_ROLE_HEADER, effective);
+    }
+  }
+  if (!headers.has("Content-Type") && !(extra instanceof FormData)) {
+    // Leave Content-Type unset for FormData; browser sets boundary.
+  }
+  return headers;
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+function jsonHeaders(role?: UserRole): HeadersInit {
+  const headers = new Headers(authHeaders(role));
+  headers.set("Content-Type", "application/json");
+  return headers;
+}
 
-/**
- * GET /api/v1/health — liveness check.
- *
- * Deliberately unauthenticated: a liveness probe is consumed by the container
- * runtime before any user identity exists.
- */
 export async function checkHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/api/v1/health");
 }
 
-/**
- * POST /api/v1/documents — register a document's metadata.
- *
- * This is step 1 of the register-then-classify flow. The returned document_id
- * is a real foreign key that POST /api/v1/classify requires.
- */
+export async function login(body: LoginRequest): Promise<LoginResponse> {
+  const result = await request<LoginResponse>("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const user: SessionUser = {
+    id: result.user_id,
+    email: result.email,
+    role: result.role,
+    name: result.name,
+  };
+  setSession(result.access_token, user);
+  return result;
+}
+
+export async function getMe(role?: UserRole): Promise<MeResponse> {
+  return request<MeResponse>("/api/v1/auth/me", {
+    method: "GET",
+    headers: authHeaders(role),
+  });
+}
+
 export async function registerDocument(
   body: DocumentRegistrationRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<DocumentResponse> {
   return request<DocumentResponse>("/api/v1/documents", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
 
-/**
- * GET /api/v1/documents — current risk and protection status for every document.
- *
- * Writes nothing. Stage fields are null until that step has run. data_owner
- * is refused; this is the fleet view, not FR-16.
- */
+export async function uploadDocumentFile(
+  documentId: string,
+  file: File,
+  role?: UserRole
+): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<UploadResponse>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}/upload`,
+    {
+      method: "POST",
+      headers: authHeaders(role),
+      body: form,
+    }
+  );
+}
+
 export async function listDocuments(
-  role: UserRole
+  role?: UserRole
 ): Promise<DocumentInventoryResponse> {
   return request<DocumentInventoryResponse>("/api/v1/documents", {
     method: "GET",
-    headers: roleHeaders(role),
+    headers: authHeaders(role),
   });
 }
 
-/**
- * GET /api/v1/documents/{id} — one document's current snapshot.
- *
- * Same field contract as one row of listDocuments. Unknown id is 404.
- */
 export async function getDocument(
   documentId: string,
-  role: UserRole
+  role?: UserRole
 ): Promise<DocumentSnapshot> {
   return request<DocumentSnapshot>(
     `/api/v1/documents/${encodeURIComponent(documentId)}`,
     {
       method: "GET",
-      headers: roleHeaders(role),
+      headers: authHeaders(role),
+    }
+  );
+}
+
+export async function getDocumentAgents(
+  documentId: string,
+  role?: UserRole
+): Promise<AgentDeepDiveResponse> {
+  return request<AgentDeepDiveResponse>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}/agents`,
+    {
+      method: "GET",
+      headers: authHeaders(role),
     }
   );
 }
 
 /**
- * GET /api/v1/audit/entries — one document's chain, genesis first.
- *
- * Writes nothing. No is_valid on this response; call verify separately.
- * document_id is required.
+ * Subscribe to SSE inventory/bus updates. Uses fetch so Bearer works.
+ * Returns an abort function.
  */
+export function subscribeEvents(
+  onEvent: (eventName: string, data: unknown) => void,
+  role?: UserRole
+): () => void {
+  const controller = new AbortController();
+  const headers = new Headers(authHeaders(role));
+  void (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/events/stream`, {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        onEvent("error", { status: response.status });
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const lines = chunk.split("\n");
+          let eventName = "message";
+          let dataLine = "";
+          for (const line of lines) {
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            if (line.startsWith("data:")) dataLine = line.slice(5).trim();
+          }
+          if (!dataLine) continue;
+          try {
+            onEvent(eventName, JSON.parse(dataLine));
+          } catch {
+            onEvent(eventName, dataLine);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        onEvent("error", { message: String(err) });
+      }
+    }
+  })();
+  return () => controller.abort();
+}
+
 export async function listAuditEntries(
   documentId: string,
-  role: UserRole
+  role?: UserRole
 ): Promise<AuditChainResponse> {
   const query = new URLSearchParams({ document_id: documentId });
   return request<AuditChainResponse>(`/api/v1/audit/entries?${query.toString()}`, {
     method: "GET",
-    headers: roleHeaders(role),
+    headers: authHeaders(role),
   });
 }
 
-/**
- * GET /api/v1/audit/verify — recompute the Merkle prefix for one document.
- *
- * Always send document_id. FR-15 is one document, not the system chain.
- * Do not send end_index unless the caller asked for a shorter prefix; omit
- * it to verify through the tail. Writes nothing. Do not put is_valid on
- * the entries list.
- */
 export async function verifyAudit(
   documentId: string,
-  role: UserRole
+  role?: UserRole
 ): Promise<AuditVerifyResponse> {
   const query = new URLSearchParams({ document_id: documentId });
   return request<AuditVerifyResponse>(`/api/v1/audit/verify?${query.toString()}`, {
     method: "GET",
-    headers: roleHeaders(role),
+    headers: authHeaders(role),
   });
 }
 
-/**
- * POST /api/v1/classify — classify a registered document.
- *
- * This is step 2 of the register-then-classify flow. Calling this with a
- * document_id that was not registered first returns 404 — that is correct
- * backend behaviour, not a bug.
- */
 export async function classifyDocument(
   body: ClassificationRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<ClassificationResponse> {
   return request<ClassificationResponse>("/api/v1/classify", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
 
-/**
- * Convenience: register a document then classify it in one call.
- *
- * This is the real shape of the flow. Every screen that classifies a document
- * must register it first because classification_metadata.document_id is a
- * foreign key to documents.id.
- */
 export async function registerAndClassify(
   filename: string,
   content: string,
-  role: UserRole
+  role?: UserRole
 ): Promise<{ document: DocumentResponse; classification: ClassificationResponse }> {
   const document = await registerDocument({ filename }, role);
   const classification = await classifyDocument(
@@ -260,68 +313,69 @@ export async function registerAndClassify(
   return { document, classification };
 }
 
-/**
- * POST /api/v1/manual-overrides — persist a human relabel.
- *
- * original_label is computed server-side. Do not send it, and do not send a
- * confirmed boolean: the checkbox is a UI gate, not an API field.
- */
+/** Register, upload file, classify using extracted text (fallback to paste). */
+export async function registerUploadAndClassify(
+  file: File,
+  pasteFallback: string,
+  role?: UserRole
+): Promise<{
+  document: DocumentResponse;
+  upload: UploadResponse;
+  classification: ClassificationResponse;
+}> {
+  const document = await registerDocument({ filename: file.name }, role);
+  const upload = await uploadDocumentFile(document.id, file, role);
+  const content =
+    upload.extracted_text && upload.extracted_text_chars > 0
+      ? upload.extracted_text
+      : pasteFallback;
+  const classification = await classifyDocument(
+    { document_id: document.id, content },
+    role
+  );
+  return { document, upload, classification };
+}
+
 export async function overrideClassification(
   body: ManualOverrideRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<ManualOverrideResponse> {
   return request<ManualOverrideResponse>("/api/v1/manual-overrides", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
 
-/**
- * POST /api/v1/policy-rules — persist one override rule.
- *
- * Name must be unique. Priority must be unique among active rules. Extra
- * keys are forbidden. Role: compliance_officer.
- */
 export async function createPolicyRule(
   body: PolicyRuleRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<PolicyRuleResponse> {
   return request<PolicyRuleResponse>("/api/v1/policy-rules", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
 
-/**
- * POST /api/v1/policy-rules/test — dry-run a candidate against recent decisions.
- *
- * Does not save the rule. Do not send a window or limit; the server uses 20.
- */
 export async function testPolicyRule(
   body: PolicyRuleRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<PolicyRuleTestResponse> {
   return request<PolicyRuleTestResponse>("/api/v1/policy-rules/test", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
 
-/**
- * POST /api/v1/assessments — risk → agents → trust → policy → crypto → encrypt.
- *
- * Roles: security_analyst, security_admin. Pass content to store ciphertext.
- */
 export async function runAssessment(
   body: AssessmentRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<AssessmentResponse> {
   return request<AssessmentResponse>("/api/v1/assessments", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
@@ -332,11 +386,11 @@ export async function runAssessment(
  */
 export async function shredDocument(
   body: ShredRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<ShredResponse> {
   return request<ShredResponse>("/api/v1/shred", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
@@ -348,12 +402,12 @@ export async function shredDocument(
 export async function downloadDocumentSummary(
   documentId: string,
   format: "csv" | "pdf",
-  role: UserRole
+  role?: UserRole
 ): Promise<void> {
   const url = `${API_BASE_URL}/api/v1/documents/${encodeURIComponent(
     documentId
   )}/summary?format=${format}`;
-  const response = await fetch(url, { headers: roleHeaders(role) });
+  const response = await fetch(url, { headers: authHeaders(role) });
   if (!response.ok) {
     let body: unknown;
     try {
@@ -378,11 +432,11 @@ export async function downloadDocumentSummary(
  */
 export async function rankMigration(
   body: MigrationRankRequest,
-  role: UserRole
+  role?: UserRole
 ): Promise<MigrationRankResponse> {
   return request<MigrationRankResponse>("/api/v1/migration-schedule/rank", {
     method: "POST",
-    headers: roleHeaders(role),
+    headers: jsonHeaders(role),
     body: JSON.stringify(body),
   });
 }
