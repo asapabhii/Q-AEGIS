@@ -14,6 +14,7 @@
 
 import type {
   AuditChainResponse,
+  AuditVerifyResponse,
   ClassificationRequest,
   ClassificationResponse,
   DocumentInventoryResponse,
@@ -191,6 +192,25 @@ export async function listAuditEntries(
 ): Promise<AuditChainResponse> {
   const query = new URLSearchParams({ document_id: documentId });
   return request<AuditChainResponse>(`/api/v1/audit/entries?${query.toString()}`, {
+    method: "GET",
+    headers: roleHeaders(role),
+  });
+}
+
+/**
+ * GET /api/v1/audit/verify — recompute the Merkle prefix for one document.
+ *
+ * Always send document_id. FR-15 is one document, not the system chain.
+ * Do not send end_index unless the caller asked for a shorter prefix; omit
+ * it to verify through the tail. Writes nothing. Do not put is_valid on
+ * the entries list.
+ */
+export async function verifyAudit(
+  documentId: string,
+  role: UserRole
+): Promise<AuditVerifyResponse> {
+  const query = new URLSearchParams({ document_id: documentId });
+  return request<AuditVerifyResponse>(`/api/v1/audit/verify?${query.toString()}`, {
     method: "GET",
     headers: roleHeaders(role),
   });

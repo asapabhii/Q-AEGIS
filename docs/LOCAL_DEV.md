@@ -494,6 +494,11 @@ project using TypeScript and Tailwind CSS in `frontend/`. It includes:
   `{rule_name, condition_expr, action, priority}` after a non-blank name and
   at least one condition. Test uses the same body on `POST /policy-rules/test`
   and writes nothing. Multiple conditions are a flat `all`.
+- The risk dashboard at `/dashboard` (`PRD.md` FR-14). Reads `GET /documents`.
+  Null stages render as a dash. Does not invent scores.
+- The audit viewer at `/audit` (`PRD.md` FR-15). Load uses
+  `GET /audit/entries?document_id=`. Verify is a separate
+  `GET /audit/verify?document_id=` and is not a field on the list.
 - A Vitest unit and component test suite (`src/**/*.test.{ts,tsx}`) using `jsdom`,
   Testing Library (`@testing-library/react`, `@testing-library/user-event`,
   `@testing-library/jest-dom`), and
