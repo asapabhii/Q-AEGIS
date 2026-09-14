@@ -57,13 +57,19 @@ def alembic_config(url: str) -> Config:
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Iterator[None]:
+def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Reset the cached settings around every test.
 
     ``get_settings`` is ``lru_cache``d, so a test that changes the environment
     would otherwise leak its configuration into unrelated tests through the
     cached instance, and the resulting failure would depend on test ordering.
     """
+    # Dummy master key so assessment encrypt paths work in API tests.
+    monkeypatch.setenv(
+        "CRYPTO_MASTER_KEY",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    )
+    monkeypatch.setenv("RISK_RECOMPUTE_INTERVAL_SECONDS", "0")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

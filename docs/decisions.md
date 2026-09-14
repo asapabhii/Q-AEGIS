@@ -6,12 +6,24 @@ A running log of implementation decisions made where `SPEC.md` deliberately left
 
 ## Pending
 
-- **Event bus: Redis Streams vs Kafka** (`SPEC.md` 2.3, `SPEC.md` 3.1). Default assumption is Redis Streams until a concrete scale need appears.
 - **Vector store: pgvector vs Qdrant** (`SPEC.md` 2.4, `SPEC.md` 3.12). Default assumption is pgvector until a measured latency or filtered-search problem appears.
 
 ---
 
 ## Log
+
+### 2026-09-14: Event bus is Redis Streams; P0 pipeline runs agents then gate then encrypt
+
+Decided by: Abhinav, closing `SPEC.md` 2.3 while implementing P0 (FR-2 schedule/triggers, FR-3 agents, FR-6 encrypt).
+
+- **Bus:** Redis Streams (`qaegis:events`), not Kafka. One Redis is already in `infra/docker-compose.yml`. Streams give consumer groups and durability at this volume without a second broker. Move to Kafka only if partitioned multi-group scale appears as a measured need (`SPEC.md` 2.3).
+- Event envelopes are validated on publish and consume. First event types: `document.uploaded`, `document.classified`, `risk.trigger` (new device / after-hours), `trust.updated`.
+- Contextual risk stays callable via `POST /risk-scores`. The bus adds scheduled recomputes and immediate trigger events so FR-2 is not "once at upload" only. `after_hours` remains a fact on the snapshot, not derived from a hard-coded business-hours window.
+- **FR-3:** five LangGraph agents produce the `agent_outputs` rows. `POST /trust-scores` still accepts caller-supplied outputs for direct tests; the assessment pipeline prefers agent-produced scores.
+- **FR-5:** when `ai_recommendation` is omitted on the gate, it is derived from the persisted consensus via a versioned mapping (`allow` / `require_mfa` / `force_pqc` / `deny`). Callers may still supply it explicitly.
+- **FR-6:** profile selection still writes `crypto_profiles`; encrypting document bytes is a separate step that uses the selected profile and stores ciphertext + wrapped DEK so FR-8 can destroy the key later without touching `audit_log`.
+
+Rejected: Kafka at this team size. Rejected: inventing business hours for `after_hours`. Rejected: silently falling hybrid/PQ encrypt back to AES when liboqs is missing.
 
 ### 2026-09-10: Dashboard and audit viewer are separate screens; verify is its own call
 

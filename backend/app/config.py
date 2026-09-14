@@ -33,12 +33,7 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
-    """Runtime settings.
-
-    Broker credentials are still absent deliberately: no module wires the event
-    bus yet (``SPEC.md`` 3.1), and reading them here before a consumer exists
-    would imply a connection this build does not make.
-    """
+    """Runtime settings."""
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -67,11 +62,31 @@ class Settings(BaseSettings):
     # this variable. Absence is never silently tolerated at the point of use.
     database_url: str | None = None
 
+    # Event bus, SPEC.md 3.1 / 2.3. Redis Streams (decided 2026-09-14).
+    # Optional: publish becomes a validated no-op when unset so CI smoke and
+    # unit tests without Redis still import the app.
+    redis_url: str | None = None
+
+    # FR-2 scheduled recompute interval in seconds. 0 disables the in-process
+    # scheduler tick (tests, CI). Triggers via the bus still work.
+    risk_recompute_interval_seconds: int = Field(default=300, ge=0)
+
+    # AES wrapping key for document DEKs, SPEC.md Section 6 / NG5.
+    # Base64url-encoded 32-byte key. Optional until encrypt is invoked.
+    crypto_master_key: str | None = None
+
+    # Comma-separated browser origins for CORS (frontend local dev).
+    cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
+
     # Sensitivity classifier, SPEC.md 3.2.
     # A classification scoring below this threshold is escalated to the more
     # sensitive label. Load-bearing for the system's security posture, see
     # app/classifier/stub_classifier.py.
     classifier_confidence_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+
+    def cors_origin_list(self) -> list[str]:
+        """Parse ``cors_origins`` into a list of non-empty origins."""
+        return [part.strip() for part in self.cors_origins.split(",") if part.strip()]
 
 
 @lru_cache(maxsize=1)

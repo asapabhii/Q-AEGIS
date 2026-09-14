@@ -83,7 +83,8 @@ though it were.
 
 `users` and `documents` are the roots. `documents` has a one-to-many to
 `classification_metadata`, `manual_overrides`, `risk_scores`, `trust_scores`,
-`policy_decisions`, `crypto_profiles`, `migration_schedule`, and `audit_log`.
+`policy_decisions`, `crypto_profiles`, `document_ciphertexts`,
+`migration_schedule`, and `audit_log`.
 `risk_scores` has a one-to-many to `agent_outputs`, with five rows expected per
 risk score, one per agent type. `trust_scores` has a one-to-many to
 `crypto_profiles`, since a profile records which trust score drove it.
@@ -110,12 +111,14 @@ erDiagram
     documents ||--o{ trust_scores : trusted_at
     documents ||--o{ policy_decisions : gated_by
     documents ||--o{ crypto_profiles : protected_by
+    documents ||--o{ document_ciphertexts : stores
     documents ||--o{ migration_schedule : queued_in
     documents |o--o{ audit_log : recorded_in
 
     risk_scores ||--o{ agent_outputs : aggregates
     risk_scores ||--o{ trust_scores : consensus_over
     trust_scores ||--o{ crypto_profiles : drives
+    crypto_profiles ||--o{ document_ciphertexts : encrypts_with
     policy_rules |o--o{ policy_decisions : matched_by
 ```
 
@@ -319,6 +322,27 @@ v1 persist: `POST /api/v1/crypto-profiles` writes one row per call from a
 `trust_score_id`. A `policy_decisions` row must already exist for the same
 `document_id` (FR-6). Reselection is a new row. The endpoint does not encrypt
 bytes.
+
+## `document_ciphertexts`
+
+Stores encrypted document bytes plus a master-key-wrapped DEK so crypto-shredding
+(`PRD.md` FR-8) can destroy keys without deleting audit rows. One row per
+encryption run; re-encryption is a new row.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `uuid` PK | no | |
+| `document_id` | `uuid` FK → `documents.id` | no | Indexed |
+| `crypto_profile_id` | `uuid` FK → `crypto_profiles.id` | no | Indexed. The profile selection that drove this encryption |
+| `ciphertext` | `bytea` | no | AES-256-GCM encrypted document bytes |
+| `nonce` | `bytea` | no | Nonce for `ciphertext` |
+| `wrapped_dek` | `bytea` | no | DEK and profile secrets wrapped under `CRYPTO_MASTER_KEY` (NG5) |
+| `kem_ciphertext` | `bytea` | **yes** | Null for `aes256`. Hybrid and post-quantum KEM or signature envelope |
+| `algorithm` | `varchar(80)` | no | For example `AES-256-GCM`, `X25519MLKEM768+AES-256-GCM` |
+| `created_at` | `timestamptz` | no | Indexed, defaults to `now()` |
+
+Parameter sets behind each profile are in `SPEC.md` Section 6. Shredding overwrites
+or deletes `wrapped_dek`; ciphertext may remain as proof that data existed.
 
 ## `migration_schedule`
 

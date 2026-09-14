@@ -49,9 +49,9 @@ Original framing: OPA's commercial backer Styra had its core team acquired by Ap
 
 Three corrections that came out of making the call, recorded here so this paragraph is not read at face value. The "independent benchmarking" is a Teleport engineering blog post, and Teleport ships Cedar-adjacent tooling, so it is not a neutral source; several of its Cedar results were predicted rather than measured. Cedar's proven determinism property is order-independence, which this system does not use, because `policy_rules.priority` requires priority-ordered first match. And Cedar is an authorization engine answering Allow or Deny about a principal and a resource, which is a different question from the one FR-5 asks.
 
-### 2.3 Event bus: Redis Streams vs Kafka, decided at implementation time
+### 2.3 Event bus: Redis Streams (decided)
 
-Start with Redis Streams, simpler to operate for a small team, sufficient durability and consumer-group support for expected volume. Move to Kafka only if a concrete need for partitioned, multi-consumer-group scale actually appears, not preemptively.
+**Decided 2026-09-14: Redis Streams.** Full reasoning in `docs/decisions.md`. Kafka only if partitioned multi-consumer-group scale appears as a measured need.
 
 ### 2.4 Vector store: pgvector vs Qdrant, decided at implementation time
 
@@ -76,6 +76,8 @@ v1 is caller-triggered via `POST /api/v1/risk-scores`; scheduled recomputes and 
 
 ### 3.4 Multi-Agent Risk Assessment
 Implements PRD FR-3. Five agents (security, compliance, contextual, quantum-readiness, sustainability) as parallel LangGraph nodes, not sequential calls. Each agent writes one row to `agent_outputs` including a `rationale` field, not only a numeric score, this is what powers the risk breakdown shown in the document summary report (PRD FR-16).
+
+v1 ships deterministic heuristic agents via `app.agents.run_assessment`, orchestrated by LangGraph with per-agent timeout fail-safe (low trust on failure). `POST /api/v1/assessments` runs risk → agents → trust → policy → crypto (and optional encrypt). `POST /trust-scores` still accepts caller-supplied outputs for direct tests.
 
 ### 3.5 Trust Score Computation
 Implements PRD FR-4. The consensus function combining the five agent outputs must be explicit, documented, and versioned, either a weighted average with published weights or a small explainable aggregator, never an opaque model call producing a number with no traceable reasoning. `trust_scores` is append-only; every row references the exact `agent_outputs` rows that produced it. If this function is ever replaced by a learned model, it inherits the same fail-safe defaulting rule as 3.2: ambiguity resolves toward less trust, never more.
@@ -175,9 +177,9 @@ Status markers below describe what is actually merged to `main`, not what was pl
 
 1. Repository scaffolding, environments, classifier stub, core audit log functions, initial CI. Complete.
 2. Data model (Section 5) as SQLAlchemy models plus Alembic migrations, the crypto-selector stub (3.7), and CI hardening with a coverage gate and branch protection. Complete. Persist of selected profiles landed in item 3.
-3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). The Section 5 tables now exist, so risk scores, trust scores, and policy decisions have somewhere to persist. The policy engine decision (2.2) is made and logged, so 3.6 is unblocked. 3.3's scoring function and `POST /api/v1/risk-scores` are complete; recomputes are still caller-triggered, not scheduled, and no event bus is wired. 3.6's in-process WASM evaluator, `POST /api/v1/policy-rules`, and `POST /api/v1/policy-decisions` are complete. 3.5's equal-weight consensus and `POST /api/v1/trust-scores` are complete; the five agent scores are still caller-supplied until 3.4. 3.7 persist is complete: `POST /api/v1/crypto-profiles` writes a `crypto_profiles` row from a `trust_score_id` after a policy decision exists for that document. Selector thresholds are still uncalibrated placeholders. This endpoint does not encrypt bytes. Policy reads the effective `sensitivity_label` (latest override, else latest classification), plus persisted `risk_value` and `trust_score`, via a `trust_score_id`; `ai_recommendation` is still caller-asserted until 3.4. FR-12 persist is complete: `POST /api/v1/manual-overrides` writes a `manual_overrides` row from a stored effective label. The override screen is `/override`. FR-13 dry-run is complete: `POST /api/v1/policy-rules/test` evaluates a candidate against the last 20 gate audit snapshots and persists nothing. The rule-builder screen is `/rules`. FR-14 inventory is complete: `GET /api/v1/documents` and `GET /api/v1/documents/{document_id}` return the current risk and protection snapshot. The dashboard screen is `/dashboard`. FR-15 chain list is complete: `GET /api/v1/audit/entries` returns one document's chain in link order. The viewer screen is `/audit`. `GET /audit/verify` was already the independent check.
+3. Contextual risk engine (3.3), policy engine (3.6), replace the crypto-selector stub with real trust-score-driven selection (3.5 into 3.7). Complete for the decision/persist path. **P0 completion (2026-09-14):** Redis Streams event bus (2.3 decided), `POST /risk-triggers` plus optional scheduled heartbeat, LangGraph five-agent assessment (`POST /assessments`), consensus-derived `ai_recommendation` when omitted, AES-256-GCM encrypt with hybrid/PQ via liboqs (fail-closed without it), `document_ciphertexts` storage, CORS for the frontend. FR-12–15 screens are on `main`. Selector thresholds remain uncalibrated placeholders. Classifier remains the keyword stub until a labelled dataset exists (PRD §9).
 4. Crypto-shredding (3.9), agentic RAG (3.12), knowledge graph (3.11).
-5. Full LangGraph multi-agent orchestration (3.4), migration scheduler with real baseline benchmark (3.10).
+5. Migration scheduler with real baseline benchmark (3.10). Full LangGraph landed in item 3 for FR-3; further agent sophistication can continue here.
 6. Full evaluation against PRD Section 8's success metrics.
 
 ## 8. Environment setup
