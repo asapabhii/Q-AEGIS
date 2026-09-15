@@ -12,7 +12,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.risk_engine.schemas import RiskScoreRequest, RiskScoreResponse
-from app.risk_engine.schemas import derive_after_hours
 from app.risk_engine.scorer import (
     AFTER_HOURS_WEIGHT,
     BASE_RISK,
@@ -90,11 +89,11 @@ def test_clamp_holds_the_unit_interval() -> None:
 
 
 def test_incomplete_snapshot_never_reaches_score() -> None:
-    """Missing ``after_hours`` is derived server-side from org timezone."""
+    """Missing ``after_hours`` is a 422-shaped validation error, not a default."""
     body = _request_body()
     del body["after_hours"]
-    request = RiskScoreRequest.model_validate(body)
-    assert request.snapshot().after_hours is False
+    with pytest.raises(ValidationError):
+        RiskScoreRequest.model_validate(body)
 
 
 def test_extra_snapshot_fields_are_forbidden() -> None:
@@ -142,49 +141,6 @@ def test_request_snapshot_is_the_five_closed_fields() -> None:
     assert snap.device_id == request.device_id
     assert snap.device_is_new is False
     assert snap.after_hours is False
-
-
-def test_after_hours_derives_weeknight_in_org_timezone() -> None:
-    request = RiskScoreRequest.model_validate(
-        _request_body(
-            accessed_at="2026-09-09T16:00:00+00:00",
-            after_hours=None,
-            org_timezone="Asia/Kolkata",
-        )
-    )
-    assert request.snapshot().after_hours is True
-
-
-def test_after_hours_derives_weekend_in_org_timezone() -> None:
-    request = RiskScoreRequest.model_validate(
-        _request_body(
-            accessed_at="2026-09-12T06:00:00+00:00",
-            after_hours=None,
-            org_timezone="Asia/Kolkata",
-        )
-    )
-    assert request.snapshot().after_hours is True
-
-
-def test_caller_asserted_after_hours_is_still_accepted_for_compatibility() -> None:
-    request = RiskScoreRequest.model_validate(
-        _request_body(
-            accessed_at="2026-09-09T16:00:00+00:00",
-            after_hours=False,
-            org_timezone="Asia/Kolkata",
-        )
-    )
-    assert request.snapshot().after_hours is False
-
-
-def test_invalid_org_timezone_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="valid IANA timezone"):
-        RiskScoreRequest.model_validate(_request_body(org_timezone="Mars/Olympus"))
-
-
-def test_derive_after_hours_refuses_naive_timestamp() -> None:
-    with pytest.raises(ValueError, match="timezone-aware"):
-        derive_after_hours(datetime(2026, 9, 9, 12, 0), "Asia/Kolkata")
 
 
 def test_response_from_row_carries_the_computed_score() -> None:
