@@ -2,8 +2,8 @@
 
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
+import { AppShell } from "@/components/AppShell";
 import { LabelBadge } from "@/components/LabelBadge";
-import { SiteNav } from "@/components/SiteNav";
 import {
   checkHealth,
   registerAndClassify,
@@ -143,67 +143,42 @@ export default function ClassifyPage() {
     : !classifyLoading && Boolean(filename.trim()) && Boolean(content.trim());
 
   return (
-    <div className="flex-1 flex flex-col">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-bold">
-              Q
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                Q-AEGIS Shield
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Quantum-Adaptive Encryption Governance
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-6">
-            <SiteNav active="/" />
-            <div className="flex items-center gap-2 text-sm">
-              <span
-                className={`inline-block h-2.5 w-2.5 rounded-full ${
-                  health ? "bg-emerald-400 animate-pulse-glow" : "bg-slate-600"
-                }`}
-              />
-              <span className="text-[var(--color-text-secondary)]">
-                {health ? `v${health.version}` : "Not checked"}
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 mx-auto w-full max-w-6xl px-6 py-8 space-y-8">
-        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
-          <div className="flex items-center justify-between mb-4">
+    <AppShell
+      active="/"
+      eyebrow="Classify / assess / protect"
+      title="Operator workbench"
+      summary="Register a document, classify sensitivity, run the full trust and policy path, then jump directly into override, agent, or audit workflows."
+      status={health ? `v${health.version}` : "Backend not checked"}
+    >
+      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.65fr]">
+        <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-panel)] p-5 shadow-[var(--shadow-panel)]">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold">System Health</h2>
             <button
               id="health-check-btn"
               onClick={handleHealthCheck}
               disabled={healthLoading}
-              className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="bg-[var(--color-accent-cyan)] px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50"
             >
-              {healthLoading ? "Checking…" : "Check Health"}
+              {healthLoading ? "Checking..." : "Check Health"}
             </button>
           </div>
           {healthError && <p className="text-sm text-red-400">{healthError}</p>}
           {health && (
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
+            <div className="grid gap-4 text-sm sm:grid-cols-3 xl:grid-cols-1">
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3">
                 <span className="text-[var(--color-text-muted)] block text-xs mb-1">
                   Status
                 </span>
                 <span className="text-emerald-400 font-medium">{health.status}</span>
               </div>
-              <div>
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3">
                 <span className="text-[var(--color-text-muted)] block text-xs mb-1">
                   Service
                 </span>
                 <span className="font-medium">{health.service}</span>
               </div>
-              <div>
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-3">
                 <span className="text-[var(--color-text-muted)] block text-xs mb-1">
                   Version
                 </span>
@@ -213,17 +188,17 @@ export default function ClassifyPage() {
           )}
         </section>
 
-        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
+        <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-panel)] p-5 shadow-[var(--shadow-panel)]">
           <h2 className="text-base font-semibold mb-1">Document Classification</h2>
           <p className="text-sm text-[var(--color-text-muted)] mb-6">
-            Upload a file (≤50 MB) or paste text. Prefer{" "}
+            Upload a file (50 MB max) or paste text. Prefer{" "}
             <Link href="/login" className="text-cyan-400 hover:underline">
               JWT login
             </Link>
             ; role selector is DEV-ONLY when no token is stored.
           </p>
 
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-4">
               {!hasJwt && (
                 <div>
@@ -240,7 +215,7 @@ export default function ClassifyPage() {
                     id="role-select"
                     value={role}
                     onChange={(e) => setRole(e.target.value as UserRole)}
-                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
+                    className="w-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
                   >
                     {AVAILABLE_ROLES.map((r) => (
                       <option key={r.value} value={r.value}>
@@ -260,7 +235,7 @@ export default function ClassifyPage() {
                 <label htmlFor="file-input" className="block text-xs font-medium mb-1.5">
                   Upload file
                 </label>
-                <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-3">
+                <div className="border-2 border-dashed border-teal-300/40 bg-teal-300/5 px-4 py-4">
                   <input
                     id="file-input"
                     type="file"
@@ -279,12 +254,12 @@ export default function ClassifyPage() {
                       setFile(next);
                       if (next) setFilename(next.name);
                     }}
-                    className="block w-full text-sm text-[var(--color-text-primary)] file:mr-3 file:rounded-md file:border-0 file:bg-cyan-900/40 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cyan-200 hover:file:bg-cyan-900/60"
+                    className="block w-full text-sm text-[var(--color-text-primary)] file:mr-3 file:rounded-md file:border-0 file:bg-teal-300 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-950 hover:file:bg-teal-200"
                   />
                   <p className="mt-2 text-xs text-[var(--color-text-muted)]">
                     {file
                       ? `Selected: ${file.name} (${file.size.toLocaleString()} bytes)`
-                      : "Choose a document to store on disk, then classify (≤50 MiB)."}
+                      : "Choose a document to store on disk, then classify."}
                   </p>
                 </div>
               </div>
@@ -302,7 +277,7 @@ export default function ClassifyPage() {
                   value={filename}
                   onChange={(e) => setFilename(e.target.value)}
                   disabled={Boolean(file)}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm disabled:opacity-60"
+                  className="w-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm disabled:opacity-60"
                 />
               </div>
 
@@ -321,7 +296,7 @@ export default function ClassifyPage() {
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   rows={4}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm resize-y"
+                  className="w-full resize-y border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
                 />
               </div>
 
@@ -329,10 +304,10 @@ export default function ClassifyPage() {
                 id="classify-btn"
                 onClick={handleClassify}
                 disabled={!canClassify}
-                className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                className="w-full bg-[var(--color-accent-cyan)] px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50"
               >
                 {classifyLoading
-                  ? "Classifying…"
+                  ? "Classifying..."
                   : file
                     ? "Upload, Register & Classify"
                     : "Register & Classify"}
@@ -344,7 +319,7 @@ export default function ClassifyPage() {
 
             <div className="space-y-4">
               {registeredDocument && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 text-sm space-y-2">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-4 text-sm space-y-2">
                   <p className="text-xs uppercase text-[var(--color-text-muted)]">
                     Document
                   </p>
@@ -358,7 +333,7 @@ export default function ClassifyPage() {
                 </div>
               )}
               {classification && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 space-y-3">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-4 space-y-3">
                   <div className="flex justify-between items-center text-sm">
                     <span>Sensitivity</span>
                     <LabelBadge label={classification.sensitivity_label} />
@@ -391,9 +366,9 @@ export default function ClassifyPage() {
                         id="assess-btn"
                         onClick={() => void handleAssess()}
                         disabled={assessLoading || !canAssess}
-                        className="block w-full rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm disabled:opacity-50"
+                        className="block w-full border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-bg-card-hover)] disabled:opacity-50"
                       >
-                        {assessLoading ? "Running…" : "Run full assessment"}
+                        {assessLoading ? "Running..." : "Run full assessment"}
                       </button>
                       {assessError && (
                         <p className="text-sm text-red-400">{assessError}</p>
@@ -415,14 +390,14 @@ export default function ClassifyPage() {
                 </div>
               )}
               {!registeredDocument && !classification && !classifyError && (
-                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-sm text-[var(--color-text-muted)]">
+                <div className="flex h-56 items-center justify-center rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-card)] text-sm text-[var(--color-text-muted)]">
                   Results will appear here
                 </div>
               )}
             </div>
           </div>
         </section>
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
