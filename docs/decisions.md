@@ -13,6 +13,37 @@ Postgres/Redis/API TLS landed via #27)_
 
 ## Log
 
+### 2026-09-15: Trust-to-action and trust-to-crypto policy bands calibrated
+
+Decided by: Abhinav, with Codex implementation support, closing the Track A
+threshold-placeholder gap for `SPEC.md` 3.5 / 3.7.
+
+The first shipped thresholds were deliberately labelled placeholders. They are
+now versioned as policy bands rather than incident-statistical calibration:
+`trust-recommendation-policy-bands-1.0.0` and
+`trust-crypto-policy-bands-1.0.0`. No historical incident dataset exists in this
+repository, so this entry does **not** claim empirical precision. It records the
+risk posture the deterministic layer will enforce until a measured calibration
+pack supersedes it.
+
+- **AI recommendation from consensus:** `0.000–0.250` → `deny`,
+  `0.251–0.500` → `force_pqc`, `0.501–0.750` → `require_mfa`,
+  `0.751–1.000` → `allow`.
+- **Crypto profile selection:** `0.000–0.500` → `post_quantum`,
+  `0.501–0.850` → `hybrid`, `0.851–1.000` → `aes256`.
+- Boundaries are inclusive on the more protective side. For example `0.500`
+  still selects full post-quantum crypto, and `0.750` still requires MFA.
+- The crypto band is intentionally more conservative than the policy action
+  band: a request may be allowed or MFA-gated while its bytes still receive
+  hybrid protection, because harvest-now-decrypt-later exposure is about data
+  lifetime, not only the current access decision.
+
+Rejected: keeping the old placeholder labels after the cut-points became part
+of the product contract. Rejected: claiming model-derived calibration without a
+labelled outcomes dataset. Rejected: making AES-256 the default for any
+non-finite or out-of-range value; invalid trust input still raises rather than
+falling through to the weakest profile.
+
 ### 2026-09-14: Neo4j Bolt TLS for local compose
 
 Decided by: Abhinav, closing the Pending item from AGENTS.md TLS-in-transit for the knowledge graph.
