@@ -22,6 +22,7 @@ import type {
   HealthResponse,
   ClassificationResponse,
   DocumentResponse,
+  UserRole,
 } from "@/lib/api/types";
 
 // ---------------------------------------------------------------------------
@@ -52,9 +53,11 @@ export default function ClassifyPage() {
   const [healthLoading, setHealthLoading] = useState(false);
 
   // Classify flow
-  const { role } = useRole();
-  const [filename, setFilename] = useState("");
-  const [content, setContent] = useState("");
+  const { role, setRole } = useRole();
+  const [filename, setFilename] = useState("quarterly-report.pdf");
+  const [content, setContent] = useState(
+    "This document contains confidential financial projections and restricted trade secrets."
+  );
   const [registeredDocument, setRegisteredDocument] =
     useState<DocumentResponse | null>(null);
   const [classification, setClassification] =
@@ -176,8 +179,23 @@ export default function ClassifyPage() {
             </p>
           </div>
 
-          {/* System Status */}
+          {/* System Status and Role */}
           <div className="flex items-center gap-3">
+            <label htmlFor="role-select" className="sr-only">Caller Role</label>
+            <select
+              id="role-select"
+              value={role}
+              onChange={(e) => setRole(e.target.value as UserRole)}
+              className="border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2.5 py-1 text-xs rounded text-[var(--color-text-primary)]"
+            >
+              <option value="data_owner">Data Owner</option>
+              <option value="security_analyst">Security Analyst</option>
+              <option value="security_admin">Security Admin</option>
+              <option value="compliance_officer">Compliance Officer</option>
+              <option value="auditor">Auditor</option>
+              <option value="ciso">CISO</option>
+              <option value="engineer">Engineer</option>
+            </select>
             <div
               className={`status-dot ${
                 health ? "status-dot-pass" : "status-dot-pending"

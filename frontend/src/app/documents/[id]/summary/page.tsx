@@ -13,6 +13,7 @@ import type {
   CryptoProfileType,
   DocumentSnapshot,
   SensitivityLabel,
+  UserRole,
 } from "@/lib/api/types";
 
 const LABEL_TONES: Record<
@@ -37,13 +38,22 @@ const PROFILE_LABELS: Record<CryptoProfileType, string> = {
   post_quantum: "Full PQC",
 };
 
+const SUMMARY_ALLOWED_ROLES: UserRole[] = [
+  "security_admin",
+  "security_analyst",
+  "auditor",
+  "ciso",
+  "compliance_officer",
+];
+
 export default function DocumentSummaryPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role } = useRole();
+  const { role: contextRole } = useRole();
+  const role = SUMMARY_ALLOWED_ROLES.includes(contextRole) ? contextRole : "security_admin";
   const [documentId, setDocumentId] = useState<string>("");
 
   useEffect(() => {

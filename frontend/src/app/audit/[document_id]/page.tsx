@@ -9,7 +9,7 @@ import HashDisplay from "@/components/ui/HashDisplay";
 import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import { useRole } from "@/lib/context/RoleContext";
 import { listAuditEntries, ApiError } from "@/lib/api/client";
-import type { AuditEntry } from "@/lib/api/types";
+import type { AuditEntry, UserRole } from "@/lib/api/types";
 
 function verifyChain(chain: AuditEntry[]): boolean {
   for (let i = 0; i < chain.length; i += 1) {
@@ -29,9 +29,12 @@ function formatPayload(payload: Record<string, unknown>): string {
 
 import D3AuditChain from "@/components/ui/D3AuditChain";
 
+const AUDIT_ALLOWED_ROLES: UserRole[] = ["security_admin", "auditor", "ciso"];
+
 export function AuditViewer({ documentId }: { documentId: string }) {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role } = useRole();
+  const { role: contextRole } = useRole();
+  const role = AUDIT_ALLOWED_ROLES.includes(contextRole) ? contextRole : "auditor";
   const [chain, setChain] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

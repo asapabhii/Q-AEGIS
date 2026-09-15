@@ -21,6 +21,7 @@ import type {
   PolicyAction,
   PolicyRuleResponse,
   PolicyRuleTestResponse,
+  UserRole,
 } from "@/lib/api/types";
 import {
   CONDITION_FIELDS,
@@ -46,9 +47,12 @@ function valueChoices(field: ConditionField): readonly string[] | null {
   return null;
 }
 
+const RULES_ALLOWED_ROLES: UserRole[] = ["security_admin", "compliance_officer", "ciso"];
+
 export function RuleBuilderScreen() {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role } = useRole();
+  const { role: contextRole } = useRole();
+  const role = RULES_ALLOWED_ROLES.includes(contextRole) ? contextRole : "compliance_officer";
   const [ruleName, setRuleName] = useState("");
   const [action, setAction] = useState<PolicyAction>("deny");
   const [priority, setPriority] = useState("10");

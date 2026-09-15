@@ -22,6 +22,7 @@ import type {
   DocumentSnapshot,
   ManualOverrideResponse,
   SensitivityLabel,
+  UserRole,
 } from "@/lib/api/types";
 import {
   MIN_JUSTIFICATION_CHARS,
@@ -47,13 +48,20 @@ const LABEL_COLORS: Record<SensitivityLabel, string> = {
   RESTRICTED: "#EF4444",
 };
 
+const OVERRIDE_ALLOWED_ROLES: UserRole[] = [
+  "security_admin",
+  "security_analyst",
+  "ciso",
+];
+
 export function OverrideScreen({
   initialDocumentId = "",
 }: {
   initialDocumentId?: string;
 }) {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role } = useRole();
+  const { role: contextRole } = useRole();
+  const role = OVERRIDE_ALLOWED_ROLES.includes(contextRole) ? contextRole : "security_analyst";
   const [documentId, setDocumentId] = useState(initialDocumentId);
   const [snapshot, setSnapshot] = useState<DocumentSnapshot | null>(null);
   const [newLabel, setNewLabel] = useState<SensitivityLabel | "">("");
@@ -115,7 +123,7 @@ export function OverrideScreen({
   }, [initialDocumentId, role]);
 
   const snapshotMatchesInput =
-    snapshot !== null && snapshot.id === documentId.trim();
+    snapshot != null && snapshot.id === documentId.trim();
   const currentLabel = snapshotMatchesInput
     ? snapshot.sensitivity_label
     : null;
