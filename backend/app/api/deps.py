@@ -218,18 +218,6 @@ DocumentInventoryCaller = Annotated[
     ),
 ]
 
-AuditCaller = Annotated[
-    UserRole,
-    Depends(
-        require_role(
-            UserRole.AUDITOR,
-            UserRole.SECURITY_ADMIN,
-            UserRole.SECURITY_ANALYST,
-            UserRole.CISO,
-        )
-    ),
-]
-
 #: Roles allowed to crypto-shred a document's keys, ``PRD.md`` FR-8.
 #: Data Owners request erasure; Compliance Officers handle erasure requests;
 #: Security Admins act across the fleet. Analysts and auditors do not shred.
