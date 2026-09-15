@@ -1,8 +1,17 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import Link from "next/link";
-import { SiteNav } from "@/components/SiteNav";
+import {
+  Plus,
+  X,
+  FlaskConical,
+  Save,
+  CheckCircle2,
+  AlertTriangle,
+  Code2,
+} from "lucide-react";
+import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
+import { useRole } from "@/lib/context/RoleContext";
 import {
   ApiError,
   createPolicyRule,
@@ -30,16 +39,6 @@ import {
   type LeafOperator,
 } from "@/lib/rules";
 
-const RULE_ROLES: { value: UserRole; label: string }[] = [
-  { value: "compliance_officer", label: "Compliance Officer" },
-  { value: "security_admin", label: "Security Admin" },
-  { value: "security_analyst", label: "Security Analyst" },
-  { value: "data_owner", label: "Data Owner" },
-  { value: "auditor", label: "Auditor" },
-  { value: "ciso", label: "CISO" },
-  { value: "engineer", label: "Engineer" },
-];
-
 type DraftRow = ConditionDraft & { id: number };
 
 function valueChoices(field: ConditionField): readonly string[] | null {
@@ -48,8 +47,12 @@ function valueChoices(field: ConditionField): readonly string[] | null {
   return null;
 }
 
+const RULES_ALLOWED_ROLES: UserRole[] = ["security_admin", "compliance_officer", "ciso"];
+
 export function RuleBuilderScreen() {
-  const [role, setRole] = useState<UserRole>("compliance_officer");
+  const containerRef = useGsapReveal<HTMLDivElement>();
+  const { role: contextRole } = useRole();
+  const role = RULES_ALLOWED_ROLES.includes(contextRole) ? contextRole : "compliance_officer";
   const [ruleName, setRuleName] = useState("");
   const [action, setAction] = useState<PolicyAction>("deny");
   const [priority, setPriority] = useState("10");
@@ -61,9 +64,7 @@ export function RuleBuilderScreen() {
   const [saving, setSaving] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<PolicyRuleTestResponse | null>(
-    null
-  );
+  const [testResult, setTestResult] = useState<PolicyRuleTestResponse | null>(null);
   const [saved, setSaved] = useState<PolicyRuleResponse | null>(null);
 
   const loading = testing || saving;
@@ -134,156 +135,238 @@ export function RuleBuilderScreen() {
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-bold"
-            >
-              Q
-            </Link>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                Policy Rule Builder
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                PRD.md FR-13 · test before it goes live
-              </p>
-            </div>
-          </div>
-          <SiteNav active="/rules" />
+    <div
+      ref={containerRef}
+      className="mx-auto w-full max-w-screen-xl space-y-8 px-6 py-8"
+    >
+      {/* Hero Header */}
+      <header data-reveal className="flex items-start justify-between">
+        <div>
+          <h1
+            className="font-semibold mb-1"
+            style={{
+              fontSize: "var(--font-size-2xl)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Rule Configuration Studio
+          </h1>
+          <p
+            style={{
+              fontSize: "var(--font-size-sm)",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            Build, test, and deploy policy override rules with visual query editor
+          </p>
         </div>
+
+
       </header>
 
-      <main className="flex-1 mx-auto w-full max-w-6xl px-6 py-8 space-y-8">
-        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
-          <h2 className="text-base font-semibold mb-1">Author an override rule</h2>
-          <p className="text-sm text-[var(--color-text-muted)] mb-6">
-            Compliance Officers can save a named rule with at least one
-            condition. Test evaluates the last 20 gate snapshots and writes
-            nothing. Multiple conditions are sent as a flat <code>all</code>.
-          </p>
+      {/* Success Banner */}
+      {saved && (
+        <div
+          data-reveal
+          className="card p-6 flex items-start gap-4"
+          style={{ borderColor: "var(--status-pass)" }}
+        >
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-full"
+            style={{ backgroundColor: "rgba(16, 185, 129, 0.1)" }}
+          >
+            <CheckCircle2 className="h-5 w-5" style={{ color: "var(--status-pass)" }} />
+          </div>
+          <div className="flex-1">
+            <h3
+              className="text-base font-semibold mb-2"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Policy Rule Deployed
+            </h3>
+            <p className="text-sm mb-3" style={{ color: "var(--color-text-secondary)" }}>
+              <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>
+                {saved.rule_name}
+              </span>{" "}
+              is now{" "}
+              {saved.active ? (
+                <span style={{ color: "var(--status-pass)" }}>active</span>
+              ) : (
+                <span style={{ color: "var(--status-override)" }}>inactive</span>
+              )}{" "}
+              in the policy engine
+            </p>
+            <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+              Rule ID:{" "}
+              <span className="mono-data" style={{ color: "var(--status-pass)" }}>
+                {saved.id}
+              </span>
+            </p>
+          </div>
+          <button
+            onClick={() => setSaved(null)}
+            className="btn btn-ghost"
+            style={{ padding: "var(--spacing-2)" }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
-          <form onSubmit={handleSave} className="grid gap-5 md:grid-cols-2">
-            <div className="space-y-4">
+      {/* Main Content */}
+      <div data-reveal className="grid gap-6 lg:grid-cols-[1fr_420px]">
+        {/* Left: Form */}
+        <div className="card p-6">
+          <form onSubmit={handleSave} className="space-y-6">
+            <header className="mb-6 flex items-center gap-2">
+              <Code2 className="h-5 w-5" style={{ color: "var(--color-text-secondary)" }} />
+              <h2
+                className="font-semibold"
+                style={{
+                  fontSize: "var(--font-size-lg)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                Rule Configuration
+              </h2>
+            </header>
+
+            {/* Rule name */}
+            <div>
+              <label
+                className="block text-sm font-medium mb-2"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Rule Name
+                <span className="ml-2 text-xs mono-data" style={{ color: "var(--color-text-tertiary)" }}>
+                  {strippedRuleNameLength(ruleName)}/{MAX_RULE_NAME_CHARS}
+                </span>
+              </label>
+              <input
+                id="rule-name"
+                type="text"
+                value={ruleName}
+                onChange={(event) =>
+                  setRuleName(clampRuleName(event.target.value))
+                }
+                className="input w-full"
+                placeholder="e.g. Deny RESTRICTED without approval"
+              />
+            </div>
+
+            {/* Action + Priority */}
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label
-                  htmlFor="rule-role"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
+                  className="block text-sm font-medium mb-2"
+                  style={{ color: "var(--color-text-secondary)" }}
                 >
-                  Caller Role
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    (authorization plumbing, not authentication)
-                  </span>
+                  Action
                 </label>
                 <select
-                  id="rule-role"
-                  value={role}
-                  onChange={(event) => setRole(event.target.value as UserRole)}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
+                  id="rule-action"
+                  value={action}
+                  onChange={(event) =>
+                    setAction(event.target.value as PolicyAction)
+                  }
+                  className="input w-full"
                 >
-                  {RULE_ROLES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
+                  {POLICY_ACTIONS.map((item) => (
+                    <option key={item} value={item}>
+                      {item.toUpperCase()}
                     </option>
                   ))}
                 </select>
               </div>
-
               <div>
                 <label
-                  htmlFor="rule-name"
-                  className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
+                  className="block text-sm font-medium mb-2"
+                  style={{ color: "var(--color-text-secondary)" }}
                 >
-                  Rule name
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    ({strippedRuleNameLength(ruleName)}/{MAX_RULE_NAME_CHARS} after trim)
-                  </span>
+                  Priority
                 </label>
                 <input
-                  id="rule-name"
-                  type="text"
-                  value={ruleName}
-                  onChange={(event) => setRuleName(clampRuleName(event.target.value))}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                  placeholder="Deny restricted"
+                  id="rule-priority"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={priority}
+                  onChange={(event) => setPriority(event.target.value)}
+                  className="input mono-data w-full"
                 />
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="rule-action"
-                    className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                  >
-                    Action
-                  </label>
-                  <select
-                    id="rule-action"
-                    value={action}
-                    onChange={(event) =>
-                      setAction(event.target.value as PolicyAction)
-                    }
-                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                  >
-                    {POLICY_ACTIONS.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label
-                    htmlFor="rule-priority"
-                    className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1.5"
-                  >
-                    Priority
-                  </label>
-                  <input
-                    id="rule-priority"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={priority}
-                    onChange={(event) => setPriority(event.target.value)}
-                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
-                  />
+            {/* Conditions */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  Conditions{" "}
+                  <span className="text-xs ml-2" style={{ color: "var(--color-text-tertiary)" }}>
+                    (combined with AND logic)
+                  </span>
+                </label>
+                <div className="text-xs mono-data" style={{ color: "var(--color-text-tertiary)" }}>
+                  {drafts.length} condition{drafts.length !== 1 ? "s" : ""}
                 </div>
               </div>
 
+              {/* Condition list without line connectors */}
               <div className="space-y-3">
-                <p className="text-xs font-medium text-[var(--color-text-secondary)]">
-                  Conditions
-                </p>
                 {drafts.map((row, index) => {
                   const choices = valueChoices(row.field);
                   const useSelect = choices !== null && row.op !== "in";
                   return (
                     <div
                       key={row.id}
-                      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3 space-y-2"
+                      className="rounded-lg p-4 border-hairline"
+                      style={{ backgroundColor: "var(--color-bg-tertiary)" }}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-[var(--color-text-muted)]">
-                          Condition {index + 1}
-                        </span>
+                      {/* Condition header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="flex h-6 w-6 items-center justify-center rounded font-mono text-xs font-medium"
+                            style={{
+                              backgroundColor: "var(--color-bg-secondary)",
+                              color: "var(--color-text-primary)",
+                              border: "var(--border-width-hairline) solid var(--color-border)",
+                            }}
+                          >
+                            {index + 1}
+                          </div>
+                          <span
+                            className="text-xs uppercase tracking-wider"
+                            style={{ color: "var(--color-text-secondary)" }}
+                          >
+                            Condition
+                          </span>
+                        </div>
                         <button
                           type="button"
                           onClick={() => removeCondition(row.id)}
                           disabled={drafts.length <= 1}
-                          className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="btn btn-ghost"
+                          style={{
+                            padding: "var(--spacing-1)",
+                            color: drafts.length <= 1 ? "var(--color-text-tertiary)" : "var(--status-fail)",
+                          }}
+                          aria-label="Remove condition"
                         >
-                          Remove
+                          <X className="h-4 w-4" />
                         </button>
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-3">
+
+                      {/* Condition inputs */}
+                      <div className="grid gap-3 sm:grid-cols-3">
                         <div>
                           <label
                             htmlFor={`rule-field-${row.id}`}
-                            className="block text-xs text-[var(--color-text-muted)] mb-1"
+                            className="block text-xs mb-1.5 uppercase tracking-wider"
+                            style={{ color: "var(--color-text-secondary)" }}
                           >
                             Field
                           </label>
@@ -295,7 +378,7 @@ export function RuleBuilderScreen() {
                                 field: event.target.value as ConditionField,
                               })
                             }
-                            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-2 py-1.5 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
+                            className="input w-full"
                           >
                             {CONDITION_FIELDS.map((field) => (
                               <option key={field} value={field}>
@@ -307,7 +390,8 @@ export function RuleBuilderScreen() {
                         <div>
                           <label
                             htmlFor={`rule-op-${row.id}`}
-                            className="block text-xs text-[var(--color-text-muted)] mb-1"
+                            className="block text-xs mb-1.5 uppercase tracking-wider"
+                            style={{ color: "var(--color-text-secondary)" }}
                           >
                             Operator
                           </label>
@@ -319,7 +403,7 @@ export function RuleBuilderScreen() {
                                 op: event.target.value as LeafOperator,
                               })
                             }
-                            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-2 py-1.5 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
+                            className="input mono-data w-full"
                           >
                             {operatorsForField(row.field).map((op) => (
                               <option key={op} value={op}>
@@ -331,7 +415,8 @@ export function RuleBuilderScreen() {
                         <div>
                           <label
                             htmlFor={`rule-value-${row.id}`}
-                            className="block text-xs text-[var(--color-text-muted)] mb-1"
+                            className="block text-xs mb-1.5 uppercase tracking-wider"
+                            style={{ color: "var(--color-text-secondary)" }}
                           >
                             Value
                           </label>
@@ -340,9 +425,11 @@ export function RuleBuilderScreen() {
                               id={`rule-value-${row.id}`}
                               value={row.value}
                               onChange={(event) =>
-                                updateDraft(row.id, { value: event.target.value })
+                                updateDraft(row.id, {
+                                  value: event.target.value,
+                                })
                               }
-                              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-2 py-1.5 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
+                              className="input w-full"
                             >
                               <option value="">Select</option>
                               {choices.map((item) => (
@@ -357,11 +444,17 @@ export function RuleBuilderScreen() {
                               type="text"
                               value={row.value}
                               onChange={(event) =>
-                                updateDraft(row.id, { value: event.target.value })
+                                updateDraft(row.id, {
+                                  value: event.target.value,
+                                })
                               }
-                              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-2 py-1.5 text-sm focus:border-[var(--color-border-focus)] focus:outline-none"
+                              className="input mono-data w-full"
                               placeholder={
-                                row.op === "in" ? "a, b" : "0.0 – 1.0"
+                                row.op === "in"
+                                  ? "a, b, c"
+                                  : row.field === "trust_score"
+                                    ? "0.0 – 1.0"
+                                    : "value"
                               }
                             />
                           )}
@@ -370,124 +463,257 @@ export function RuleBuilderScreen() {
                     </div>
                   );
                 })}
-                <button
-                  type="button"
-                  onClick={addCondition}
-                  className="text-sm text-cyan-400 hover:underline"
-                >
-                  Add condition
-                </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  id="rule-test-btn"
-                  onClick={() => void handleTest()}
-                  disabled={!canSubmit}
-                  className="rounded-lg border border-[var(--color-border)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--color-bg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {testing ? "Testing…" : "Test rule"}
-                </button>
-                <button
-                  type="submit"
-                  id="rule-save-btn"
-                  disabled={!canSubmit}
-                  className="rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {saving ? "Saving…" : "Save rule"}
-                </button>
+              <button
+                type="button"
+                onClick={addCondition}
+                className="btn btn-secondary w-full flex items-center justify-center gap-2"
+                style={{
+                  borderStyle: "dashed",
+                  backgroundColor: "transparent",
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Add Condition
+              </button>
+            </div>
+
+            {/* Info Banner */}
+            <div className="card p-4">
+              <p className="text-sm" style={{ color: "var(--color-text-secondary)", lineHeight: "var(--line-height-relaxed)" }}>
+                Test mode evaluates against the last 20 policy decisions without writing to the database. Save mode deploys the rule to the live policy engine.
+              </p>
+            </div>
+
+            {/* Action buttons */}
+            <div className="grid grid-cols-2 gap-4 pt-2">
+              <button
+                type="button"
+                id="rule-test-btn"
+                onClick={() => void handleTest()}
+                disabled={!canSubmit}
+                className="btn btn-secondary flex items-center justify-center gap-2"
+                style={{ padding: "var(--spacing-3)" }}
+              >
+                {testing ? "Testing..." : <><FlaskConical className="h-4 w-4" /> Test Rule</>}
+              </button>
+              <button
+                type="submit"
+                id="rule-save-btn"
+                disabled={!canSubmit}
+                className="btn btn-primary flex items-center justify-center gap-2"
+                style={{ padding: "var(--spacing-3)" }}
+              >
+                {saving ? "Deploying..." : <><Save className="h-4 w-4" /> Deploy Rule</>}
+              </button>
+            </div>
+
+            {testError && (
+               <div
+                className="p-4 rounded-lg flex items-center gap-3 border-hairline"
+                style={{
+                  backgroundColor: "rgba(239, 68, 68, 0.1)",
+                  borderColor: "var(--status-fail)",
+                }}
+              >
+                <AlertTriangle
+                  className="h-5 w-5 flex-shrink-0"
+                  style={{ color: "var(--status-fail)" }}
+                />
+                <p className="text-sm" style={{ color: "var(--status-fail)" }}>{testError}</p>
               </div>
-
-              {testError && <p className="text-sm text-red-400">{testError}</p>}
-              {saveError && <p className="text-sm text-red-400">{saveError}</p>}
-            </div>
-
-            <div className="space-y-4">
-              {saved && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
-                    Rule saved
-                  </h3>
-                  <dl className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">Name</dt>
-                      <dd>{saved.rule_name}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">ID</dt>
-                      <dd className="font-mono text-xs">{saved.id}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">Active</dt>
-                      <dd>{saved.active ? "yes" : "no"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              )}
-
-              {testResult && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
-                    Dry-run result
-                  </h3>
-                  <dl className="space-y-2 text-sm mb-4">
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">Window</dt>
-                      <dd>{testResult.window}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">
-                        Considered
-                      </dt>
-                      <dd>{testResult.considered}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-[var(--color-text-secondary)]">Skipped</dt>
-                      <dd>{testResult.skipped}</dd>
-                    </div>
-                  </dl>
-                  {testResult.replays.length === 0 ? (
-                    <p className="text-sm text-[var(--color-text-muted)]">
-                      No historical decisions in the window
-                    </p>
-                  ) : (
-                    <ul className="space-y-2 text-xs">
-                      {testResult.replays.map((replay) => (
-                        <li
-                          key={replay.decision_id}
-                          className="rounded-md border border-[var(--color-border)] px-2 py-2"
-                        >
-                          <div className="font-mono">{replay.document_id}</div>
-                          <div className="text-[var(--color-text-muted)]">
-                            {replay.would_match ? "would match" : "no match"}
-                            {replay.would_change_outcome
-                              ? " · would change outcome"
-                              : ""}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-
-              {!saved && !testResult && !testError && !saveError && (
-                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] text-sm">
-                  Test against recent decisions, then save
-                </div>
-              )}
-            </div>
+            )}
+            {saveError && (
+              <div
+                className="p-4 rounded-lg flex items-center gap-3 border-hairline"
+                style={{
+                  backgroundColor: "rgba(239, 68, 68, 0.1)",
+                  borderColor: "var(--status-fail)",
+                }}
+              >
+                <AlertTriangle
+                  className="h-5 w-5 flex-shrink-0"
+                  style={{ color: "var(--status-fail)" }}
+                />
+                <p className="text-sm" style={{ color: "var(--status-fail)" }}>{saveError}</p>
+              </div>
+            )}
           </form>
-        </section>
-      </main>
-
-      <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Q-AEGIS Shield · SPEC.md 3.13 · Input Screen 3</span>
-          <span>Test writes nothing — save persists the rule</span>
         </div>
-      </footer>
+
+        {/* Right: Results Panel */}
+        <div className="space-y-4">
+          {testResult ? (
+            <div className="card p-6">
+              <header className="mb-6">
+                <h3
+                  className="font-semibold mb-1"
+                  style={{
+                    fontSize: "var(--font-size-base)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  Test Results
+                </h3>
+                <p
+                  style={{
+                    fontSize: "var(--font-size-sm)",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  Dry-run simulation against recent decisions
+                </p>
+              </header>
+
+              <div className="space-y-4">
+                {/* Metrics */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div
+                    className="text-center p-3 rounded-lg border-hairline"
+                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                  >
+                    <p className="text-xl font-medium mono-data" style={{ color: "var(--color-text-primary)" }}>
+                      {testResult.window}
+                    </p>
+                    <p className="text-xs mt-1 uppercase tracking-wider" style={{ color: "var(--color-text-tertiary)" }}>
+                      Window
+                    </p>
+                  </div>
+                  <div
+                    className="text-center p-3 rounded-lg border-hairline"
+                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                  >
+                    <p className="text-xl font-medium mono-data" style={{ color: "var(--color-text-primary)" }}>
+                      {testResult.considered}
+                    </p>
+                    <p className="text-xs mt-1 uppercase tracking-wider" style={{ color: "var(--color-text-tertiary)" }}>
+                      Considered
+                    </p>
+                  </div>
+                  <div
+                    className="text-center p-3 rounded-lg border-hairline"
+                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                  >
+                    <p className="text-xl font-medium mono-data" style={{ color: "var(--color-text-secondary)" }}>
+                      {testResult.skipped}
+                    </p>
+                    <p className="text-xs mt-1 uppercase tracking-wider" style={{ color: "var(--color-text-tertiary)" }}>
+                      Skipped
+                    </p>
+                  </div>
+                </div>
+
+                {/* Replay results */}
+                {testResult.replays.length === 0 ? (
+                  <div
+                    className="flex flex-col items-center justify-center py-8 rounded-lg border-hairline"
+                    style={{ borderStyle: "dashed" }}
+                  >
+                    <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                      No historical decisions in window
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p
+                      className="text-xs uppercase tracking-wider mb-3"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Match Results ({testResult.replays.length})
+                    </p>
+                    <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                      {testResult.replays.map((replay) => {
+                        const wouldMatch = replay.would_match;
+                        const wouldChange = replay.would_change_outcome;
+                        return (
+                          <div
+                            key={replay.decision_id}
+                            className="rounded-lg p-3 border-hairline transition-colors"
+                            style={{
+                              backgroundColor: wouldMatch
+                                ? "var(--color-bg-hover)"
+                                : "var(--color-bg-tertiary)",
+                              borderColor: wouldMatch
+                                ? "var(--color-border-hover)"
+                                : "var(--color-border)",
+                            }}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className="flex h-5 w-5 items-center justify-center rounded-full flex-shrink-0 mt-0.5"
+                                style={{
+                                  backgroundColor: wouldMatch
+                                    ? "rgba(16, 185, 129, 0.1)"
+                                    : "var(--color-bg-secondary)",
+                                }}
+                              >
+                                {wouldMatch ? (
+                                  <CheckCircle2 className="h-3 w-3" style={{ color: "var(--status-pass)" }} />
+                                ) : (
+                                  <X className="h-3 w-3" style={{ color: "var(--color-text-tertiary)" }} />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs mono-data truncate" style={{ color: "var(--color-text-primary)" }}>
+                                  {replay.document_id}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span
+                                    className="text-xs"
+                                    style={{
+                                      color: wouldMatch
+                                        ? "var(--status-pass)"
+                                        : "var(--color-text-secondary)",
+                                    }}
+                                  >
+                                    {wouldMatch ? "Match" : "No match"}
+                                  </span>
+                                  {wouldChange && (
+                                    <span
+                                      className="text-xs flex items-center gap-1"
+                                      style={{ color: "var(--status-override)" }}
+                                    >
+                                      <AlertTriangle className="h-3 w-3" />
+                                      Would change outcome
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div
+              className="card flex flex-col items-center justify-center py-12"
+              style={{ minHeight: "400px" }}
+            >
+              <Code2
+                className="h-12 w-12 mb-4 opacity-40"
+                style={{ color: "var(--color-text-tertiary)" }}
+              />
+              <p
+                className="text-base font-medium mb-2"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Ready to Test
+              </p>
+              <p
+                className="text-sm text-center max-w-xs"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Configure your rule conditions and test against recent policy decisions
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -36,6 +36,11 @@ infra/certs/
 # OPA CLI and extract leftovers from compiling the policy WASM bundle.
 # Commit policy.rego, policy.wasm, and capabilities.json only.
 backend/app/policy/rego/opa.exe
+backend/opa.exe
+*.exe
 backend/app/policy/rego/bundle.tar.gz
 backend/app/policy/rego/data.json
 backend/app/policy/rego/.manifest
+frontend/test_output.txt
+frontend/coverage/
+_agent_plans/
