@@ -511,13 +511,6 @@ def test_risk_score_returns_the_computed_value_not_a_client_value(
         {},
         {"document_id": str(uuid4())},
         {
-            "document_id": str(uuid4()),
-            "actor_user_id": str(uuid4()),
-            "device_id": "laptop-12",
-            "device_is_new": True,
-            "accessed_at": "2026-09-09T12:00:00+00:00",
-        },
-        {
             "document_id": "not-a-uuid",
             "actor_user_id": str(uuid4()),
             "device_id": "laptop-12",
@@ -545,7 +538,6 @@ def test_risk_score_returns_the_computed_value_not_a_client_value(
     ids=[
         "empty-body",
         "only-document-id",
-        "missing-after-hours",
         "malformed-uuid",
         "blank-device-id",
         "naive-accessed-at",
@@ -557,6 +549,19 @@ def test_risk_score_rejects_incomplete_or_invalid_bodies(
     """An incomplete snapshot is a 422. It never reaches the scorer."""
     response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
     assert response.status_code == 422
+
+
+def test_risk_score_derives_after_hours_when_the_client_omits_it(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    """Omitted ``after_hours`` is not a 422; the server derives it."""
+    body = risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id)
+    del body["after_hours"]
+    response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
+    assert response.status_code == 201, response.text
+    assert "after_hours" in response.json()["context_snapshot"]
 
 
 def test_risk_score_rejects_a_client_supplied_risk_value(
@@ -1183,7 +1188,7 @@ def test_crypto_profile_admits_permitted_roles(
         headers={ACTOR_ROLE_HEADER: role.value},
     )
     assert response.status_code == 201, response.text
-    assert response.json()["profile_type"] == "hybrid"
+    assert response.json()["profile_type"] == "post_quantum"
     assert response.json()["consensus_value"] == "0.500"
 
 

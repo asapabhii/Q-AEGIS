@@ -44,8 +44,8 @@ describe("mock data fixtures", () => {
       const outputs = MOCK_AGENT_OUTPUTS.slice(index * 5, index * 5 + 5);
       expect(outputs.map((output) => output.agent_type)).toEqual(expectedTypes);
       outputs.forEach((output) => {
-        expect(output.score).toBeGreaterThanOrEqual(0);
-        expect(output.score).toBeLessThanOrEqual(1);
+        expect(Number(output.score)).toBeGreaterThanOrEqual(0);
+        expect(Number(output.score)).toBeLessThanOrEqual(1);
         expect(output.rationale.trim().length).toBeGreaterThan(0);
       });
     });

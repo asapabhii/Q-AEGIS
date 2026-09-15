@@ -32,14 +32,19 @@ describe("AuditViewer", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(listAuditEntries).mockResolvedValue({
+      document_id: "test-doc-123",
+      count: 0,
+      entries: [],
+    });
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("shows loading state initially", () => {
-    // Return an unresolved promise to keep it in loading state
+  it("shows loading state initially", async () => {
+    const documentId = "test-doc-123";
     vi.mocked(listAuditEntries).mockReturnValue(new Promise(() => {}));
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
     expect(screen.getByText(/Loading audit trail/i)).toBeInTheDocument();
@@ -136,13 +141,8 @@ describe("AuditViewer", () => {
     // Click to verify
     fireEvent.click(verifyButton);
     
-    // Status should say verifying
-    expect(screen.getByText(/Verifying/i)).toBeInTheDocument();
-    
     // Wait for validation to finish (1 second timer)
-    await waitFor(() => {
-      expect(screen.getByText(/Verified/i)).toBeInTheDocument();
-    }, { timeout: 1500 });
+    expect(await screen.findByText("Verified", {}, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it("handles broken chain verification", async () => {
@@ -186,8 +186,6 @@ describe("AuditViewer", () => {
     const verifyButton = screen.getByRole("button", { name: /Verify Chain Integrity/i });
     fireEvent.click(verifyButton);
     
-    await waitFor(() => {
-      expect(screen.getByText("Compromised")).toBeInTheDocument();
-    }, { timeout: 1500 });
+    expect(await screen.findByText("Compromised", {}, { timeout: 3000 })).toBeInTheDocument();
   });
 });

@@ -45,6 +45,8 @@ import type {
   RagAnswer,
   RagIngestResult,
   CryptoProfileResponse,
+  PolicyAction,
+  PolicyDecisionRequest,
   PolicyDecisionResponse,
   RiskScoreRequest,
   RiskScoreResponse,
@@ -553,12 +555,17 @@ export async function selectCryptoProfile(
 
 /** POST /api/v1/policy-decisions — run the deterministic policy gate. */
 export async function evaluatePolicyDecision(
-  documentId: string,
-  role: UserRole
+  trustScoreId: string,
+  role: UserRole,
+  aiRecommendation?: PolicyAction
 ): Promise<PolicyDecisionResponse> {
+  const body: PolicyDecisionRequest =
+    aiRecommendation === undefined
+      ? { trust_score_id: trustScoreId }
+      : { trust_score_id: trustScoreId, ai_recommendation: aiRecommendation };
   return request<PolicyDecisionResponse>("/api/v1/policy-decisions", {
     method: "POST",
     headers: jsonHeaders(role),
-    body: JSON.stringify({ document_id: documentId }),
+    body: JSON.stringify(body),
   });
 }

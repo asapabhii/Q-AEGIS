@@ -450,7 +450,8 @@ export interface RiskScoreRequest {
 export interface RiskScoreResponse {
   id: string;
   document_id: string;
-  risk_value: number;
+  /** Decimal serialized as a JSON string by Pydantic v2. */
+  risk_value: string;
   model_version: string;
   context_snapshot: {
     actor_user_id: string;
@@ -491,7 +492,8 @@ export interface TrustScoreRequest {
 export interface AgentOutputResponse {
   id: string;
   agent_type: AgentType;
-  score: number;
+  /** Decimal serialized as a JSON string by Pydantic v2. */
+  score: string;
   rationale: string;
 }
 
@@ -500,7 +502,8 @@ export interface TrustScoreResponse {
   id: string;
   document_id: string;
   risk_score_id: string;
-  consensus_value: number;
+  /** Decimal serialized as a JSON string by Pydantic v2. */
+  consensus_value: string;
   consensus_version: string;
   outputs: AgentOutputResponse[];
   computed_at: string;
@@ -524,10 +527,26 @@ export type ConditionOperator =
   | "lte"
   | "in";
 
+/** POST /api/v1/policy-decisions — request body. */
+export interface PolicyDecisionRequest {
+  trust_score_id: string;
+  ai_recommendation?: PolicyAction;
+}
+
 /** POST /api/v1/policy-decisions — response body. */
 export interface PolicyDecisionResponse {
   id: string;
   document_id: string;
+  trust_score_id: string;
+  risk_score_id: string;
+  classification_id: string;
+  override_id: string | null;
+  label_source: SensitivitySource;
+  sensitivity_label: SensitivityLabel;
+  /** Decimal serialized as a JSON string by Pydantic v2. */
+  risk_value: string;
+  /** Decimal serialized as a JSON string by Pydantic v2. */
+  trust_score: string;
   rule_id: string | null;
   rule_name: string | null;
   ai_recommendation: PolicyAction;
@@ -547,20 +566,9 @@ export interface CryptoProfileResponse {
   document_id: string;
   trust_score_id: string;
   profile_type: CryptoProfileType;
-  consensus_value: number;
+  /** Decimal serialized as a JSON string by Pydantic v2. */
+  consensus_value: string;
   selected_at: string;
-}
-
-/** POST /api/v1/crypto-shredding — request body. */
-export interface CryptoShredRequest {
-  document_id: string;
-}
-
-/** POST /api/v1/crypto-shredding — response body. */
-export interface CryptoShredResponse {
-  document_id: string;
-  shredded_at: string;
-  status: string;
 }
 
 // ---------------------------------------------------------------------------
