@@ -288,3 +288,10 @@ RagCaller = Annotated[
         )
     ),
 ]
+
+#: Roles allowed to invoke right-to-erasure (shredding), ``PRD.md`` FR-8.
+#: Data Owners can shred their own documents.
+ShredDocumentCaller = Annotated[
+    UserRole,
+    Depends(require_role(UserRole.DATA_OWNER)),
+]

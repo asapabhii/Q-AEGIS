@@ -44,6 +44,12 @@ import type {
   RagAskRequest,
   RagAnswer,
   RagIngestResult,
+  CryptoProfileResponse,
+  PolicyDecisionResponse,
+  RiskScoreRequest,
+  RiskScoreResponse,
+  TrustScoreRequest,
+  TrustScoreResponse,
 } from "./types";
 
 const API_BASE_URL: string =
@@ -502,5 +508,57 @@ export async function askRag(
     method: "POST",
     headers: jsonHeaders(role),
     body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Risk scoring, trust engine, crypto selection, policy gate — SPEC 3.3/3.5/3.7/3.6
+// ---------------------------------------------------------------------------
+
+/** POST /api/v1/risk-scores — compute and persist a contextual risk score. */
+export async function submitRiskScore(
+  body: RiskScoreRequest,
+  role: UserRole
+): Promise<RiskScoreResponse> {
+  return request<RiskScoreResponse>("/api/v1/risk-scores", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/v1/trust-scores — record five agent outputs, compute consensus. */
+export async function submitTrustScore(
+  body: TrustScoreRequest,
+  role: UserRole
+): Promise<TrustScoreResponse> {
+  return request<TrustScoreResponse>("/api/v1/trust-scores", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/v1/crypto-profiles — select and persist the protection profile. */
+export async function selectCryptoProfile(
+  trustScoreId: string,
+  role: UserRole
+): Promise<CryptoProfileResponse> {
+  return request<CryptoProfileResponse>("/api/v1/crypto-profiles", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify({ trust_score_id: trustScoreId }),
+  });
+}
+
+/** POST /api/v1/policy-decisions — run the deterministic policy gate. */
+export async function evaluatePolicyDecision(
+  documentId: string,
+  role: UserRole
+): Promise<PolicyDecisionResponse> {
+  return request<PolicyDecisionResponse>("/api/v1/policy-decisions", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify({ document_id: documentId }),
   });
 }
