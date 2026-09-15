@@ -1,75 +1,75 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { LabelBadge } from "@/components/LabelBadge";
-import { SiteNav } from "@/components/SiteNav";
+import {
+  Upload,
+  FileText,
+  ArrowRight,
+  AlertTriangle,
+  CheckCircle,
+  X,
+} from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
+import { useRole } from "@/lib/context/RoleContext";
 import {
   checkHealth,
   registerAndClassify,
-  registerUploadAndClassify,
-  runAssessment,
   ApiError,
 } from "@/lib/api/client";
 import type {
   HealthResponse,
   ClassificationResponse,
   DocumentResponse,
-  AssessmentResponse,
-  UserRole,
 } from "@/lib/api/types";
-import {
-  getAccessToken,
-  getSessionUser,
-  setDevRole,
-} from "@/lib/auth/session";
 
-const AVAILABLE_ROLES: { value: UserRole; label: string }[] = [
-  { value: "data_owner", label: "Data Owner" },
-  { value: "security_analyst", label: "Security Analyst" },
-  { value: "security_admin", label: "Security Admin" },
-  { value: "compliance_officer", label: "Compliance Officer" },
-  { value: "auditor", label: "Auditor" },
-  { value: "ciso", label: "CISO" },
-  { value: "engineer", label: "Engineer" },
-];
+// ---------------------------------------------------------------------------
+// Role descriptions — authorization plumbing, NOT authentication
+// ---------------------------------------------------------------------------
 
-/** Client-side mirror of ``UPLOAD_MAX_BYTES`` (50 MiB). */
-const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const LABEL_TONES: Record<
+  string,
+  "public" | "internal" | "confidential" | "restricted"
+> = {
+  PUBLIC: "public",
+  INTERNAL: "internal",
+  CONFIDENTIAL: "confidential",
+  RESTRICTED: "restricted",
+};
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function ClassifyPage() {
-  const session = typeof window !== "undefined" ? getSessionUser() : null;
-  const hasJwt = typeof window !== "undefined" && Boolean(getAccessToken());
+  const containerRef = useGsapReveal<HTMLDivElement>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Health
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
-  const [role, setRole] = useState<UserRole>(session?.role ?? "data_owner");
-  const [filename, setFilename] = useState("quarterly-report.pdf");
-  const [content, setContent] = useState(
-    "This document contains confidential financial projections and restricted trade secrets."
-  );
-  const [file, setFile] = useState<File | null>(null);
+  // Classify flow
+  const { role } = useRole();
+  const [filename, setFilename] = useState("");
+  const [content, setContent] = useState("");
   const [registeredDocument, setRegisteredDocument] =
     useState<DocumentResponse | null>(null);
   const [classification, setClassification] =
     useState<ClassificationResponse | null>(null);
   const [classifyError, setClassifyError] = useState<string | null>(null);
   const [classifyLoading, setClassifyLoading] = useState(false);
-  const [assessment, setAssessment] = useState<AssessmentResponse | null>(null);
-  const [assessError, setAssessError] = useState<string | null>(null);
-  const [assessLoading, setAssessLoading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  useEffect(() => {
-    if (!hasJwt) setDevRole(role);
-  }, [role, hasJwt]);
-
+  // ------ Health check ------
   const handleHealthCheck = useCallback(async () => {
     setHealthLoading(true);
     setHealthError(null);
     try {
-      setHealth(await checkHealth());
+      const res = await checkHealth();
+      setHealth(res);
     } catch (err) {
       setHealthError(err instanceof ApiError ? err.message : "Network error");
     } finally {
@@ -77,352 +77,615 @@ export default function ClassifyPage() {
     }
   }, []);
 
+  // ------ Register + Classify ------
   const handleClassify = useCallback(async () => {
     setClassifyLoading(true);
     setClassifyError(null);
     setRegisteredDocument(null);
     setClassification(null);
-    setAssessment(null);
-    setAssessError(null);
     try {
-      if (file) {
-        const result = await registerUploadAndClassify(file, content, role);
-        setRegisteredDocument(result.document);
-        setClassification(result.classification);
-        if (result.upload.extracted_text) {
-          setContent(result.upload.extracted_text);
-        }
-      } else {
-        const { document: doc, classification: cls } = await registerAndClassify(
-          filename,
-          content,
-          role
-        );
-        setRegisteredDocument(doc);
-        setClassification(cls);
-      }
+      const { document: doc, classification: cls } =
+        await registerAndClassify(filename, content, role);
+      setRegisteredDocument(doc);
+      setClassification(cls);
     } catch (err) {
       setClassifyError(err instanceof ApiError ? err.message : "Network error");
     } finally {
       setClassifyLoading(false);
     }
-  }, [filename, content, role, file]);
+  }, [filename, content, role]);
 
-  const effectiveRole = session?.role ?? role;
-  const canAssess =
-    effectiveRole === "security_analyst" || effectiveRole === "security_admin";
+  // ------ Drag & Drop handlers ------
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
 
-  const handleAssess = useCallback(async () => {
-    if (!registeredDocument || !canAssess) return;
-    setAssessLoading(true);
-    setAssessError(null);
-    setAssessment(null);
-    try {
-      setAssessment(
-        await runAssessment(
-          {
-            document_id: registeredDocument.id,
-            device_id: "workstation-01",
-            device_is_new: false,
-            accessed_at: new Date().toISOString(),
-            after_hours: false,
-            content,
-          },
-          role
-        )
-      );
-    } catch (err) {
-      setAssessError(err instanceof ApiError ? err.message : "Network error");
-    } finally {
-      setAssessLoading(false);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      const file = files[0];
+      setFilename(file.name);
+      
+      // Read file content (for demo, just use placeholder)
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setContent(text.slice(0, 500)); // First 500 chars
+      };
+      reader.readAsText(file);
     }
-  }, [registeredDocument, role, content, canAssess]);
+  }, []);
 
-  const canClassify = file
-    ? !classifyLoading && file.size <= UPLOAD_MAX_BYTES
-    : !classifyLoading && Boolean(filename.trim()) && Boolean(content.trim());
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      setFilename(file.name);
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setContent(text.slice(0, 500));
+      };
+      reader.readAsText(file);
+    }
+  }, []);
+
+  const handleReset = useCallback(() => {
+    setRegisteredDocument(null);
+    setClassification(null);
+    setClassifyError(null);
+    setContent("");
+    setFilename("");
+  }, []);
 
   return (
-    <div className="flex-1 flex flex-col">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-bold">
-              Q
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                Q-AEGIS Shield
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Quantum-Adaptive Encryption Governance
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-6">
-            <SiteNav active="/" />
-            <div className="flex items-center gap-2 text-sm">
-              <span
-                className={`inline-block h-2.5 w-2.5 rounded-full ${
-                  health ? "bg-emerald-400 animate-pulse-glow" : "bg-slate-600"
-                }`}
-              />
-              <span className="text-[var(--color-text-secondary)]">
-                {health ? `v${health.version}` : "Not checked"}
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 mx-auto w-full max-w-6xl px-6 py-8 space-y-8">
-        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold">System Health</h2>
-            <button
-              id="health-check-btn"
-              onClick={handleHealthCheck}
-              disabled={healthLoading}
-              className="rounded-lg bg-[var(--color-accent-blue)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+    <div
+      ref={containerRef}
+      className="mx-auto w-full max-w-[1600px] space-y-8 px-6 py-8"
+    >
+      {/* Hero Header */}
+      <header data-reveal>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h1
+              className="font-semibold mb-1"
+              style={{
+                fontSize: "var(--font-size-2xl)",
+                color: "var(--color-text-primary)",
+              }}
             >
-              {healthLoading ? "Checking…" : "Check Health"}
-            </button>
+              Upload Document
+            </h1>
+            <p
+              style={{
+                fontSize: "var(--font-size-sm)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Register documents and classify their sensitivity in real-time
+            </p>
           </div>
-          {healthError && <p className="text-sm text-red-400">{healthError}</p>}
-          {health && (
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <span className="text-[var(--color-text-muted)] block text-xs mb-1">
-                  Status
-                </span>
-                <span className="text-emerald-400 font-medium">{health.status}</span>
-              </div>
-              <div>
-                <span className="text-[var(--color-text-muted)] block text-xs mb-1">
-                  Service
-                </span>
-                <span className="font-medium">{health.service}</span>
-              </div>
-              <div>
-                <span className="text-[var(--color-text-muted)] block text-xs mb-1">
-                  Version
-                </span>
-                <span className="font-medium">{health.version}</span>
-              </div>
-            </div>
-          )}
-        </section>
 
-        <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6">
-          <h2 className="text-base font-semibold mb-1">Document Classification</h2>
-          <p className="text-sm text-[var(--color-text-muted)] mb-6">
-            Upload a file (≤50 MB) or paste text. Prefer{" "}
-            <Link href="/login" className="text-cyan-400 hover:underline">
-              JWT login
-            </Link>
-            ; role selector is DEV-ONLY when no token is stored.
-          </p>
-
-          <div className="grid gap-5 md:grid-cols-2">
-            <div className="space-y-4">
-              {!hasJwt && (
-                <div>
-                  <label
-                    htmlFor="role-select"
-                    className="block text-xs font-medium mb-1.5"
-                  >
-                    Caller Role
-                    <span className="ml-1 text-[var(--color-text-muted)]">
-                      (DEV-ONLY bypass when no JWT)
-                    </span>
-                  </label>
-                  <select
-                    id="role-select"
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm"
-                  >
-                    {AVAILABLE_ROLES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {hasJwt && session && (
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Signed in as {session.email} ({session.role})
+          {/* System Status */}
+          <div className="flex items-center gap-3">
+            <div
+              className={`status-dot ${
+                health ? "status-dot-pass" : "status-dot-pending"
+              }`}
+            />
+            <div className="text-sm">
+              <p style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                {health ? "System Online" : "Status Unknown"}
+              </p>
+              {health && (
+                <p className="mono-data" style={{ color: "var(--color-text-tertiary)" }}>
+                  v{health.version}
                 </p>
               )}
+            </div>
+            <button
+              onClick={handleHealthCheck}
+              disabled={healthLoading}
+              className="btn btn-secondary ml-2"
+            >
+              {healthLoading ? "..." : "Check"}
+            </button>
+          </div>
+        </div>
+        {healthError && (
+          <div
+            className="p-3 rounded-md text-sm border-hairline"
+            style={{
+              backgroundColor: "rgba(239, 68, 68, 0.1)",
+              borderColor: "var(--status-fail)",
+              color: "var(--status-fail)",
+            }}
+          >
+            {healthError}
+          </div>
+        )}
+      </header>
 
-              <div>
-                <label htmlFor="file-input" className="block text-xs font-medium mb-1.5">
-                  Upload file
-                </label>
-                <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-3">
-                  <input
-                    id="file-input"
-                    type="file"
-                    accept=".pdf,.txt,.md,.csv,.json,.doc,.docx,.png,.jpg,.jpeg,.webp"
-                    onChange={(e) => {
-                      const next = e.target.files?.[0] ?? null;
-                      if (next && next.size > UPLOAD_MAX_BYTES) {
-                        setFile(null);
-                        setClassifyError(
-                          `File exceeds the ${UPLOAD_MAX_BYTES} byte (50 MiB) upload limit.`
-                        );
-                        e.target.value = "";
-                        return;
-                      }
-                      setClassifyError(null);
-                      setFile(next);
-                      if (next) setFilename(next.name);
-                    }}
-                    className="block w-full text-sm text-[var(--color-text-primary)] file:mr-3 file:rounded-md file:border-0 file:bg-cyan-900/40 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cyan-200 hover:file:bg-cyan-900/60"
-                  />
-                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                    {file
-                      ? `Selected: ${file.name} (${file.size.toLocaleString()} bytes)`
-                      : "Choose a document to store on disk, then classify (≤50 MiB)."}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="filename-input"
-                  className="block text-xs font-medium mb-1.5"
-                >
-                  Filename
-                </label>
-                <input
-                  id="filename-input"
-                  type="text"
-                  value={filename}
-                  onChange={(e) => setFilename(e.target.value)}
-                  disabled={Boolean(file)}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm disabled:opacity-60"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="content-input"
-                  className="block text-xs font-medium mb-1.5"
-                >
-                  Document Content
-                  <span className="ml-1 text-[var(--color-text-muted)]">
-                    (fallback if upload has no extractable text)
-                  </span>
-                </label>
-                <textarea
-                  id="content-input"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm resize-y"
-                />
-              </div>
-
-              <button
-                id="classify-btn"
-                onClick={handleClassify}
-                disabled={!canClassify}
-                className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+      {/* Main Upload Zone or Results */}
+      {!registeredDocument && !classification ? (
+        <>
+          {/* Upload Zone */}
+          <div data-reveal className="card p-6">
+            <div className="space-y-6">
+              {/* Drag & Drop Zone */}
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg p-12 text-center cursor-pointer transition-colors"
+                style={{
+                  minHeight: "280px",
+                  border: "var(--border-width-default) dashed var(--color-border)",
+                  backgroundColor: isDragOver
+                    ? "var(--color-bg-hover)"
+                    : "var(--color-bg-secondary)",
+                }}
               >
-                {classifyLoading
-                  ? "Classifying…"
-                  : file
-                    ? "Upload, Register & Classify"
-                    : "Register & Classify"}
-              </button>
-              {classifyError && (
-                <p className="text-sm text-red-400">{classifyError}</p>
+                <div className="flex flex-col items-center justify-center h-full">
+                  <Upload
+                    className="h-12 w-12 mx-auto mb-4"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  />
+
+                  {isDragOver ? (
+                    <div>
+                      <p
+                        className="text-base font-medium mb-1"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        Release to Upload
+                      </p>
+                      <p
+                        className="text-sm"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        Drop your document here
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p
+                        className="text-base font-medium mb-1"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        Drag & Drop Document
+                      </p>
+                      <p
+                        className="text-sm mb-4"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        or click to browse files
+                      </p>
+                      <div
+                        className="flex items-center gap-2 text-xs"
+                        style={{ color: "var(--color-text-tertiary)" }}
+                      >
+                        <FileText className="h-4 w-4" />
+                        <span>Supported: PDF, DOCX, TXT, CSV</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.docx,.txt,.csv"
+                  onChange={handleFileSelect}
+                />
+              </div>
+
+              {/* Manual Input Toggle */}
+              {filename && (
+                <div className="space-y-4">
+                  <div
+                    className="flex items-center justify-between p-4 rounded-lg border-hairline"
+                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText
+                        className="h-5 w-5"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      />
+                      <div>
+                        <p
+                          className="text-sm font-medium"
+                          style={{ color: "var(--color-text-primary)" }}
+                        >
+                          {filename}
+                        </p>
+                        <p
+                          className="text-xs"
+                          style={{ color: "var(--color-text-tertiary)" }}
+                        >
+                          {content.length} characters loaded
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleReset}
+                      className="btn btn-ghost"
+                      style={{ padding: "var(--spacing-2)" }}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Content Preview */}
+                  <div>
+                    <label
+                      className="block text-sm font-medium mb-2"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      Content Preview
+                    </label>
+                    <textarea
+                      value={content}
+                      onChange={(e) => setContent(e.target.value)}
+                      rows={6}
+                      className="input mono-data resize-y"
+                      placeholder="Document content will appear here..."
+                    />
+                  </div>
+
+                  {/* Classify Button */}
+                  <button
+                    onClick={handleClassify}
+                    disabled={classifyLoading || !content.trim()}
+                    className="btn btn-primary w-full py-3"
+                    style={{ justifyContent: "center" }}
+                  >
+                    {classifyLoading ? (
+                      "Analyzing Document..."
+                    ) : (
+                      "Register & Classify Document"
+                    )}
+                  </button>
+
+                  {classifyError && (
+                    <div
+                      className="p-4 rounded-lg border-hairline flex items-center gap-3"
+                      style={{
+                        backgroundColor: "rgba(239, 68, 68, 0.1)",
+                        borderColor: "var(--status-fail)",
+                      }}
+                    >
+                      <AlertTriangle
+                        className="h-5 w-5 flex-shrink-0"
+                        style={{ color: "var(--status-fail)" }}
+                      />
+                      <p className="text-sm" style={{ color: "var(--status-fail)" }}>
+                        {classifyError}
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
+          </div>
+        </>
+      ) : (
+        <div data-reveal className="space-y-6">
+          {/* Success Banner */}
+          <div
+            className="card p-6 flex items-center justify-between"
+            style={{ borderColor: "var(--status-pass)" }}
+          >
+            <div className="flex items-center gap-4">
+              <div
+                className="flex h-10 w-10 items-center justify-center rounded-full"
+                style={{ backgroundColor: "rgba(16, 185, 129, 0.1)" }}
+              >
+                <CheckCircle
+                  className="h-5 w-5"
+                  style={{ color: "var(--status-pass)" }}
+                />
+              </div>
+              <div>
+                <h3
+                  className="text-base font-semibold mb-1"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Classification Complete
+                </h3>
+                <p
+                  className="text-sm"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  Document successfully registered and analyzed
+                </p>
+              </div>
+            </div>
+            <button onClick={handleReset} className="btn btn-secondary">
+              Upload Another
+            </button>
+          </div>
 
-            <div className="space-y-4">
-              {registeredDocument && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 text-sm space-y-2">
-                  <p className="text-xs uppercase text-[var(--color-text-muted)]">
-                    Document
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Document Info */}
+            {registeredDocument && (
+              <div className="card p-6">
+                <header className="mb-6">
+                  <h3
+                    className="font-semibold mb-1"
+                    style={{
+                      fontSize: "var(--font-size-base)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    Document Registered
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: "var(--font-size-sm)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    System-assigned identifier and metadata
                   </p>
-                  <p className="font-mono text-xs">{registeredDocument.id}</p>
-                  <p>
-                    {registeredDocument.filename} ·{" "}
-                    <span className="text-cyan-400">
-                      {registeredDocument.current_status}
-                    </span>
-                  </p>
-                </div>
-              )}
-              {classification && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 space-y-3">
-                  <div className="flex justify-between items-center text-sm">
-                    <span>Sensitivity</span>
-                    <LabelBadge label={classification.sensitivity_label} />
+                </header>
+                <dl className="space-y-4">
+                  <div>
+                    <dt
+                      className="text-xs mb-1.5 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Document ID
+                    </dt>
+                    <dd
+                      className="mono-data text-sm"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {registeredDocument.id}
+                    </dd>
                   </div>
+                  <div>
+                    <dt
+                      className="text-xs mb-1.5 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Filename
+                    </dt>
+                    <dd
+                      className="text-sm"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {registeredDocument.filename}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt
+                      className="text-xs mb-1.5 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Status
+                    </dt>
+                    <dd>
+                      <Badge
+                        label={registeredDocument.current_status}
+                        tone="info"
+                        size="sm"
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt
+                      className="text-xs mb-1.5 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Uploaded At
+                    </dt>
+                    <dd
+                      className="text-sm mono-data"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {new Date(registeredDocument.uploaded_at).toLocaleString()}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            )}
+
+            {/* Classification Result */}
+            {classification && (
+              <div className="card p-6">
+                <header className="mb-6">
+                  <h3
+                    className="font-semibold mb-1"
+                    style={{
+                      fontSize: "var(--font-size-base)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    Classification Analysis
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: "var(--font-size-sm)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    AI-powered sensitivity assessment
+                  </p>
+                </header>
+
+                {/* Hero Badge */}
+                <div className="mb-6 flex items-center gap-3">
+                  <Badge
+                    label={classification.sensitivity_label}
+                    tone={LABEL_TONES[classification.sensitivity_label]}
+                    size="lg"
+                  />
                   {classification.is_defaulted && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span>Escalated from</span>
-                      <span className="flex items-center gap-2">
-                        <LabelBadge label={classification.base_label} />
-                        <span className="text-amber-400 text-xs">fail-safe</span>
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-full border-hairline"
+                      style={{
+                        backgroundColor: "rgba(249, 115, 22, 0.1)",
+                        borderColor: "var(--status-override)",
+                      }}
+                    >
+                      <AlertTriangle
+                        className="h-3.5 w-3.5"
+                        style={{ color: "var(--status-override)" }}
+                      />
+                      <span
+                        className="text-xs font-medium"
+                        style={{ color: "var(--status-override)" }}
+                      >
+                        Fail-Safe Escalated
                       </span>
                     </div>
                   )}
-                  <p className="text-xs font-mono">
-                    {(classification.confidence * 100).toFixed(1)}%
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    {classification.rationale}
-                  </p>
-                  {registeredDocument && (
-                    <div className="space-y-2">
-                      <Link
-                        href={`/override?document_id=${registeredDocument.id}`}
-                        className="text-sm text-cyan-400 hover:underline"
+                </div>
+
+                <dl className="space-y-4">
+                  {/* Confidence */}
+                  <div>
+                    <dt
+                      className="text-xs mb-2 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Confidence Level
+                    </dt>
+                    <dd>
+                      <div className="flex items-center gap-3 mb-1">
+                        <div
+                          className="flex-1 h-2 rounded-full overflow-hidden"
+                          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                        >
+                          <div
+                            className="h-full transition-all duration-500"
+                            style={{
+                              width: `${classification.confidence * 100}%`,
+                              backgroundColor: "var(--status-info)",
+                            }}
+                          />
+                        </div>
+                        <span
+                          className="mono-data text-lg font-semibold"
+                          style={{ color: "var(--color-text-primary)" }}
+                        >
+                          {(classification.confidence * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <p
+                        className="text-xs"
+                        style={{ color: "var(--color-text-secondary)" }}
                       >
-                        Override this classification
-                      </Link>
-                      <button
-                        type="button"
-                        id="assess-btn"
-                        onClick={() => void handleAssess()}
-                        disabled={assessLoading || !canAssess}
-                        className="block w-full rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm disabled:opacity-50"
+                        Threshold: {(classification.confidence_threshold * 100).toFixed(0)}%
+                      </p>
+                    </dd>
+                  </div>
+
+                  {/* Model */}
+                  <div>
+                    <dt
+                      className="text-xs mb-1.5 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      Model Version
+                    </dt>
+                    <dd
+                      className="mono-data text-xs"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {classification.model_version}
+                    </dd>
+                  </div>
+
+                  {/* Keywords */}
+                  {classification.matched_keywords.length > 0 && (
+                    <div>
+                      <dt
+                        className="text-xs mb-2 uppercase tracking-wider"
+                        style={{ color: "var(--color-text-tertiary)" }}
                       >
-                        {assessLoading ? "Running…" : "Run full assessment"}
-                      </button>
-                      {assessError && (
-                        <p className="text-sm text-red-400">{assessError}</p>
-                      )}
-                      {assessment && (
-                        <p className="text-xs font-mono">
-                          trust {assessment.consensus_value} ·{" "}
-                          {assessment.profile_type} ·{" "}
-                          <Link
-                            href={`/agents?document_id=${assessment.document_id}`}
-                            className="text-cyan-400 hover:underline"
+                        Matched Keywords
+                      </dt>
+                      <dd className="flex flex-wrap gap-2">
+                        {classification.matched_keywords.map((kw) => (
+                          <span
+                            key={kw}
+                            className="px-2.5 py-1 rounded-md border-hairline text-xs mono-data"
+                            style={{
+                              backgroundColor: "var(--color-bg-tertiary)",
+                              color: "var(--color-text-secondary)",
+                            }}
                           >
-                            agents
-                          </Link>
-                        </p>
-                      )}
+                            {kw}
+                          </span>
+                        ))}
+                      </dd>
                     </div>
                   )}
-                </div>
-              )}
-              {!registeredDocument && !classification && !classifyError && (
-                <div className="flex items-center justify-center h-48 rounded-lg border border-dashed border-[var(--color-border)] text-sm text-[var(--color-text-muted)]">
-                  Results will appear here
-                </div>
-              )}
-            </div>
+
+                  {/* Rationale */}
+                  <div>
+                    <dt
+                      className="text-xs mb-2 uppercase tracking-wider"
+                      style={{ color: "var(--color-text-tertiary)" }}
+                    >
+                      AI Rationale
+                    </dt>
+                    <dd
+                      className="text-sm rounded-lg p-4 border-hairline"
+                      style={{
+                        backgroundColor: "var(--color-bg-tertiary)",
+                        color: "var(--color-text-secondary)",
+                        lineHeight: "var(--line-height-relaxed)",
+                      }}
+                    >
+                      {classification.rationale}
+                    </dd>
+                  </div>
+                </dl>
+
+                {/* Action Buttons */}
+                {registeredDocument && (
+                  <div
+                    className="mt-6 pt-6 space-y-3"
+                    style={{ borderTop: "var(--border-width-hairline) solid var(--color-border)" }}
+                  >
+                    <Link
+                      href={`/override?document_id=${registeredDocument.id}`}
+                      className="btn btn-secondary w-full py-2"
+                      style={{ justifyContent: "center" }}
+                    >
+                      Override Classification
+                      <ArrowRight className="h-4 w-4 ml-1" />
+                    </Link>
+                    <Link
+                      href={`/dashboard`}
+                      className="btn btn-ghost w-full py-2"
+                      style={{ justifyContent: "center" }}
+                    >
+                      View Dashboard
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </section>
-      </main>
+        </div>
+      )}
     </div>
   );
 }
+
