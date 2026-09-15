@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import ACTOR_ROLE_HEADER
 from app.api.router import API_V1_PREFIX
 from app.classifier.stub_classifier import MODEL_VERSION
+from app.crypto.selector import HYBRID_MAX, POST_QUANTUM_MAX
 from app.db.enums import (
     AuditEventType,
     CryptoProfileType,
@@ -1236,7 +1237,7 @@ def test_a_failed_audit_write_rolls_back_the_trust_score(
     [
         ("0.20", "post_quantum"),
         ("0.40", "post_quantum"),
-        ("0.50", "hybrid"),
+        ("0.50", "post_quantum"),
         ("0.80", "hybrid"),
         ("0.90", "aes256"),
     ],
@@ -1267,8 +1268,8 @@ def test_selecting_a_crypto_profile_persists_the_row_and_the_audit_entry(
     assert events[0].payload["profile_type"] == expected
     assert events[0].payload["trust_score_id"] == trust_id
     assert Decimal(str(events[0].payload["consensus_value"])) == Decimal(score)
-    assert events[0].payload["post_quantum_max"] == "0.4"
-    assert events[0].payload["hybrid_max"] == "0.8"
+    assert events[0].payload["post_quantum_max"] == str(POST_QUANTUM_MAX)
+    assert events[0].payload["hybrid_max"] == str(HYBRID_MAX)
 
 
 def test_reselecting_a_crypto_profile_appends_a_new_row(
@@ -1561,7 +1562,7 @@ def test_the_classify_to_crypto_chain_writes_every_decision_and_its_audit(
 
     profile = select_crypto(client, trust_id)
     assert profile.status_code == 201, profile.text
-    assert profile.json()["profile_type"] == "hybrid"
+    assert profile.json()["profile_type"] == "post_quantum"
 
     events = {
         entry.event_type
@@ -1836,7 +1837,7 @@ def test_inventory_reads_the_full_protection_snapshot(
     assert payload["trust_score_id"] == trust_id
     assert Decimal(str(payload["trust_score"])) == Decimal("0.500")
     assert payload["final_decision"] == "allow"
-    assert payload["profile_type"] == "hybrid"
+    assert payload["profile_type"] == "post_quantum"
     assert payload["crypto_profile_id"] == profile.json()["id"]
     assert payload["policy_decision_id"] is not None
     assert payload["risk_score_id"] is not None

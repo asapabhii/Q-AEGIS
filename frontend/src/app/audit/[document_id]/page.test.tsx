@@ -47,7 +47,7 @@ describe("Audit Viewer (FR-15)", () => {
   it("shows loading state while fetching", () => {
     mockListAuditEntries.mockReturnValue(new Promise(() => {}));
     render(<RoleProvider><AuditViewer documentId="123e4567-e89b-12d3-a456-426614174001" /></RoleProvider>);
-    expect(screen.getByText(/INITIALIZING FORENSIC DECRYPTION/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading audit trail/i)).toBeInTheDocument();
     cleanup();
   });
 
@@ -64,7 +64,7 @@ describe("Audit Viewer (FR-15)", () => {
   it("shows unverified status before the chain is verified", async () => {
     render(<RoleProvider><AuditViewer documentId="123e4567-e89b-12d3-a456-426614174001" /></RoleProvider>);
     await waitFor(() => {
-      expect(screen.getByText(/SYS: UNVERIFIED/i)).toBeInTheDocument();
+      expect(screen.getByText(/Unverified/i)).toBeInTheDocument();
     });
     expect(
       screen.getByRole("button", { name: /verify chain integrity/i }),
@@ -76,7 +76,7 @@ describe("Audit Viewer (FR-15)", () => {
     const user = userEvent.setup();
     render(<RoleProvider><AuditViewer documentId="123e4567-e89b-12d3-a456-426614174001" /></RoleProvider>);
     await waitFor(() => {
-      expect(screen.getByText(/SYS: UNVERIFIED/i)).toBeInTheDocument();
+      expect(screen.getByText(/Unverified/i)).toBeInTheDocument();
     });
 
     await user.click(
@@ -85,7 +85,7 @@ describe("Audit Viewer (FR-15)", () => {
     expect(screen.getByRole("button", { name: /verifying/i })).toBeDisabled();
 
     expect(
-      await screen.findByText(/SYS: VERIFIED/i),
+      await screen.findByText(/Verified/i),
     ).toBeInTheDocument();
     cleanup();
   }, 10000);
@@ -95,7 +95,7 @@ describe("Audit Viewer (FR-15)", () => {
     await waitFor(() => {
       expect(screen.getByText(/CRYPTOGRAPHIC AUDIT TRAIL/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/D3.JS MERKLE-ROOT VISUALIZATION/i)).toBeInTheDocument();
+    expect(screen.getByText(/Merkle-root visualization/i)).toBeInTheDocument();
     cleanup();
   });
 
