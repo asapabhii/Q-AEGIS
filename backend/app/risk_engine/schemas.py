@@ -8,7 +8,6 @@ signals this version does not score.
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
@@ -17,9 +16,6 @@ from app.risk_engine.scorer import ContextSnapshot, RiskScoreResult
 #: Matches ``documents.filename``: a device identifier is caller-supplied text,
 #: not an unbounded blob.
 MAX_DEVICE_ID_CHARS = 255
-DEFAULT_ORG_TIMEZONE = "Asia/Kolkata"
-BUSINESS_DAY_START_HOUR = 9
-BUSINESS_DAY_END_HOUR = 18
 
 
 class RiskScoreRequest(BaseModel):
@@ -32,15 +28,7 @@ class RiskScoreRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=MAX_DEVICE_ID_CHARS)
     device_is_new: bool
     accessed_at: AwareDatetime
-    after_hours: bool | None = None
-    org_timezone: str = Field(
-        default=DEFAULT_ORG_TIMEZONE,
-        min_length=1,
-        max_length=80,
-        description=(
-            "IANA timezone used to derive after_hours when the caller omits it."
-        ),
-    )
+    after_hours: bool
 
     @field_validator("device_id")
     @classmethod
@@ -52,42 +40,15 @@ class RiskScoreRequest(BaseModel):
             )
         return value
 
-    @field_validator("org_timezone")
-    @classmethod
-    def org_timezone_must_be_valid(cls, value: str) -> str:
-        """Require an IANA timezone for server-side ``after_hours`` derivation."""
-        zone_name = value.strip()
-        if not zone_name:
-            raise ValueError("org_timezone must contain a timezone name")
-        try:
-            ZoneInfo(zone_name)
-        except ZoneInfoNotFoundError as exc:
-            raise ValueError("org_timezone must be a valid IANA timezone") from exc
-        return zone_name
-
     def snapshot(self) -> ContextSnapshot:
-        """The five stored snapshot fields, excluding ``document_id``."""
+        """The five snapshot fields, excluding ``document_id``."""
         return ContextSnapshot(
             actor_user_id=self.actor_user_id,
             device_id=self.device_id,
             device_is_new=self.device_is_new,
             accessed_at=self.accessed_at,
-            after_hours=(
-                derive_after_hours(self.accessed_at, self.org_timezone)
-                if self.after_hours is None
-                else self.after_hours
-            ),
+            after_hours=self.after_hours,
         )
-
-
-def derive_after_hours(accessed_at: datetime, org_timezone: str) -> bool:
-    """Return True when access falls outside weekday 09:00-18:00 local time."""
-    if accessed_at.tzinfo is None:
-        raise ValueError("accessed_at must be timezone-aware")
-    local = accessed_at.astimezone(ZoneInfo(org_timezone))
-    if local.weekday() >= 5:
-        return True
-    return not (BUSINESS_DAY_START_HOUR <= local.hour < BUSINESS_DAY_END_HOUR)
 
 
 class ContextSnapshotBody(BaseModel):
