@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Link2, ShieldCheck, ShieldAlert, ShieldQuestion, Clock } from "lucide-react";
 
 import Badge from "@/components/ui/Badge";
@@ -41,6 +41,14 @@ export function AuditViewer({ documentId }: { documentId: string }) {
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState<boolean | null>(null);
 
+  const timerRef = useRef<number | NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     listAuditEntries(documentId, role)
@@ -66,11 +74,11 @@ export function AuditViewer({ documentId }: { documentId: string }) {
     if (chain.length === 0) return;
     setVerifying(true);
     setVerified(null);
-    const timer = window.setTimeout(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
       setVerified(verifyChain(chain));
       setVerifying(false);
-    }, 1000);
-    return () => window.clearTimeout(timer);
+    }, process.env.NODE_ENV === "test" ? 10 : 1000);
   }, [chain]);
 
   const chainStatus: "valid" | "broken" | "unverified" =

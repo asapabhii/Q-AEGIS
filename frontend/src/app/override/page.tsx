@@ -123,7 +123,7 @@ export function OverrideScreen({
   }, [initialDocumentId, role]);
 
   const snapshotMatchesInput =
-    snapshot != null && snapshot.id === documentId.trim();
+    snapshot !== null && snapshot.id === documentId.trim();
   const currentLabel = snapshotMatchesInput
     ? snapshot.sensitivity_label
     : null;
