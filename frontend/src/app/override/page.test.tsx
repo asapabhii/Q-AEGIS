@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OverrideScreen } from "./page";
 import { ApiError, getDocument, overrideClassification } from "@/lib/api/client";
-import type { DocumentSnapshot, ManualOverrideResponse } from "@/lib/api/types";
+import type { DocumentSnapshot, ManualOverrideResponse, UserRole } from "@/lib/api/types";
 import { RoleProvider, useRole } from "@/lib/context/RoleContext";
 
 function RoleWrapper({ children }: { children: React.ReactNode }) {
@@ -12,7 +12,7 @@ function RoleWrapper({ children }: { children: React.ReactNode }) {
     <>
       <select 
         value={role} 
-        onChange={(e) => setRole(e.target.value as any)} 
+        onChange={(e) => setRole(e.target.value as UserRole)} 
         aria-label="Role"
       >
         <option value="security_analyst">security_analyst</option>
@@ -82,7 +82,7 @@ async function fillReadyForm(
   await user.click(screen.getByRole("button", { name: /^load$/i }));
   expect(await screen.findByText("payroll.pdf")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /^INTERNAL$/i }));
-  await user.type(screen.getByPlaceholderText(/Explain why this classification/i), longJustification);
+  fireEvent.change(screen.getByPlaceholderText(/Explain why this classification/i), { target: { value: longJustification } });
   if (options?.confirm !== false) {
     await user.click(
       screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
@@ -232,7 +232,7 @@ describe("OverrideScreen", () => {
     expect(
       screen.getByRole("button", { name: /RESTRICTED.*Current/i })
     ).toBeDisabled();
-    await user.type(screen.getByPlaceholderText(/Explain why this classification/i), longJustification);
+    fireEvent.change(screen.getByPlaceholderText(/Explain why this classification/i), { target: { value: longJustification } });
     await user.click(
       screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );
@@ -254,7 +254,7 @@ describe("OverrideScreen", () => {
       await screen.findByText(/not classified/i)
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^INTERNAL$/i }));
-    await user.type(screen.getByPlaceholderText(/Explain why this classification/i), longJustification);
+    fireEvent.change(screen.getByPlaceholderText(/Explain why this classification/i), { target: { value: longJustification } });
     await user.click(
       screen.getByLabelText(/i understand and confirm this action will be permanently logged/i)
     );

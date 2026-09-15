@@ -9,41 +9,71 @@
 
 ## 📊 Module Ownership & Actual Status
 
-*Status is based on the actual codebase state as of Phase 4.*
+*Verified against code and merged PRs on 2026-09-15. "main" means merged to `origin/main`; "PR #24" means present only on `feature/phase4-crypto-scheduler`, the sole open PR.*
 
 ### Abhinav (Backend: Agents, Graph, RAG, Ingestion)
 | Module | SPEC.md Section | PRD Requirement | Status |
 |--------|-----------------|-----------------|--------|
-| Ingestion / Event Bus | 3.1 | FR-2 (Partial) | ❌ Not Started |
-| Contextual Risk API | 3.3 | FR-2 | ✅ Complete |
-| Multi-Agent Orchestration | 3.4 | FR-3 | ❌ Not Started |
-| Trust Score Computation | 3.5 | FR-4 | 🟡 Partially Complete (Mocked inputs) |
-| Knowledge Graph | 3.11 | FR-10 | ❌ Not Started |
-| Agentic RAG | 3.12 | FR-11 | ❌ Not Started |
+| Ingestion / Event Bus | 3.1 | FR-2 (Partial) | ✅ Complete on main (Redis Streams, `qaegis:events`, outbox + consumer group, PR #25) |
+| Contextual Risk API | 3.3 | FR-2 | ✅ Complete on main (caller-triggered + scheduled recompute + triggers, PR #25) |
+| Multi-Agent Orchestration | 3.4 | FR-3 | ✅ Complete on main (LangGraph 5 parallel nodes, timeout fail-safe, `POST /assessments`, PR #25) |
+| Trust Score Computation | 3.5 | FR-4 | ✅ Complete on main (versioned equal-weight consensus, PR #13; bands calibrated via #30) |
+| Knowledge Graph | 3.11 | FR-10 | 🟡 Mostly done on main (Neo4j attack paths, Bolt TLS, PR #28) — graph is populated by a synthetic **demo seed only**; no live event-bus sync, see "Needs to Be Connected" |
+| Agentic RAG | 3.12 | FR-11 | 🟡 Pipeline complete on main (4-node Planner→Retriever→Reasoner→Verifier on pgvector, PR #28); embeddings are `stub-hash-v1` (not semantic) — real embedder pending |
+| Data model & migrations (§5) | 5 | all | ✅ Complete on main (12 tables, append-only triggers, PR #25 and follow-ups) |
+| CI/CD, JWT/auth, TLS | — | — | ✅ Complete on main (coverage gate, branch protection, PR #27: JWT login, upload, SSE, local TLS) |
 
 ### Udhav (Backend: Policy, Crypto, Audit, Scheduler)
 | Module | SPEC.md Section | PRD Requirement | Status |
 |--------|-----------------|-----------------|--------|
-| Policy Engine | 3.6 | FR-5 | ✅ Complete |
-| Crypto Engine Profile Selection | 3.7 | FR-6 | ✅ Complete |
-| Crypto Engine Byte Encryption | 3.7 | FR-6 | 🟡 Partially Complete (Stubbed) |
-| Audit Log | 3.8 | FR-7 | ✅ Complete |
-| Crypto-Shredding | 3.9 | FR-8 | ❌ Not Started |
-| Migration Scheduler | 3.10 | FR-9 | ❌ Not Started |
+| Policy Engine | 3.6 | FR-5 | ✅ Complete on main (OPA WASM in-process, capabilities gate in CI, per-operator tests) |
+| Crypto Engine Profile Selection | 3.7 | FR-6 | ✅ Complete on main (trust-driven persist, PR #14; bands calibrated via #30 — see open conflict below) |
+| Crypto Engine Byte Encryption | 3.7 | FR-6 | ✅ Complete on main (AES-256-GCM + X25519MLKEM768 + ML-KEM-1024/ML-DSA-87 via liboqs, fail-closed, PR #25) |
+| Audit Log | 3.8 | FR-7 | ✅ Complete on main (Merkle build/verify, DB trigger, tampered + odd-leaves tests) |
+| Crypto-Shredding | 3.9 | FR-8 | ✅ Complete on main (`POST /shred`, key destruction, audit preserved, PR #26) |
+| Migration Scheduler | 3.10 | FR-9 | ✅ Complete on main (QAOA + greedy/annealing baselines on identical constraints, PR #26) |
+| API error boundary | — | — | 🟡 In PR #24 only (global sanitized 500/422 handlers, `app/api/errors.py`, not yet merged) |
 
 ### Sukhmani (Frontend, Testing, Documentation)
 | Module | SPEC.md Section | PRD Requirement | Status |
 |--------|-----------------|-----------------|--------|
-| Sensitivity Classifier Stub | 3.2 | FR-1 | ✅ Complete |
-| Sensitivity Classifier ML Model | 3.2 | FR-1 | 🟡 Partially Complete (Waiting dataset) |
-| Quantum Upload UI | 3.13 | FR-12 | ✅ Complete |
-| Risk Dashboard UI | 3.13 | FR-14 | ✅ Complete |
-| Override Console UI | 3.13 | FR-12 | ✅ Complete |
-| Rule Studio UI | 3.13 | FR-13 | ✅ Complete |
-| Audit Viewer UI | 3.13 | FR-15 | ✅ Complete |
-| Summary Report UI | 3.13 | FR-16 | ✅ Complete |
-| Frontend Crypto-Shredding | 3.9 | FR-8 | ❌ Not Started |
-| Cross-Module Tests | 4 | N/A | ❌ Not Started |
+| Sensitivity Classifier Stub | 3.2 | FR-1 | ✅ Complete (keyword stub + one-step fail-safe escalation, explicit default test) |
+| Sensitivity Classifier ML Model | 3.2 | FR-1 | ❌ Blocked (no labelled dataset; PRD §9 forbids building against synthetic labels) |
+| Upload / Classify UI | 3.13 | FR-1 screen | ✅ Complete (redesign on main; RoleContext refinements in PR #24) |
+| Audit Viewer + Summary Redesign (Task 2) | 3.13 | FR-15/FR-16 | 🟡 Redesigned screens (`audit/[document_id]`, `documents/[id]/summary`, D3AuditChain, MetricCard, GSAP reveal) exist **in PR #24 only**; main has functional but unredesigned versions |
+| Risk Dashboard UI | 3.13 | FR-14 | ✅ Complete on main (PR #22; SSE live updates via #27) |
+| Override Console UI | 3.13 | FR-12 | ✅ Complete on main (PR #20, #16) |
+| Rule Studio UI | 3.13 | FR-13 | ✅ Complete on main (PR #21, #17) |
+| Audit Viewer UI | 3.13 | FR-15 | ✅ Complete on main (PR #19; D3 chain + verify cascade) |
+| Summary Report UI | 3.13 | FR-16 | ✅ Complete on main (PR #26: export + shred trigger wired to `POST /shred`) |
+| Frontend Crypto-Shredding | 3.9 | FR-8 | ✅ Complete (`shredDocument` client + data_owner-gated double-confirm UI) |
+| Cross-Module Tests | 4 | N/A | ✅ Backend chain suite green; frontend 160/160 vitest green; backend coverage 86.68% |
+
+## 🔗 Integration Status (verified 2026-09-15)
+
+How the three workstreams fit together, and the one open conflict blocking PR #24.
+
+**Merged to `main` (PRs #13–#22, #25–#28, #30).** End-to-end chain proven live against compose on 2026-09-15: register → classify → risk-scores → trust-scores → policy-decisions → crypto-profiles → audit verify (`is_valid: true`, roots match). Frontend↔backend contract verified: 28/30 routes wired, role header + JWT paths match, Decimal-as-string shapes aligned in `lib/api/types.ts`, CORS origins cover local dev. Backend pytest green at 86.68% coverage; frontend 160/160 vitest green with the 70% gate.
+
+**In PR #24 only (open, textually MERGEABLE).** API error boundary (`errors.py` — the sanitized 500/422 handlers go live on `main` only when this merges), frontend Audit Viewer + Document Summary redesign (`audit/[document_id]/page.tsx`, `documents/[id]/summary/page.tsx`, D3 chain visual, MetricCard, useGsapReveal), RoleContext refinements + test hardening, `evaluator.rego`, mock-data contract alignment.
+
+**⛔ Open conflict — PR #24 vs merged #30 (needs Udhav + Abhinav decision before #24 merges).** PR #24 as written silently reverts #30's merged calibration work: crypto selector bands back to 0.4/0.8 stubs (main: 0.50/0.85 policy bands), recommendation bands back to deny-0.300/MFA-0.800 (main: 0.250/0.750), `after_hours` back to caller-required (main: derived from `org_timezone`), `backend/app/classifier/training.py` + its tests deleted, `docs/classifier-dataset.md` deleted, and the two 2026-09-15 calibration entries removed from `docs/decisions.md`. GitHub reports no textual conflict; the clash is semantic. Do not merge #24 until the branch either keeps #30's calibration (restoring code + decision entries + dataset doc) or records an explicit superseding decision. Deleting logged decisions without a replacement entry is not a resolution either way.
+
+**Remaining gaps (not started, in priority order).** Real labelled classifier dataset (PRD §9 dependency, blocks FR-1 model + §8 accuracy metric); real RAG embeddings (stub-hash-v1 works but is not semantic; costs ~500MB torch dep); richer non-heuristic agent scorers (current five are deterministic rules, labelled provisional); measured latency/evaluation artifacts for §8 metrics. Known hardening notes, unchanged: `AUTH_DEV_HEADER_BYPASS=true` pinned in compose (local-dev choice, CI unaffected); Neo4j Browser `:7474` plaintext loopback; no `frontend` service in compose so `NEXT_PUBLIC_API_URL` must be set manually (documented in `.env.example`).
+
+## 🔌 Needs to Be Connected (wiring gaps, verified 2026-09-15)
+
+Built but not yet joined to the rest of the system. Each item is small-to-medium wiring work, not a new module.
+
+| # | What | Currently | Missing link | Owner |
+|---|------|-----------|--------------|-------|
+| 1 | PR #24 merge | Open PR carrying error boundary + frontend redesign; silently reverts #30 calibration | Resolve the ⛔ conflict above first (restore #30's bands + decision entries + dataset doc, or log a superseding decision), then merge | Udhav + Abhinav |
+| 2 | Neo4j graph population | `app/graph/seed.py` upserts a fixed synthetic demo topology | Subscribe to the Redis Streams bus (Task 6 output) so real users/documents/access events flow into Neo4j continuously; seed stays as demo fallback | Abhinav |
+| 3 | RAG semantic retrieval | `app/rag/embeddings.py` is `stub-hash-v1` (hash tokens, not semantic); pipeline works end-to-end | Swap in a real embedder behind the same `embed_text` interface once an embedding path is chosen (model size vs. local-only constraint is the decision) | Abhinav |
+| 4 | Classifier ML model | Keyword stub + fail-safe escalation, tested | Blocked on labelled dataset (PRD §9) — do not train on synthetic labels | Sukhmani |
+| 5 | `errors.py` activation | Sanitized 500/422 global handlers live only on the #24 branch | Goes live automatically once #24 merges cleanly with #30 preserved | Udhav |
+| 6 | Frontend service in compose | No `frontend` service in `infra/docker-compose.yml`; `NEXT_PUBLIC_API_URL` set by hand | Add a frontend service (or document-run script) so `docker compose up` is genuinely full-stack | Sukhmani |
+| 7 | Dedicated end-to-end chain test | Chain covered piecewise across `test_api.py` flows, `test_audit_chain.py`, `test_api_persistence.py` | One `test_integration_chain.py` asserting full pipeline + contiguous `prev_hash` chain in a single run (Task 3 as specified) | Sukhmani |
 
 ---
 
@@ -108,7 +138,9 @@ All AI agents and developers implementing tasks in this roadmap must consult the
 
 ## 🎯 Active Tasks & AI Agent Prompts
 
-### [UDHAV] Task 1: Migration Scheduler Implementation
+*Status per task verified 2026-09-15. Task prompts retained below as history.*
+
+### [UDHAV] Task 1: Migration Scheduler Implementation — ✅ DONE (PR #26 merged)
 **Target Files:** `backend/app/scheduler/prioritizer.py`, `backend/tests/test_scheduler.py`
 **Dependencies:** Crypto profiles and data model (Phase 2 complete)
 
@@ -145,7 +177,7 @@ Post-quantum migration cannot happen overnight due to performance and bandwidth 
 
 ---
 
-### [UDHAV] Task 1.5: Crypto-Agile Byte Encryption
+### [UDHAV] Task 1.5: Crypto-Agile Byte Encryption — ✅ DONE (PR #25 merged)
 **Target Files:** `backend/app/crypto/engine.py`
 **Dependencies:** Crypto profiles (Phase 3 complete)
 
@@ -179,7 +211,7 @@ The current system successfully determines and persists whether a document needs
 
 ---
 
-### [UDHAV] Task 1.6: Crypto-Shredding / Erasure Implementation
+### [UDHAV] Task 1.6: Crypto-Shredding / Erasure Implementation — ✅ DONE (PR #26 merged)
 **Target Files:** `backend/app/crypto/shredder.py`
 **Dependencies:** Audit Log (Phase 2 complete), Crypto Encryption (Task 1.5)
 
@@ -211,7 +243,7 @@ When a user exercises their Right to Erasure, deleting the record from the datab
 
 ---
 
-### [SUKHMANI] Task 2: Frontend Redesign - Screens 5 & 6
+### [SUKHMANI] Task 2: Frontend Redesign - Screens 5 & 6 — 🟡 PARTIAL (redesigned screens exist in PR #24 only, not merged)
 **Target Files:** `frontend/src/app/audit/[document_id]/page.tsx`, `frontend/src/app/documents/[id]/summary/page.tsx`
 **Dependencies:** `globals.css` Design System, D3.js
 
@@ -251,7 +283,7 @@ The data logic works, but the UI is generic. The Q-AEGIS Shield platform require
 
 ---
 
-### [SUKHMANI] Task 2.5: Frontend Crypto-Shredding Wire-up
+### [SUKHMANI] Task 2.5: Frontend Crypto-Shredding Wire-up — ✅ DONE (PR #26 merged; redesigned version in PR #24)
 **Target Files:** `frontend/src/lib/api/client.ts`, `frontend/src/app/documents/[id]/summary/page.tsx`
 **Dependencies:** Backend Crypto-Shredding (Task 1.6 complete)
 
@@ -288,7 +320,7 @@ The backend API for irreversible key destruction (`POST /api/v1/crypto-shredding
 
 ---
 
-### [SUKHMANI] Task 3: Cross-Module Integration Tests
+### [SUKHMANI] Task 3: Cross-Module Integration Tests — 🟡 PARTIAL (chain covered piecewise; dedicated single-run suite missing, see Needs to Be Connected #7)
 **Target Files:** `backend/tests/test_integration_chain.py`, `frontend/src/**/*.test.tsx`
 **Dependencies:** All backend modules (Phase 1-4) complete.
 
@@ -324,7 +356,7 @@ The individual modules (Classification, Policy, Crypto) have unit tests, but the
 
 ---
 
-### [SUKHMANI] Task 4: Sensitivity Classification ML Model
+### [SUKHMANI] Task 4: Sensitivity Classification ML Model — ❌ BLOCKED (no labelled dataset, PRD §9)
 **Target Files:** `backend/app/classifier/model.py`, `backend/tests/test_classifier.py`
 **Dependencies:** Labeled Dataset (PRD NG9)
 
@@ -360,7 +392,7 @@ The current classifier uses a static stub. We now have a labeled dataset to trai
 
 ---
 
-### [ABHINAV] Task 5: Multi-Agent Risk Orchestration
+### [ABHINAV] Task 5: Multi-Agent Risk Orchestration — ✅ DONE (PR #25 merged; implemented as `backend/app/agents/graph.py`)
 **Target Files:** `backend/app/agents/orchestrator.py`
 **Dependencies:** LangGraph, Trust Score Computation (Phase 3 complete)
 
@@ -392,7 +424,7 @@ The Trust Engine currently receives mocked caller-asserted inputs. We need to re
 
 ---
 
-### [ABHINAV] Task 6: Event Bus & Async Ingestion
+### [ABHINAV] Task 6: Event Bus & Async Ingestion — ✅ DONE (PR #25 merged)
 **Target Files:** `backend/app/api/events.py`, `infra/docker-compose.yml`
 **Dependencies:** Redis (already running)
 
@@ -423,7 +455,7 @@ Currently, risk scores are triggered directly by synchronous API calls. To achie
 
 ---
 
-### [ABHINAV] Task 7: Agentic RAG Pipeline
+### [ABHINAV] Task 7: Agentic RAG Pipeline — 🟡 PARTIAL (pipeline done, PR #28; embeddings still `stub-hash-v1`, see Needs to Be Connected #3)
 **Target Files:** `backend/app/rag/pipeline.py`
 **Dependencies:** `pgvector`
 
@@ -456,7 +488,7 @@ Users need to ask natural-language questions about security events and receive a
 
 ---
 
-### [ABHINAV] Task 8: Knowledge Graph Integration
+### [ABHINAV] Task 8: Knowledge Graph Integration — 🟡 PARTIAL (query engine done, PR #28; event-bus sync missing, see Needs to Be Connected #2)
 **Target Files:** `backend/app/graph/neo4j_client.py`
 **Dependencies:** Neo4j (already running)
 
@@ -505,5 +537,5 @@ Relational databases fail at multi-hop queries. We need a graph to link employee
 - PRs touching `crypto/`, `policy/`, or `audit/` require Udhav's review.
 
 ---
-*Last Updated: 2026-09-12*
+*Last Updated: 2026-09-15 (status tables, integration status, per-task statuses, and wiring-gap table verified against code and merged PRs; task prompts retained as history)*
 *Aligns with Phase 4/5 of SPEC.md*

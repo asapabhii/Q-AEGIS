@@ -17,6 +17,7 @@ import type {
   CryptoProfileType,
   DocumentSnapshot,
   SensitivityLabel,
+  UserRole,
 } from "@/lib/api/types";
 
 const HIGH_RISK_THRESHOLD = 0.5;

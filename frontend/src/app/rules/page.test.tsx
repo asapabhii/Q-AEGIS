@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RuleBuilderScreen } from "./page";
 import {
@@ -7,7 +7,7 @@ import {
   createPolicyRule,
   testPolicyRule,
 } from "@/lib/api/client";
-import type { PolicyRuleResponse, PolicyRuleTestResponse } from "@/lib/api/types";
+import type { PolicyRuleResponse, PolicyRuleTestResponse, UserRole } from "@/lib/api/types";
 import { RoleProvider, useRole } from "@/lib/context/RoleContext";
 
 function RoleWrapper({ children }: { children: React.ReactNode }) {
@@ -16,7 +16,7 @@ function RoleWrapper({ children }: { children: React.ReactNode }) {
     <>
       <select 
         value={role} 
-        onChange={(e) => setRole(e.target.value as any)} 
+        onChange={(e) => setRole(e.target.value as UserRole)} 
         aria-label="Role"
       >
         <option value="compliance_officer">compliance_officer</option>
@@ -85,9 +85,9 @@ const expectedBody = {
 };
 
 async function fillReadyForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(
+  fireEvent.change(
     screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i),
-    "Deny restricted"
+    { target: { value: "Deny restricted" } }
   );
   await user.selectOptions(screen.getByLabelText(/^value$/i), "RESTRICTED");
 }
@@ -123,9 +123,9 @@ describe("RuleBuilderScreen", () => {
   it("keeps both actions disabled for a whitespace-only name", async () => {
     const user = userEvent.setup();
     render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
-    await user.type(
+    fireEvent.change(
       screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i),
-      "   "
+      { target: { value: "   " } }
     );
     await user.selectOptions(screen.getByLabelText(/^value$/i), "RESTRICTED");
     expect(screen.getByRole("button", { name: /test rule/i })).toBeDisabled();
@@ -174,7 +174,7 @@ describe("RuleBuilderScreen", () => {
     await user.click(screen.getByRole("button", { name: /add condition/i }));
     await user.selectOptions(screen.getAllByLabelText(/^field$/i)[1], "trust_score");
     await user.selectOptions(screen.getAllByLabelText(/^operator$/i)[1], "lte");
-    await user.type(screen.getAllByLabelText(/^value$/i)[1], "0.4");
+    fireEvent.change(screen.getAllByLabelText(/^value$/i)[1], { target: { value: "0.4" } });
     await user.click(screen.getByRole("button", { name: /deploy rule/i }));
 
     expect(mockCreate).toHaveBeenCalledWith(
