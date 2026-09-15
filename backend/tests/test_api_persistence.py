@@ -1861,4 +1861,3 @@ def test_reading_the_inventory_writes_nothing(
     assert len(rows(db_session, PolicyDecision)) == decisions_before
     assert len(rows(db_session, AuditLog)) == audit_before
     assert len(rows(db_session, Document)) == documents_before
-
