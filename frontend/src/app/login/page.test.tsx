@@ -59,7 +59,9 @@ describe("LoginPage", () => {
       new ApiError(401, "Unauthorized", { detail: "Invalid email or password." })
     );
     render(<LoginPage />);
+    await user.clear(screen.getByLabelText(/^email$/i));
     await user.type(screen.getByLabelText(/^email$/i), "user@dev.qaegis.local");
+    await user.clear(screen.getByLabelText(/^password$/i));
     await user.type(screen.getByLabelText(/^password$/i), "wrong-password");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
     expect(

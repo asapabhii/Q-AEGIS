@@ -8,7 +8,24 @@ import {
   testPolicyRule,
 } from "@/lib/api/client";
 import type { PolicyRuleResponse, PolicyRuleTestResponse } from "@/lib/api/types";
-import { RoleProvider } from "@/lib/context/RoleContext";
+import { RoleProvider, useRole } from "@/lib/context/RoleContext";
+
+function RoleWrapper({ children }: { children: React.ReactNode }) {
+  const { role, setRole } = useRole();
+  return (
+    <>
+      <select 
+        value={role} 
+        onChange={(e) => setRole(e.target.value as any)} 
+        aria-label="Role"
+      >
+        <option value="compliance_officer">compliance_officer</option>
+        <option value="security_admin">security_admin</option>
+      </select>
+      {children}
+    </>
+  );
+}
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/client")>();
@@ -86,7 +103,7 @@ describe("RuleBuilderScreen", () => {
 
   it("keeps test and save disabled until name and one condition are filled", async () => {
     const user = userEvent.setup();
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     const testBtn = screen.getByRole("button", { name: /test rule/i });
     const saveBtn = screen.getByRole("button", { name: /deploy rule/i });
     expect(testBtn).toBeDisabled();
@@ -105,7 +122,7 @@ describe("RuleBuilderScreen", () => {
 
   it("keeps both actions disabled for a whitespace-only name", async () => {
     const user = userEvent.setup();
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     await user.type(
       screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i),
       "   "
@@ -118,7 +135,7 @@ describe("RuleBuilderScreen", () => {
   it("tests without calling createPolicyRule", async () => {
     const user = userEvent.setup();
     mockTest.mockResolvedValueOnce(sampleTest);
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     await fillReadyForm(user);
     await user.click(screen.getByRole("button", { name: /test rule/i }));
 
@@ -133,7 +150,7 @@ describe("RuleBuilderScreen", () => {
   it("saves the rule without calling testPolicyRule", async () => {
     const user = userEvent.setup();
     mockCreate.mockResolvedValueOnce(sampleSaved);
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     await fillReadyForm(user);
     await user.click(screen.getByRole("button", { name: /deploy rule/i }));
 
@@ -152,7 +169,7 @@ describe("RuleBuilderScreen", () => {
         all: [sampleLeaf, { field: "trust_score", op: "lte", value: 0.4 }],
       },
     });
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     await fillReadyForm(user);
     await user.click(screen.getByRole("button", { name: /add condition/i }));
     await user.selectOptions(screen.getAllByLabelText(/^field$/i)[1], "trust_score");
@@ -184,7 +201,7 @@ describe("RuleBuilderScreen", () => {
           "A rule with this name already exists, or another active rule already has this priority.",
       })
     );
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     await fillReadyForm(user);
     await user.click(screen.getByRole("button", { name: /deploy rule/i }));
     expect(
@@ -197,9 +214,9 @@ describe("RuleBuilderScreen", () => {
     const user = userEvent.setup();
     mockTest.mockResolvedValueOnce(sampleTest);
     mockCreate.mockResolvedValueOnce(sampleSaved);
-    render(<RoleProvider><RuleBuilderScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
     await user.selectOptions(
-      screen.getByDisplayValue("Compliance Officer"),
+      screen.getByRole("combobox", { name: "Role" }),
       "security_admin"
     );
     await fillReadyForm(user);

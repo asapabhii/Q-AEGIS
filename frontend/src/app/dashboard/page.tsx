@@ -53,8 +53,17 @@ function formatScore(value: number, digits = 2): string {
   return value.toFixed(digits);
 }
 
+const DASHBOARD_ALLOWED_ROLES: UserRole[] = [
+  "security_admin",
+  "security_analyst",
+  "auditor",
+  "ciso",
+  "engineer",
+];
+
 export default function RiskDashboardPage() {
-  const { role } = useRole();
+  const { role: contextRole } = useRole();
+  const role = DASHBOARD_ALLOWED_ROLES.includes(contextRole) ? contextRole : "security_admin";
   const [documents, setDocuments] = useState<DocumentSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -1,6 +1,4 @@
-"""Tests for the crypto-selector stub.
-
-This tests a stub implementation.
+"""Tests for the calibrated crypto selector.
 
 SECURITY CAVEAT: liboqs is NOT independently audited, and OQS-OpenSSL is
 documented by its own maintainers as development and interop-testing only, not
@@ -13,21 +11,23 @@ import math
 import pytest
 
 from app.crypto import selector
-from app.crypto.selector import select_crypto_profile
+from app.crypto.selector import SELECTOR_VERSION, select_crypto_profile
 from app.db.enums import CryptoProfileType
 
 
-def test_crypto_selector_is_stub() -> None:
-    """The module and function are explicitly labeled as a stub."""
+def test_crypto_selector_is_not_labeled_as_stub() -> None:
+    """The threshold selector has a documented policy-band calibration."""
     assert selector.__doc__ is not None
-    assert "stub" in selector.__doc__.lower()
+    assert "stub" not in selector.__doc__.lower()
+    assert "policy-calibrated" in selector.__doc__.lower()
     assert select_crypto_profile.__doc__ is not None
-    assert "stub" in select_crypto_profile.__doc__.lower()
+    assert "stub" not in select_crypto_profile.__doc__.lower()
+    assert SELECTOR_VERSION == "trust-crypto-policy-bands-1.0.0"
 
 
 def test_select_crypto_profile_returns_the_enum() -> None:
     """Callers get CryptoProfileType, not a raw string they could misspell."""
-    result = select_crypto_profile(0.5)
+    result = select_crypto_profile(0.51)
     assert result is CryptoProfileType.HYBRID
     assert result.value == "hybrid"
 
@@ -35,13 +35,13 @@ def test_select_crypto_profile_returns_the_enum() -> None:
 def test_select_crypto_profile_boundaries() -> None:
     """Every published boundary resolves toward more protection."""
     assert select_crypto_profile(0.0) is CryptoProfileType.POST_QUANTUM
-    assert select_crypto_profile(0.39) is CryptoProfileType.POST_QUANTUM
-    assert select_crypto_profile(0.4) is CryptoProfileType.POST_QUANTUM
-    assert select_crypto_profile(0.41) is CryptoProfileType.HYBRID
+    assert select_crypto_profile(0.49) is CryptoProfileType.POST_QUANTUM
+    assert select_crypto_profile(0.5) is CryptoProfileType.POST_QUANTUM
+    assert select_crypto_profile(0.51) is CryptoProfileType.HYBRID
 
-    assert select_crypto_profile(0.79) is CryptoProfileType.HYBRID
-    assert select_crypto_profile(0.8) is CryptoProfileType.HYBRID
-    assert select_crypto_profile(0.81) is CryptoProfileType.AES256
+    assert select_crypto_profile(0.84) is CryptoProfileType.HYBRID
+    assert select_crypto_profile(0.85) is CryptoProfileType.HYBRID
+    assert select_crypto_profile(0.86) is CryptoProfileType.AES256
     assert select_crypto_profile(1.0) is CryptoProfileType.AES256
 
 

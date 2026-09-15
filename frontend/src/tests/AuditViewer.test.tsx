@@ -42,7 +42,7 @@ describe("AuditViewer", () => {
     // Return an unresolved promise to keep it in loading state
     vi.mocked(listAuditEntries).mockReturnValue(new Promise(() => {}));
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
-    expect(screen.getByText(/INITIALIZING FORENSIC DECRYPTION/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading audit trail/i)).toBeInTheDocument();
   });
 
   it("renders audit chain after loading", async () => {
@@ -80,11 +80,11 @@ describe("AuditViewer", () => {
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
 
     await waitFor(() => {
-      expect(screen.queryByText(/INITIALIZING FORENSIC DECRYPTION/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Loading audit trail/i)).not.toBeInTheDocument();
     });
 
     // Check header
-    expect(screen.getByText(/FORENSIC INSPECTION FOR DOCUMENT_ID/i)).toBeInTheDocument();
+    expect(screen.getByText(/Forensic inspection for document/i)).toBeInTheDocument();
     expect(screen.getByText(documentId)).toBeInTheDocument();
 
     // Check D3 mock is rendered
@@ -126,22 +126,22 @@ describe("AuditViewer", () => {
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
 
     await waitFor(() => {
-      expect(screen.queryByText(/INITIALIZING FORENSIC DECRYPTION/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Loading audit trail/i)).not.toBeInTheDocument();
     });
 
     // Check that button is present
-    const verifyButton = screen.getByRole("button", { name: /VERIFY CHAIN INTEGRITY/i });
+    const verifyButton = screen.getByRole("button", { name: /Verify Chain Integrity/i });
     expect(verifyButton).toBeInTheDocument();
 
     // Click to verify
     fireEvent.click(verifyButton);
     
     // Status should say verifying
-    expect(screen.getByText(/VERIFYING PROOFS.../i)).toBeInTheDocument();
+    expect(screen.getByText(/Verifying/i)).toBeInTheDocument();
     
     // Wait for validation to finish (1 second timer)
     await waitFor(() => {
-      expect(screen.getByText(/SYS: VERIFIED/i)).toBeInTheDocument();
+      expect(screen.getByText(/Verified/i)).toBeInTheDocument();
     }, { timeout: 1500 });
   });
 
@@ -180,14 +180,14 @@ describe("AuditViewer", () => {
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
 
     await waitFor(() => {
-      expect(screen.queryByText(/INITIALIZING FORENSIC DECRYPTION/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Loading audit trail/i)).not.toBeInTheDocument();
     });
 
-    const verifyButton = screen.getByRole("button", { name: /VERIFY CHAIN INTEGRITY/i });
+    const verifyButton = screen.getByRole("button", { name: /Verify Chain Integrity/i });
     fireEvent.click(verifyButton);
     
     await waitFor(() => {
-      expect(screen.getByText(/SYS: TAMPERED/i)).toBeInTheDocument();
+      expect(screen.getByText("Compromised")).toBeInTheDocument();
     }, { timeout: 1500 });
   });
 });

@@ -4,7 +4,24 @@ import userEvent from "@testing-library/user-event";
 import { OverrideScreen } from "./page";
 import { ApiError, getDocument, overrideClassification } from "@/lib/api/client";
 import type { DocumentSnapshot, ManualOverrideResponse } from "@/lib/api/types";
-import { RoleProvider } from "@/lib/context/RoleContext";
+import { RoleProvider, useRole } from "@/lib/context/RoleContext";
+
+function RoleWrapper({ children }: { children: React.ReactNode }) {
+  const { role, setRole } = useRole();
+  return (
+    <>
+      <select 
+        value={role} 
+        onChange={(e) => setRole(e.target.value as any)} 
+        aria-label="Role"
+      >
+        <option value="security_analyst">security_analyst</option>
+        <option value="security_admin">security_admin</option>
+      </select>
+      {children}
+    </>
+  );
+}
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/client")>();
@@ -264,7 +281,7 @@ describe("OverrideScreen", () => {
   it("passes the selected role to load and to persist", async () => {
     const user = userEvent.setup();
     mockOverride.mockResolvedValueOnce(sampleResult);
-    render(<RoleProvider><OverrideScreen /></RoleProvider>);
+    render(<RoleProvider><RoleWrapper><OverrideScreen /></RoleWrapper></RoleProvider>);
     await user.selectOptions(
       screen.getByRole("combobox"),
       "security_admin"
