@@ -13,6 +13,21 @@ Postgres/Redis/API TLS landed via #27)_
 
 ## Log
 
+### 2026-09-15: after_hours derives from org timezone when omitted
+
+Decided by: Abhinav, with Codex implementation support, closing a small Track C
+behavioral hardening gap for `SPEC.md` 3.3 / PRD FR-2.
+
+`after_hours` remains in the stored risk snapshot so historical rows are still a
+closed five-field record. The API now derives it when callers omit the field,
+using an IANA `org_timezone` value that defaults to `Asia/Kolkata`. Business
+hours are Monday-Friday, 09:00 inclusive to 18:00 exclusive in that timezone.
+Existing callers may still send `after_hours` explicitly for compatibility.
+
+Rejected: reopening Redis Streams/Kafka or policy engine decisions for this
+small hardening item. Rejected: deriving from a naive timestamp; `accessed_at`
+must stay timezone-aware.
+
 ### 2026-09-15: Trust-to-action and trust-to-crypto policy bands calibrated
 
 Decided by: Abhinav, with Codex implementation support, closing the Track A
