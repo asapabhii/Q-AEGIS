@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, String, Text, text
+from sqlalchemy import ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,12 +18,26 @@ from app.db.base import Base, created_timestamp, uuid_primary_key
 class RagChunk(Base):
     """One embedded text chunk used by the Verifier-backed ask pipeline.
 
-    Embeddings in this phase are the labelled stub ``stub-hash-v1``; the
-    ``embedding_model`` column records that so a real embedder can be swapped
-    without silent incompatibility.
+    ``embedding_model`` records which model produced the vector (e.g.
+    ``BAAI/bge-large-en-v1.5`` in production, or ``deterministic-hash-v1`` for
+    hermetic tests) so a re-embed can be detected and no query mixes incompatible
+    vector spaces. The column width must match ``RAG_EMBEDDING_DIMS``.
     """
 
     __tablename__ = "rag_chunks"
+
+    __table_args__ = (
+        # HNSW cosine index matching the '<=>' ordering in similarity_search.
+        # Declared on the model (not only in the migration) so the model-vs-DB
+        # drift check sees it. Keep in sync with the rag_embeddings_1024_hnsw
+        # migration.
+        Index(
+            "ix_rag_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[UUID] = uuid_primary_key()
     document_id: Mapped[UUID | None] = mapped_column(
@@ -34,7 +48,7 @@ class RagChunk(Base):
     source_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     source_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(64), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1024), nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(80), nullable=False)
     # Column name matches the migration / data-dictionary; ``metadata`` is
     # reserved on DeclarativeBase.

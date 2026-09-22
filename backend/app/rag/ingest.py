@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import documents as documents_repo
 from app.db.repositories import inventory as inventory_repo
-from app.rag.embeddings import EMBEDDING_MODEL_STUB
+from app.rag.embeddings import embedding_model_name
 from app.rag.schemas import RagIngestResult
 from app.rag.store import delete_chunks_for_document, upsert_chunk
 
@@ -69,5 +69,5 @@ def ingest_document_records(session: Session, document_id: UUID) -> RagIngestRes
     return RagIngestResult(
         document_id=document_id,
         chunks_written=written,
-        embedding_model=EMBEDDING_MODEL_STUB,
+        embedding_model=embedding_model_name(),
     )
