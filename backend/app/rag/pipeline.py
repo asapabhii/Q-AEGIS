@@ -12,7 +12,7 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.orm import Session
 
-from app.rag.embeddings import EMBEDDING_MODEL_STUB
+from app.rag.embeddings import embedding_model_name
 from app.rag.schemas import RagAnswer, RagCitation
 from app.rag.store import similarity_search
 
@@ -187,6 +187,6 @@ def ask_question(
         verified=verified,
         plan=final.get("plan") or "",
         citations=citations if verified else [],
-        embedding_model=EMBEDDING_MODEL_STUB,
+        embedding_model=embedding_model_name(),
         refusal_reason=final.get("refusal_reason"),
     )

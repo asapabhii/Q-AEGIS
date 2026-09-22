@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.rag.embeddings import EMBEDDING_MODEL_STUB, embed_text
+from app.rag.embeddings import embed_text, embedding_model_name
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -47,7 +47,7 @@ def upsert_chunk(
             "source_id": source_id,
             "content": content,
             "embedding": _vector_literal(embedding),
-            "embedding_model": EMBEDDING_MODEL_STUB,
+            "embedding_model": embedding_model_name(),
             "metadata": __import__("json").dumps(metadata or {}),
         },
     )
