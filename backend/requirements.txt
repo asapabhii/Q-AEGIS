@@ -54,3 +54,9 @@ neo4j==5.28.1
 
 # Vector store for FR-11 RAG (pgvector type + SQLAlchemy VECTOR).
 pgvector==0.4.1
+
+# Real RAG embeddings for FR-11, SPEC.md 3.12. fastembed runs transformer
+# embedding models through ONNX Runtime (no PyTorch). Default model
+# BAAI/bge-large-en-v1.5 (1024-dim); weights download once, cache on disk, then
+# run fully offline with no API key. Re-pin and re-run the RAG tests after a bump.
+fastembed==0.8.0
