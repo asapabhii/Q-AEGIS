@@ -82,6 +82,10 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Host .env often points at a live Redis (possibly TLS). Tests must not
     # start the risk-consumer thread against that instance.
     monkeypatch.setenv("REDIS_URL", "")
+    # Hermetic RAG: the deterministic embedding backend keeps the suite offline
+    # and fast (no model download). The real fastembed model is exercised only by
+    # the opt-in test gated on RUN_REAL_EMBED_TESTS.
+    monkeypatch.setenv("RAG_EMBEDDING_BACKEND", "deterministic")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

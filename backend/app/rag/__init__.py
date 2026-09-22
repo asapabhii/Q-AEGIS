@@ -2,11 +2,10 @@
 
 Four LangGraph nodes — Planner, Retriever, Reasoner, Verifier — answer
 natural-language questions only when grounded in retrieved system records.
-Vector store is pgvector (see ``docs/decisions.md``). Embeddings are a
-deterministic local stub until a labelled embedding model is wired; the stub
-is labelled as such in code and tests.
-
-Owner: Abhinav (``WORK_DIVISION.md``).
+Vector store is pgvector (see ``docs/decisions.md``). Embeddings are real
+transformer vectors via ``fastembed`` (default ``BAAI/bge-large-en-v1.5``,
+1024-dim); a deterministic offline backend is used only for hermetic tests. See
+``app.rag.embeddings``.
 """
 
 from app.rag.ingest import ingest_document_records
