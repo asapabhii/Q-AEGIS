@@ -34,6 +34,25 @@ def latest_for_document(session: Session, document_id: UUID) -> CryptoProfile | 
     ).one_or_none()
 
 
+def exists_for_trust_score(session: Session, trust_score_id: UUID) -> bool:
+    """Return whether any protection profile is already bound to ``trust_score_id``.
+
+    The idempotency key for asynchronous reselection: the synchronous pipeline
+    (:func:`app.risk_engine.pipeline.run_full_assessment`) appends a profile for
+    the trust score it produces, so the ``trust.updated`` consumer must skip that
+    same trust score rather than append a duplicate. Also guards against
+    at-least-once redelivery of one event.
+    """
+    return (
+        session.scalars(
+            select(CryptoProfile.id)
+            .where(CryptoProfile.trust_score_id == trust_score_id)
+            .limit(1)
+        ).one_or_none()
+        is not None
+    )
+
+
 def append_profile(
     session: Session,
     *,
