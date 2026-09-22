@@ -7,11 +7,45 @@
 # mismatch means the image runs an interpreter no test ever exercised.
 
 # --------------------------------------------------------------------------
-# Stage 1: build dependencies into a self-contained virtualenv.
+# Stage 1: build dependencies into a self-contained virtualenv, and compile
+# the native liboqs shared library that the post-quantum crypto depends on.
 # --------------------------------------------------------------------------
 FROM python:3.13-slim AS builder
 
 WORKDIR /build
+
+# liboqs-python (see requirements.txt) is only a thin ctypes wrapper: on import
+# it loads a NATIVE liboqs shared object, and if it cannot find one it tries to
+# git-clone and CMake-build liboqs *at runtime*. The slim runtime image has no
+# compiler, so that runtime build fails and hybrid/PQ encryption then fails
+# closed. We therefore build liboqs here, at image-build time, and ship the
+# resulting .so — the runtime never compiles anything.
+#
+# Keep LIBOQS_VERSION in step with the liboqs-python pin in requirements.txt:
+# liboqs-python resolves the native version from its own package version, so a
+# mismatch would mean the wrapper and the library disagree on the ABI.
+ARG LIBOQS_VERSION=0.16.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git cmake ninja-build gcc libc6-dev libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --global http.version HTTP/1.1 \
+    && for attempt in 1 2 3 4 5; do \
+         echo "liboqs clone attempt ${attempt}" \
+         && git clone --depth 1 --branch "${LIBOQS_VERSION}" \
+              https://github.com/open-quantum-safe/liboqs /tmp/liboqs \
+         && break; \
+         rm -rf /tmp/liboqs; sleep 5; \
+       done \
+    && test -d /tmp/liboqs/.git \
+    && cmake -S /tmp/liboqs -B /tmp/liboqs/build -GNinja \
+        -DBUILD_SHARED_LIBS=ON \
+        -DOQS_BUILD_ONLY_LIB=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/liboqs \
+    && cmake --build /tmp/liboqs/build --parallel \
+    && cmake --install /tmp/liboqs/build \
+    && rm -rf /tmp/liboqs
 
 # Copied on its own, before the application code, so this layer is reused as
 # long as dependencies are unchanged. Copying the source first would reinstall
@@ -22,14 +56,25 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
+# Prove the native library loads under the wrapper during the build, so a
+# broken liboqs build fails the image here rather than at first PQ request.
+# ML-KEM-1024 and ML-DSA-87 are the algorithms the crypto engine requires.
+ENV OQS_INSTALL_PATH=/opt/liboqs
+RUN /opt/venv/bin/python -c "import oqs; kem=oqs.get_enabled_kem_mechanisms(); sig=oqs.get_enabled_sig_mechanisms(); assert 'ML-KEM-1024' in kem, 'ML-KEM-1024 missing'; assert 'ML-KEM-768' in kem, 'ML-KEM-768 missing'; assert 'ML-DSA-87' in sig, 'ML-DSA-87 missing'; print('liboqs OK: ML-KEM + ML-DSA enabled')"
+
 # --------------------------------------------------------------------------
 # Stage 2: runtime.
 # --------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
 
+# OQS_INSTALL_PATH tells liboqs-python where the prebuilt native library lives
+# (it loads $OQS_INSTALL_PATH/lib/liboqs.so), so the wrapper never attempts a
+# runtime compile. LD_LIBRARY_PATH lets liboqs' own transitive deps resolve.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PATH="/opt/venv/bin:$PATH" \
+    OQS_INSTALL_PATH=/opt/liboqs \
+    LD_LIBRARY_PATH=/opt/liboqs/lib
 
 # Run as an unprivileged user. A container process does not need root, and
 # defaulting to it turns a container escape into a host-root problem.
@@ -37,6 +82,9 @@ RUN groupadd --system --gid 1001 qaegis \
     && useradd --system --uid 1001 --gid qaegis --no-create-home qaegis
 
 COPY --from=builder /opt/venv /opt/venv
+# The compiled post-quantum library. Without this the PQ/hybrid profiles fail
+# closed at runtime (LiboqsUnavailableError); AES-256 would still work.
+COPY --from=builder /opt/liboqs /opt/liboqs
 
 WORKDIR /srv
 COPY --chown=qaegis:qaegis app ./app
