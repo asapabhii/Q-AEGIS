@@ -11,6 +11,7 @@ from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import risk as risk_repo
 from app.db.repositories import trust as trust_repo
+from app.event_bus import EventType, schedule_publish
 from app.trust_engine.consensus import IncompleteAgentSetError, combine
 from app.trust_engine.schemas import TrustScoreRequest, TrustScoreResponse
 
@@ -79,6 +80,20 @@ def compute_trust_score(
             trust_score_id=row.id,
             output_ids=output_ids,
         ),
+    )
+    # FR-6 reselect signal. Held until this request's transaction commits, then
+    # published to the bus; the trust.updated consumer reselects the crypto
+    # profile if this consensus moved the protection band. Standalone trust
+    # scores (this route) do not touch crypto synchronously, unlike the full
+    # assessment pipeline, so this event is how their reselect happens.
+    schedule_publish(
+        session,
+        EventType.TRUST_UPDATED,
+        {
+            "document_id": str(risk_row.document_id),
+            "trust_score_id": str(row.id),
+            "consensus_value": str(result.consensus_value),
+        },
     )
     return TrustScoreResponse.from_row(
         trust_score_id=row.id,

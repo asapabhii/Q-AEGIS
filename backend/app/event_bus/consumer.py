@@ -47,6 +47,15 @@ def _handle_envelope(envelope: Any) -> None:
             tick_at = tick_raw
         run_scheduled_recompute(now=tick_at)
         return
+    if envelope.event_type is EventType.TRUST_UPDATED:
+        # FR-6 async reselect: a trust score written outside the synchronous
+        # pipeline (e.g. POST /trust-scores) can move the protection band. The
+        # reselect is idempotent by trust_score_id, so pipeline-produced scores
+        # (which already have a profile) and redelivered events are no-ops.
+        from app.crypto.reselect import reselect_from_trust_updated_payload
+
+        reselect_from_trust_updated_payload(envelope.payload)
+        return
     # ``risk.trigger`` is scored synchronously by ``POST /risk-triggers``.
     # Other event types are ignored by this worker.
 
