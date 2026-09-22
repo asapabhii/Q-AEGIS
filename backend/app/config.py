@@ -104,8 +104,17 @@ class Settings(BaseSettings):
     # PEM CA for bolt+s:// (local compose). Optional when using bolt+ssc://.
     qaegis_neo4j_ssl_ca_certs: str | None = None
 
-    # RAG embedding width for the stub hasher + pgvector column, SPEC.md 3.12.
-    rag_embedding_dims: int = Field(default=64, ge=8, le=1024)
+    # RAG embeddings, SPEC.md 3.12 / FR-11.
+    # Backend: "fastembed" (real transformer embeddings, production default) or
+    # "deterministic" (hash-based, non-semantic; tests / air-gapped smoke only).
+    rag_embedding_backend: str = "fastembed"
+    # fastembed model id. Default is a strong CPU-deployable retrieval model.
+    # Its native dimension MUST equal rag_embedding_dims and the rag_chunks
+    # pgvector column width.
+    rag_embedding_model: str = "BAAI/bge-large-en-v1.5"
+    # Embedding width. Must match the model (bge-large-en-v1.5 = 1024) and the
+    # rag_chunks.embedding vector(N) column.
+    rag_embedding_dims: int = Field(default=1024, ge=8, le=2000)
 
     # Sensitivity classifier, SPEC.md 3.2.
     # A classification scoring below this threshold is escalated to the more
