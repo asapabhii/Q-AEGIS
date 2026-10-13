@@ -71,7 +71,7 @@ def upsert_chunk(
             "content": content,
             "embedding": _vector_literal(embedding),
             "embedding_model": embedding_model_name(),
-            "metadata": __import__("json").dumps(metadata or {}),
+            "metadata": json.dumps(metadata or {}),
         },
     )
     return chunk_id

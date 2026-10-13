@@ -42,6 +42,7 @@ def user_id(role: str) -> str:
         _USER_ID_CACHE[role] = resp.json()["id"]
     return _USER_ID_CACHE[role]
 
+
 CABLE = (
     "CONFIDENTIAL EMBASSY CABLE. Subject: bilateral negotiations on trade "
     "tariffs and sanctions policy. The ambassador met privately with the "
@@ -283,7 +284,8 @@ def step_crypto() -> None:
     check(
         "crypto profile",
         ok,
-        f"profile_type={body.get('profile_type')} consensus={body.get('consensus_value')}",
+        "profile_type="
+        f"{body.get('profile_type')} consensus={body.get('consensus_value')}",
     )
 
 
@@ -349,7 +351,8 @@ def step_graph() -> None:
     )
     ok = r.status_code == 201
     detail = (
-        f"nodes={r.json().get('nodes_upserted')} rels={r.json().get('relationships_upserted')}"
+        f"nodes={r.json().get('nodes_upserted')} "
+        f"rels={r.json().get('relationships_upserted')}"
         if ok
         else f"{r.status_code} {r.text[:200]}"
     )
@@ -364,7 +367,8 @@ def step_graph() -> None:
     check(
         "graph document paths",
         r.status_code == 200,
-        f"{r.status_code} paths={len(r.json()) if r.status_code == 200 else r.text[:120]}",
+        f"{r.status_code} "
+        f"paths={len(r.json()) if r.status_code == 200 else r.text[:120]}",
     )
 
 
@@ -452,7 +456,8 @@ def step_audit() -> None:
     check(
         "audit verify (doc a chain)",
         ok,
-        f"{r.status_code} valid={r.json().get('is_valid') if r.status_code==200 else r.text[:120]}",
+        f"{r.status_code} "
+        f"valid={r.json().get('is_valid') if r.status_code == 200 else r.text[:120]}",
     )
 
     # system chain (document_id omitted) -- the chain the migration-rank +
@@ -462,8 +467,9 @@ def step_audit() -> None:
     check(
         "audit verify (system chain)",
         ok,
-        f"{r.status_code} valid={r.json().get('is_valid') if r.status_code==200 else r.text[:160]} "
-        f"entries={r.json().get('entry_count') if r.status_code==200 else '?'}",
+        f"{r.status_code} "
+        f"valid={r.json().get('is_valid') if r.status_code == 200 else r.text[:160]} "
+        f"entries={r.json().get('entry_count') if r.status_code == 200 else '?'}",
     )
 
     # ML-DSA-87 signed checkpoint over the doc-a chain (real liboqs in container)

@@ -59,6 +59,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const sessionUser = getSessionUser();
     if (sessionUser) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setUser(sessionUser);
       setRoleState(sessionUser.role);
     } else {
