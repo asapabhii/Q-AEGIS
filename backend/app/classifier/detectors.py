@@ -58,6 +58,11 @@ def _luhn_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _luhn_ok(digits: str) -> bool:
+    """Backward-compatible alias for callers that import ``_luhn_ok``."""
+    return _luhn_valid(digits)
+
+
 def _iban_valid(candidate: str) -> bool:
     """Return True if ``candidate`` is a structurally valid IBAN (mod-97 == 1)."""
     compact = candidate.replace(" ", "").upper()
