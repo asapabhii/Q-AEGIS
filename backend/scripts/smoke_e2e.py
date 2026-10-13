@@ -110,7 +110,7 @@ def step_upload() -> None:
     detail = ""
     if ok:
         body = r.json()
-        detail = f"stored, extracted {len(body.get('extracted_text',''))} chars"
+        detail = f"stored, extracted {len(body.get('extracted_text', ''))} chars"
     else:
         detail = f"{r.status_code} {r.text[:200]}"
     check("upload doc a", ok, detail)
@@ -493,7 +493,7 @@ def step_audit() -> None:
             "audit checkpoint (ML-DSA-87 sign)",
             ok,
             f"alg={b.get('algorithm')} tree_size={b.get('tree_size')} "
-            f"sig_len={len(b.get('signature',''))} key={b.get('signing_key_id')}",
+            f"sig_len={len(b.get('signature', ''))} key={b.get('signing_key_id')}",
         )
 
     cp = ctx.get("checkpoint_id")
@@ -530,7 +530,7 @@ def step_audit() -> None:
     check(
         "audit inclusion-proof",
         r.status_code == 200,
-        f"{r.status_code} {r.text[:120] if r.status_code!=200 else 'ok'}",
+        f"{r.status_code} {r.text[:120] if r.status_code != 200 else 'ok'}",
     )
 
     n = ctx.get("doc_a_entry_count") or 1
