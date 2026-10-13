@@ -57,7 +57,11 @@ class ClassificationMetadata(Base):
     # places, and three would store a different number than the API returned for
     # the same classification. See docs/data-dictionary.md, deviation 5.
     confidence_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
-    model_version: Mapped[str] = mapped_column(String(30), nullable=False)
+    # 64, not 30: a trained-artifact version such as
+    # "wikileaks-cables-hashing-svm-1.0.0" (34 chars) overflows a 30-char column
+    # and fails the classify write closed. The keyword fallback's shorter
+    # "stub-keyword-rules-0.1.0" masked this until the real model shipped.
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     is_defaulted: Mapped[bool] = mapped_column(nullable=False)
     classified_at: Mapped[datetime] = created_timestamp(index=True)
 

@@ -26,6 +26,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
+import opa_wasmtime.benchmark as _opa_benchmark
+
 from app.api.deps import get_db_session
 from app.config import get_settings
 from app.db.enums import UserRole
@@ -38,6 +40,23 @@ from app.db.session import (
     require_database_url,
 )
 from app.main import create_app
+
+# opa_wasmtime decorates OPAPolicy methods with a pytest-only benchmark that
+# registers atexit handlers. One decorated method is never called here, so its
+# times list is empty and the handler crashes on min([]) at interpreter exit,
+# printing a spurious traceback after an otherwise-green run. Make the stats
+# computation empty-safe so the suite exits cleanly. No production effect.
+_original_benchmark_stats = _opa_benchmark.get_benchmark_stats
+
+
+def _safe_benchmark_stats(times: list[float]) -> dict[str, float]:
+    if not times:
+        keys = ("min", "25p", "50p", "75p", "90p", "95p", "max")
+        return {key: 0.0 for key in keys}
+    return _original_benchmark_stats(times)
+
+
+_opa_benchmark.get_benchmark_stats = _safe_benchmark_stats
 
 # Required by ``seed_development_users``; never a production secret.
 os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "local-dev-only-password")
@@ -82,6 +101,9 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Host .env often points at a live Redis (possibly TLS). Tests must not
     # start the risk-consumer thread against that instance.
     monkeypatch.setenv("REDIS_URL", "")
+    # Host .env may point at a real classifier artifact. Model tests opt in
+    # explicitly so the keyword fallback path stays deterministic.
+    monkeypatch.setenv("CLASSIFIER_MODEL_PATH", "")
     # Hermetic RAG: the deterministic embedding backend keeps the suite offline
     # and fast (no model download). The real fastembed model is exercised only by
     # the opt-in test gated on RUN_REAL_EMBED_TESTS.

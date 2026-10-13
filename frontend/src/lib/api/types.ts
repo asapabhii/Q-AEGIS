@@ -242,13 +242,87 @@ export interface AuditVerifyResponse {
   document_id: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Audit checkpoints and RFC 6962 proofs — SPEC.md 3.8 (PQ-signed anchoring)
+// ---------------------------------------------------------------------------
+
+/** POST /api/v1/audit/checkpoint — request body. */
+export interface CreateCheckpointRequest {
+  /** Omit/null anchors the system chain. */
+  document_id?: string | null;
+  /** Omit anchors the full chain as it stands. */
+  tree_size?: number | null;
+}
+
+/**
+ * A Signed Tree Head: an ML-DSA-87 signature over (document_id, tree_size,
+ * signed_at, merkle_root). `public_key` is the hex key the signature verifies
+ * under; an auditor pins it out-of-band. Returned by POST /audit/checkpoint
+ * and GET /audit/checkpoints.
+ */
+export interface SignedCheckpointResponse {
+  checkpoint_id: string;
+  document_id: string | null;
+  tree_size: number;
+  merkle_root: string;
+  signed_at: string;
+  algorithm: string;
+  signature: string;
+  signing_key_id: string;
+  public_key: string;
+}
+
+/** GET /api/v1/audit/checkpoint/{id}/verify — independent re-check outcome. */
+export interface CheckpointVerificationResponse {
+  is_valid: boolean;
+  signature_valid: boolean;
+  root_matches: boolean;
+  stored_root: string;
+  recomputed_root: string;
+  tree_size: number;
+  signed_at: string;
+  algorithm: string;
+  public_key: string;
+  document_id: string | null;
+}
+
+/** GET /api/v1/audit/signing-key — the active key's public half, for pinning. */
+export interface SigningKeyResponse {
+  signing_key_id: string;
+  algorithm: string;
+  public_key: string;
+  created_at: string;
+}
+
+/** GET /api/v1/audit/inclusion-proof — RFC 6962 proof for one entry. */
+export interface InclusionProofResponse {
+  document_id: string | null;
+  leaf_index: number;
+  tree_size: number;
+  audit_path: string[];
+  leaf_hash: string;
+  root: string;
+  payload: Record<string, unknown>;
+}
+
+/** GET /api/v1/audit/consistency-proof — RFC 6962 append-only proof. */
+export interface ConsistencyProofResponse {
+  document_id: string | null;
+  old_size: number;
+  new_size: number;
+  nodes: string[];
+  old_root: string;
+  new_root: string;
+}
+
 /** POST /api/v1/assessments — full P0 pipeline. */
 export interface AssessmentRequest {
   document_id: string;
   device_id: string;
   device_is_new: boolean;
   accessed_at: string;
-  after_hours: boolean;
+  /** IANA timezone the server derives after_hours against; optional. */
+  org_timezone?: string;
   content?: string;
   ai_recommendation?: PolicyAction;
 }
@@ -443,7 +517,8 @@ export interface RiskScoreRequest {
   device_id: string;
   device_is_new: boolean;
   accessed_at: string;
-  after_hours: boolean;
+  /** IANA timezone the server derives after_hours against; optional. */
+  org_timezone?: string;
 }
 
 /** POST /api/v1/risk-scores — response body. */

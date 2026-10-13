@@ -8,6 +8,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api/client", () => ({
   listAuditEntries: vi.fn(),
+  verifyAudit: vi.fn(),
   ApiError: class MockApiError extends Error {
     status: number;
     constructor(status: number, message: string, body?: unknown) {
@@ -17,12 +18,13 @@ vi.mock("@/lib/api/client", () => ({
   },
 }));
 
-import { listAuditEntries, ApiError } from "@/lib/api/client";
+import { listAuditEntries, verifyAudit, ApiError } from "@/lib/api/client";
 import { AuditViewer } from "@/app/audit/[document_id]/page";
 import { MOCK_AUDIT_LOG } from "@/lib/api/mock-data";
 import { RoleProvider } from "@/lib/context/RoleContext";
 
 const mockListAuditEntries = vi.mocked(listAuditEntries);
+const mockVerifyAudit = vi.mocked(verifyAudit);
 
 function createApiError(message: string): ApiError {
   return new ApiError(404, message, null) as unknown as ApiError;
@@ -37,6 +39,14 @@ const MOCK_CHAIN_RESPONSE = {
 describe("Audit Viewer (FR-15)", () => {
   beforeEach(() => {
     mockListAuditEntries.mockResolvedValue(MOCK_CHAIN_RESPONSE);
+    mockVerifyAudit.mockResolvedValue({
+      is_valid: true,
+      computed_root: "abcd1234",
+      stored_root: "abcd1234",
+      end_index: MOCK_AUDIT_LOG.length - 1,
+      entry_count: MOCK_AUDIT_LOG.length,
+      document_id: "123e4567-e89b-12d3-a456-426614174001",
+    });
   });
 
   afterEach(() => {
@@ -46,8 +56,10 @@ describe("Audit Viewer (FR-15)", () => {
 
   it("shows loading state while fetching", () => {
     mockListAuditEntries.mockReturnValue(new Promise(() => {}));
-    render(<RoleProvider><AuditViewer documentId="123e4567-e89b-12d3-a456-426614174001" /></RoleProvider>);
-    expect(screen.getByText(/Loading audit trail/i)).toBeInTheDocument();
+    const { container } = render(<RoleProvider><AuditViewer documentId="123e4567-e89b-12d3-a456-426614174001" /></RoleProvider>);
+    // The in-flight state renders Skeleton placeholders (.skeleton-pulse)
+    // rather than a text spinner.
+    expect(container.querySelector(".skeleton-pulse")).toBeInTheDocument();
     cleanup();
   });
 
@@ -112,7 +124,7 @@ describe("Audit Viewer (FR-15)", () => {
     await waitFor(() => {
       expect(mockListAuditEntries).toHaveBeenCalledWith(
         "123e4567-e89b-12d3-a456-426614174001",
-        "auditor",
+        "security_admin",
       );
     });
     cleanup();

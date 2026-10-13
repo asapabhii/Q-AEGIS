@@ -13,9 +13,18 @@ here are complete and are the intended implementation.
 
 Scope note: database-level append-only enforcement for ``audit_log`` (the
 Postgres trigger rejecting UPDATE and DELETE required by ``SPEC.md`` 3.8) is a
-separate concern from these functions and is not part of this module. Inclusion
-proofs, which let an auditor verify one entry without re-reading the whole log,
-are also not implemented yet, ``verify()`` currently recomputes the full root.
+separate concern from these functions and is not part of this module.
+
+Two kinds of proof are implemented, both following RFC 6962 (Certificate
+Transparency), whose tree hash this module's construction reproduces exactly
+(design note 5). :func:`inclusion_proof` / :func:`verify_inclusion` let an
+auditor confirm that one specific entry sits at a given position under a root
+without re-reading the whole log: the proof is O(log n) sibling hashes.
+:func:`consistency_proof` / :func:`verify_consistency` prove that a later root
+is an append-only extension of an earlier one — that history was only added to,
+never rewritten — which is the property external anchoring of a root is meant to
+protect. ``verify()`` remains for whole-log recomputation; the proofs are for
+the far more common case of checking one entry or one growth step cheaply.
 
 Design choices worth not undoing:
 
@@ -39,6 +48,15 @@ Design choices worth not undoing:
    so a verifier never has to trust carried-forward state. A property test
    asserts they produce identical roots across a range of lengths. If a change
    makes them diverge, the change is wrong, not the test.
+
+5. **The tree is RFC 6962-compatible.** Promoting the odd node at each level
+   yields the same root as RFC 6962's recursive "split at the largest power of
+   two below n" tree hash, for every entry count. That equivalence is not a
+   coincidence to rely on loosely: it is what lets the inclusion and consistency
+   proofs below be the standard, widely-audited RFC 6962 algorithms rather than
+   a bespoke scheme. A property test sweeps proof generation and verification
+   against :func:`build` across every length in a range; if the constructions
+   ever diverge, those proofs would silently start lying, so the test guards it.
 """
 
 import hashlib
@@ -141,6 +159,54 @@ class VerificationResult:
     computed_root: str
     expected_root: str
     leaf_count: int
+
+
+@dataclass(frozen=True)
+class InclusionProof:
+    """A proof that one entry sits at a known position under a known root.
+
+    Holds only the leaf's position, the tree size it was proved against, and
+    the O(log n) sibling hashes on the path from that leaf to the root — never
+    the other entries. That is the entire point: an auditor holding one entry
+    can confirm it belongs to a published root without being handed, or trusting,
+    the rest of the log.
+
+    Attributes:
+        leaf_index: Zero-based position of the proved entry.
+        tree_size: Number of entries in the tree the proof is against. The path
+            is only meaningful paired with the size, because which sibling is
+            left and which is right is derived from both during verification.
+        audit_path: Sibling hashes from the leaf's level up to the root, leaf
+            first. Empty only for the single-entry tree, whose root is the leaf.
+    """
+
+    leaf_index: int
+    tree_size: int
+    audit_path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ConsistencyProof:
+    """A proof that a larger tree is an append-only extension of a smaller one.
+
+    Proves that every entry the old root committed to is still present, in the
+    same order and positions, under the new root — that the log was only
+    appended to, never rewritten or reordered. This is the guarantee that turns
+    a periodically anchored root into tamper evidence: an operator who quietly
+    edits a past entry cannot produce a consistency proof from the anchored old
+    root to their doctored new one.
+
+    Attributes:
+        old_size: Entry count of the earlier tree. Must be ``0 < old_size`` and
+            ``<= new_size`` for a non-trivial proof.
+        new_size: Entry count of the later tree.
+        nodes: The RFC 6962 consistency node hashes. Empty when the two roots
+            are trivially related (equal sizes, or an empty old tree).
+    """
+
+    old_size: int
+    new_size: int
+    nodes: tuple[str, ...]
 
 
 def canonicalize(entry: Mapping[str, Any]) -> bytes:
@@ -389,4 +455,249 @@ def verify(entries: Sequence[bytes], expected_root: str) -> VerificationResult:
         computed_root=computed.root,
         expected_root=expected_root,
         leaf_count=computed.leaf_count,
+    )
+
+
+def _largest_power_of_two_below(n: int) -> int:
+    """Return the largest power of two strictly less than ``n`` (``n >= 2``).
+
+    This is the split point RFC 6962 uses to divide a tree of ``n`` leaves into
+    a full left subtree of ``k`` leaves and a right subtree of ``n - k``. It is
+    the one arithmetic primitive both proof algorithms are built on.
+    """
+    k = 1
+    while (k << 1) < n:
+        k <<= 1
+    return k
+
+
+def _is_power_of_two(n: int) -> bool:
+    """True if ``n`` is a positive power of two."""
+    return n > 0 and (n & (n - 1)) == 0
+
+
+def _root_of_leaves(leaves: Sequence[str]) -> str:
+    """Merkle root over already-hashed leaves, using this module's construction.
+
+    Shares the exact odd-node promotion of :func:`build` so a subtree root
+    computed here is bit-for-bit what ``build`` would produce over the same
+    entries. Proof generation needs subtree roots over slices of the leaf list,
+    and re-running ``build`` (which re-hashes raw entries) is neither available
+    here nor what is wanted: the inputs are already leaf hashes.
+    """
+    if not leaves:
+        return EMPTY_ROOT
+    current = list(leaves)
+    while len(current) > 1:
+        parents = [
+            hash_internal(current[index], current[index + 1])
+            for index in range(0, len(current) - 1, 2)
+        ]
+        if len(current) % 2 == 1:
+            parents.append(current[-1])
+        current = parents
+    return current[0]
+
+
+def inclusion_proof(entries: Sequence[bytes], leaf_index: int) -> InclusionProof:
+    """Build an RFC 6962 inclusion (audit) proof for one entry.
+
+    Pure function. The system side, which holds every entry, calls this once to
+    produce the O(log n) sibling hashes an auditor then checks with
+    :func:`verify_inclusion` against nothing but the entry and a trusted root.
+
+    Args:
+        entries: The full ordered entry payloads, as :func:`canonicalize`
+            returns. Order is significant; it is part of what the root commits
+            to.
+        leaf_index: Zero-based position of the entry to prove.
+
+    Returns:
+        The :class:`InclusionProof`.
+
+    Raises:
+        ValueError: if ``leaf_index`` is outside ``0 .. len(entries) - 1``. An
+            empty log has no entry to prove, so any index fails there.
+    """
+    size = len(entries)
+    if not 0 <= leaf_index < size:
+        raise ValueError(
+            f"leaf_index {leaf_index} is out of range for {size} entr(ies)."
+        )
+    leaves = [hash_leaf(entry) for entry in entries]
+    return InclusionProof(
+        leaf_index=leaf_index,
+        tree_size=size,
+        audit_path=tuple(_audit_path(leaf_index, leaves)),
+    )
+
+
+def _audit_path(index: int, leaves: Sequence[str]) -> list[str]:
+    """RFC 6962 ``PATH(m, D[n])``: sibling hashes from a leaf up to the root."""
+    n = len(leaves)
+    if n == 1:
+        return []
+    k = _largest_power_of_two_below(n)
+    if index < k:
+        # Leaf is in the left subtree; the right subtree's root is its sibling.
+        return _audit_path(index, leaves[:k]) + [_root_of_leaves(leaves[k:])]
+    # Leaf is in the right subtree; the left subtree's root is its sibling.
+    return _audit_path(index - k, leaves[k:]) + [_root_of_leaves(leaves[:k])]
+
+
+def verify_inclusion(proof: InclusionProof, leaf_hash: str, root: str) -> bool:
+    """Check an inclusion proof against a leaf hash and a trusted root.
+
+    Reconstructs the root from ``leaf_hash`` and the proof's sibling hashes,
+    deriving each step's left/right orientation from ``leaf_index`` and
+    ``tree_size`` exactly as RFC 6962 section 2.1.1 specifies, then compares the
+    result to ``root``. Requires none of the other entries: this is what lets a
+    party who does not trust the operator verify one record cheaply.
+
+    Args:
+        proof: The proof produced by :func:`inclusion_proof`.
+        leaf_hash: The proved entry's leaf hash, i.e. ``hash_leaf(entry)`` over
+            its canonical bytes.
+        root: The root being trusted, obtained independently of the operator
+            (for example from an external anchor).
+
+    Returns:
+        True only if the entry provably sits at ``proof.leaf_index`` under
+        ``root`` in a tree of ``proof.tree_size`` entries.
+    """
+    fn, sn = proof.leaf_index, proof.tree_size - 1
+    if not 0 <= fn <= sn:
+        return False
+
+    computed = leaf_hash
+    for sibling in proof.audit_path:
+        if sn == 0:
+            # The path is longer than the tree height allows: malformed.
+            return False
+        if (fn & 1) or fn == sn:
+            computed = hash_internal(sibling, computed)
+            if not (fn & 1):
+                while fn != 0 and not (fn & 1):
+                    fn >>= 1
+                    sn >>= 1
+        else:
+            computed = hash_internal(computed, sibling)
+        fn >>= 1
+        sn >>= 1
+
+    return sn == 0 and hmac.compare_digest(computed, root)
+
+
+def consistency_proof(entries: Sequence[bytes], old_size: int) -> ConsistencyProof:
+    """Build an RFC 6962 consistency proof from ``old_size`` to ``len(entries)``.
+
+    Pure function. Proves the tree grew by appending only: the old root's
+    entries remain, in place, under the new root. The system side calls this;
+    :func:`verify_consistency` checks it against the two roots alone.
+
+    Args:
+        entries: The full ordered entry payloads of the *later* tree.
+        old_size: Entry count of the earlier tree, ``0 <= old_size <= len``.
+
+    Returns:
+        The :class:`ConsistencyProof`. Its ``nodes`` are empty for the trivial
+        cases (an empty old tree, or old and new sizes equal), which
+        :func:`verify_consistency` handles by comparing roots directly.
+
+    Raises:
+        ValueError: if ``old_size`` is negative or larger than ``len(entries)``.
+    """
+    new_size = len(entries)
+    if not 0 <= old_size <= new_size:
+        raise ValueError(
+            f"old_size {old_size} is out of range for {new_size} entr(ies)."
+        )
+    if old_size == 0 or old_size == new_size:
+        return ConsistencyProof(old_size=old_size, new_size=new_size, nodes=())
+    leaves = [hash_leaf(entry) for entry in entries]
+    return ConsistencyProof(
+        old_size=old_size,
+        new_size=new_size,
+        nodes=tuple(_subproof(old_size, leaves, True)),
+    )
+
+
+def _subproof(m: int, leaves: Sequence[str], on_boundary: bool) -> list[str]:
+    """RFC 6962 ``SUBPROOF(m, D[n], b)``.
+
+    ``on_boundary`` is the RFC's ``b``: True while ``m`` still aligns with the
+    left edge of the subtree under consideration, meaning the old tree's own
+    root is implied by the structure and need not be emitted; it flips to False
+    once the recursion descends into a right subtree, where that root must be
+    carried explicitly.
+    """
+    n = len(leaves)
+    if m == n:
+        # The old tree is exactly this subtree. Its root is only emitted when it
+        # is not already implied by an enclosing boundary.
+        return [] if on_boundary else [_root_of_leaves(leaves)]
+    k = _largest_power_of_two_below(n)
+    if m <= k:
+        return _subproof(m, leaves[:k], on_boundary) + [_root_of_leaves(leaves[k:])]
+    return _subproof(m - k, leaves[k:], False) + [_root_of_leaves(leaves[:k])]
+
+
+def verify_consistency(proof: ConsistencyProof, old_root: str, new_root: str) -> bool:
+    """Check a consistency proof against the earlier and later roots.
+
+    Reconstructs both roots from the proof nodes following RFC 6962 section
+    2.1.2 and confirms they match ``old_root`` and ``new_root``. Succeeding means
+    the later tree provably contains the earlier one as an unaltered prefix.
+
+    Args:
+        proof: The proof produced by :func:`consistency_proof`.
+        old_root: The earlier root, trusted independently (e.g. anchored).
+        new_root: The later root being checked for consistency with it.
+
+    Returns:
+        True only if ``new_root`` is an append-only extension of ``old_root``.
+    """
+    m, n = proof.old_size, proof.new_size
+    if not 0 <= m <= n:
+        return False
+    # Trivial relations carry no nodes and are decided by the roots directly.
+    if m == 0:
+        return hmac.compare_digest(old_root, EMPTY_ROOT)
+    if m == n:
+        return len(proof.nodes) == 0 and hmac.compare_digest(old_root, new_root)
+
+    path = list(proof.nodes)
+    # A full old subtree omits its own root from the proof; supply it so the
+    # reconstruction below has a starting hash. See _subproof's boundary note.
+    if _is_power_of_two(m):
+        path = [old_root] + path
+    if not path:
+        return False
+
+    fn, sn = m - 1, n - 1
+    # Advance past the levels the old tree fills completely.
+    while fn & 1:
+        fn >>= 1
+        sn >>= 1
+
+    old_computed = new_computed = path[0]
+    for node in path[1:]:
+        if sn == 0:
+            return False
+        if (fn & 1) or fn == sn:
+            old_computed = hash_internal(node, old_computed)
+            new_computed = hash_internal(node, new_computed)
+            if not (fn & 1):
+                while fn != 0 and not (fn & 1):
+                    fn >>= 1
+                    sn >>= 1
+        else:
+            new_computed = hash_internal(new_computed, node)
+        fn >>= 1
+        sn >>= 1
+
+    return (
+        sn == 0
+        and hmac.compare_digest(old_computed, old_root)
+        and hmac.compare_digest(new_computed, new_root)
     )

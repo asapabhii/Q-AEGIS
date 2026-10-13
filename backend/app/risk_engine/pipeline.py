@@ -7,7 +7,7 @@ agent scores; the gate may derive ``ai_recommendation`` from consensus.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from uuid import UUID
 
@@ -91,6 +91,21 @@ def run_full_assessment(
 
     prior_profile = crypto_repo.latest_for_document(session, document_id)
 
+    # Behavioural feature bundle for the scoring agents, computed ONCE on this
+    # request thread (which owns the Session) BEFORE the new risk row is
+    # appended, so every "prior" count excludes the current access. Frozen onto
+    # AssessmentInput below; the agent workers never touch the database.
+    access_features = replace(
+        risk_repo.access_history(
+            session,
+            actor_user_id=snapshot.actor_user_id,
+            device_id=snapshot.device_id,
+            document_id=document.id,
+        ),
+        actor_role=actor.role.value,
+        payload_byte_size=None if plaintext is None else len(plaintext),
+    )
+
     risk_result = score(snapshot)
     risk_row = risk_repo.append_risk_score(
         session, document_id=document.id, result=risk_result
@@ -113,6 +128,7 @@ def run_full_assessment(
             risk_value=risk_result.risk_value,
             filename=document.filename,
             context_snapshot=snapshot,
+            features=access_features,
         )
     )
     try:

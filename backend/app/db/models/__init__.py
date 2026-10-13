@@ -14,10 +14,12 @@ one where it genuinely earns its place, not by reflex.
 """
 
 from app.db.models.audit import AuditLog
+from app.db.models.checkpoint import AuditCheckpoint, AuditSigningKey
 from app.db.models.classification import ClassificationMetadata, ManualOverride
 from app.db.models.crypto import CryptoProfile, DocumentCiphertext, MigrationSchedule
 from app.db.models.documents import Document
 from app.db.models.identity import User
+from app.db.models.outbox import EventOutbox
 from app.db.models.policy import PolicyDecision, PolicyRule
 from app.db.models.rag import RagChunk
 from app.db.models.risk import AgentOutput, RiskScore, TrustScore
@@ -31,20 +33,32 @@ UPDATE_REJECTED_TABLES: tuple[str, ...] = (
     TrustScore.__tablename__,
     CryptoProfile.__tablename__,
     AuditLog.__tablename__,
+    AuditSigningKey.__tablename__,
+    AuditCheckpoint.__tablename__,
 )
 
 #: Tables that additionally reject DELETE and TRUNCATE. ``PRD.md`` FR-7 states
-#: the audit log's guarantee absolutely, so it is enforced absolutely.
-DELETE_REJECTED_TABLES: tuple[str, ...] = (AuditLog.__tablename__,)
+#: the audit log's guarantee absolutely, so it is enforced absolutely. The
+#: checkpoint tables are held to the same bar: a Signed Tree Head and the key
+#: that signed it are tamper-evidence, and the anchoring guarantee is defeated
+#: the moment either can be deleted, so both reject DELETE and TRUNCATE too.
+DELETE_REJECTED_TABLES: tuple[str, ...] = (
+    AuditLog.__tablename__,
+    AuditSigningKey.__tablename__,
+    AuditCheckpoint.__tablename__,
+)
 
 __all__ = [
     "AgentOutput",
+    "AuditCheckpoint",
     "AuditLog",
+    "AuditSigningKey",
     "ClassificationMetadata",
     "CryptoProfile",
     "DELETE_REJECTED_TABLES",
     "Document",
     "DocumentCiphertext",
+    "EventOutbox",
     "ManualOverride",
     "MigrationSchedule",
     "PolicyDecision",

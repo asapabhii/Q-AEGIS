@@ -36,6 +36,11 @@ redis==6.4.0
 # Multi-agent orchestration, SPEC.md 3.4 / PRD FR-3.
 langgraph==0.6.11
 
+# Real LLM scoring for the five agents, SPEC.md 3.4 / PRD FR-3. The Anthropic
+# (Claude) client is used only when AGENT_LLM_BACKEND=anthropic and credentials
+# are set; otherwise the deterministic backend runs and this import is never hit.
+anthropic==1.8.0
+
 # Crypto engine, SPEC.md 3.7. AES-256-GCM and X25519 via cryptography; ML-KEM
 # and ML-DSA via liboqs-python. Pin the exact liboqs-python version and re-run
 # the full crypto test suite after any bump; this library's API has changed

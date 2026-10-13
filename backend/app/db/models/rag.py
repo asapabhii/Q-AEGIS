@@ -41,6 +41,9 @@ class RagChunk(Base):
 
     id: Mapped[UUID] = uuid_primary_key()
     document_id: Mapped[UUID | None] = mapped_column(
+        # ON DELETE CASCADE (not RESTRICT like the evidence/decision tables) is
+        # intentional: chunks are derived, re-ingestable data, not evidence, so
+        # deleting a document should drop its stale embeddings automatically.
         ForeignKey("documents.id", ondelete="CASCADE"),
         nullable=True,
         index=True,

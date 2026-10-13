@@ -1,56 +1,41 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Link2, ShieldCheck, ShieldAlert, ShieldQuestion, Clock } from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import { Link2, ShieldCheck, ShieldAlert, ShieldQuestion } from "lucide-react";
 
 import Badge from "@/components/ui/Badge";
 import HashDisplay from "@/components/ui/HashDisplay";
+import NotPermitted from "@/components/ui/NotPermitted";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import { useRole } from "@/lib/context/RoleContext";
-import { listAuditEntries, ApiError } from "@/lib/api/client";
-import type { AuditEntry, UserRole } from "@/lib/api/types";
-
-function verifyChain(chain: AuditEntry[]): boolean {
-  for (let i = 0; i < chain.length; i += 1) {
-    if (i > 0 && chain[i].prev_hash !== chain[i - 1].payload_hash) {
-      return false;
-    }
-  }
-  if (chain.length > 0 && chain[0].prev_hash !== null) {
-    return false;
-  }
-  return true;
-}
-
-function formatPayload(payload: Record<string, unknown>): string {
-  return JSON.stringify(payload, null, 2);
-}
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
+import { listAuditEntries, verifyAudit, ApiError } from "@/lib/api/client";
+import type { AuditEntry, AuditVerifyResponse } from "@/lib/api/types";
 
 import D3AuditChain from "@/components/ui/D3AuditChain";
 
-const AUDIT_ALLOWED_ROLES: UserRole[] = ["security_admin", "auditor", "ciso"];
-
 export function AuditViewer({ documentId }: { documentId: string }) {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role: contextRole } = useRole();
-  const role = AUDIT_ALLOWED_ROLES.includes(contextRole) ? contextRole : "auditor";
+  const { role } = useRole();
+  // The audit reads are gated server-side to VerifyChainCaller. Send the
+  // caller's REAL role — never silently remap an unauthorized caller to a
+  // privileged one — and render an honest 403 state when they lack access.
+  const permitted = roleAllowed(ACCESS.audit, role);
   const [chain, setChain] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
-  const [verified, setVerified] = useState<boolean | null>(null);
+  const [verifyResult, setVerifyResult] = useState<AuditVerifyResponse | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
-  const timerRef = useRef<number | NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
+  const load = useCallback(() => {
+    if (!permitted) {
+      return () => {};
+    }
     let cancelled = false;
+    setLoading(true);
     listAuditEntries(documentId, role)
       .then((res) => {
         if (cancelled) return;
@@ -68,30 +53,47 @@ export function AuditViewer({ documentId }: { documentId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, role]);
+  }, [documentId, role, permitted]);
 
-  const handleVerify = useCallback(() => {
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => load(), [load]);
+
+  const handleVerify = useCallback(async () => {
     if (chain.length === 0) return;
     setVerifying(true);
-    setVerified(null);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      setVerified(verifyChain(chain));
+    setVerifyResult(null);
+    setVerifyError(null);
+    try {
+      const result = await verifyAudit(documentId, role);
+      setVerifyResult(result);
+    } catch (err) {
+      setVerifyError(err instanceof ApiError ? err.message : "Network error");
+    } finally {
       setVerifying(false);
-    }, process.env.NODE_ENV === "test" ? 10 : 1000);
-  }, [chain]);
+    }
+  }, [chain.length, documentId, role]);
 
   const chainStatus: "valid" | "broken" | "unverified" =
-    chain.length === 0
+    verifyResult === null
       ? "unverified"
-      : verified
+      : verifyResult.is_valid
         ? "valid"
-        : verified === false
-          ? "broken"
-          : "unverified";
+        : "broken";
 
   const StatusIcon = chainStatus === "valid" ? ShieldCheck : chainStatus === "broken" ? ShieldAlert : ShieldQuestion;
   const statusColor = chainStatus === "valid" ? "var(--status-pass)" : chainStatus === "broken" ? "var(--status-fail)" : "var(--status-pending)";
+
+  if (!permitted) {
+    return (
+      <div className="mx-auto w-full max-w-screen-xl px-6 py-8">
+        <NotPermitted
+          role={role}
+          allowed={ACCESS.audit}
+          resource="This document's forensic audit trail"
+        />
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="mx-auto w-full max-w-screen-xl space-y-8 px-6 py-8">
@@ -122,23 +124,13 @@ export function AuditViewer({ documentId }: { documentId: string }) {
       </header>
 
       {loading && (
-        <div className="flex items-center justify-center min-h-[200px]">
-          <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-            Loading audit trail...
-          </p>
+        <div className="space-y-4">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-64" />
         </div>
       )}
 
-      {error && (
-        <div className="card p-6" style={{ borderColor: "var(--status-fail)" }}>
-          <div className="flex items-center gap-3">
-            <ShieldAlert className="h-5 w-5" style={{ color: "var(--status-fail)" }} />
-            <p className="text-sm" style={{ color: "var(--status-fail)" }}>
-              {error}
-            </p>
-          </div>
-        </div>
-      )}
+      {error && <ErrorState message={error} onRetry={() => load()} />}
 
       {!loading && !error && (
         <>
@@ -181,9 +173,9 @@ export function AuditViewer({ documentId }: { documentId: string }) {
                     color: "var(--color-text-secondary)",
                   }}
                 >
-                  {chainStatus === "valid" && "Cryptographic hashes match - chain is intact"}
-                  {chainStatus === "broken" && "Hash mismatch detected - audit chain compromised"}
-                  {chainStatus === "unverified" && (chain.length === 0 ? "No audit entries found" : "Cryptographic proof: entry prev_hash == previous payload_hash")}
+                  {chainStatus === "valid" && "Recomputed Merkle root matches the stored root - chain is intact"}
+                  {chainStatus === "broken" && "Recomputed Merkle root does not match the stored root - audit chain compromised"}
+                  {chainStatus === "unverified" && (chain.length === 0 ? "No audit entries found" : "Recomputes the Merkle prefix root server-side and compares it to the stored root")}
                 </p>
               </div>
             </div>
@@ -196,6 +188,90 @@ export function AuditViewer({ documentId }: { documentId: string }) {
               {verifying ? "Verifying..." : "Verify Chain Integrity"}
             </button>
           </div>
+
+          {verifyError && (
+            <div data-reveal className="card p-6" style={{ borderColor: "var(--status-fail)" }}>
+              <div className="flex items-center gap-3">
+                <ShieldAlert className="h-5 w-5" style={{ color: "var(--status-fail)" }} />
+                <p className="text-sm" style={{ color: "var(--status-fail)" }}>
+                  Verification failed: {verifyError}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {verifyResult && (
+            <div data-reveal className="card p-6 space-y-4">
+              <h3
+                className="font-semibold"
+                style={{ fontSize: "var(--font-size-base)", color: "var(--color-text-primary)" }}
+              >
+                Server-Side Verification Result
+              </h3>
+              <dl className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <dt
+                    className="text-xs uppercase tracking-wider mb-1.5"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Recomputed Root
+                  </dt>
+                  <dd>
+                    <HashDisplay hash={verifyResult.computed_root} />
+                  </dd>
+                </div>
+                <div>
+                  <dt
+                    className="text-xs uppercase tracking-wider mb-1.5"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Stored Root
+                  </dt>
+                  <dd>
+                    <HashDisplay hash={verifyResult.stored_root} />
+                  </dd>
+                </div>
+                <div>
+                  <dt
+                    className="text-xs uppercase tracking-wider mb-1.5"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Tree Size
+                  </dt>
+                  <dd
+                    className="mono-data text-sm"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {verifyResult.entry_count}
+                  </dd>
+                </div>
+                <div>
+                  <dt
+                    className="text-xs uppercase tracking-wider mb-1.5"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    End Index
+                  </dt>
+                  <dd
+                    className="mono-data text-sm"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {verifyResult.end_index}
+                  </dd>
+                </div>
+              </dl>
+              <p
+                className="text-sm"
+                style={{
+                  color: verifyResult.is_valid ? "var(--status-pass)" : "var(--status-fail)",
+                }}
+              >
+                {verifyResult.is_valid
+                  ? "Recomputed root matches the stored root."
+                  : "Recomputed root does not match the stored root."}
+              </p>
+            </div>
+          )}
 
           {/* Audit Trail Timeline */}
           <div data-reveal className="card p-0 overflow-hidden">
@@ -224,7 +300,11 @@ export function AuditViewer({ documentId }: { documentId: string }) {
                 <D3AuditChain chain={chain} />
               ) : (
                 <div className="p-6">
-                  <p className="mono-data" style={{ color: "var(--color-text-tertiary)" }}>No blocks found.</p>
+                  <EmptyState
+                    icon={<Link2 className="h-8 w-8" />}
+                    title="No audit blocks yet"
+                    message="No cryptographic audit entries have been recorded for this document. Entries appear here as it moves through classification, risk, policy, and crypto stages."
+                  />
                 </div>
               )}
             </div>

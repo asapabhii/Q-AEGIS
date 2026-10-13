@@ -67,7 +67,9 @@ def _user_from_bearer(session: Session, authorization: str | None) -> User | Non
 
 def _user_from_dev_header(session: Session, actor_role: str | None) -> User | None:
     settings = get_settings()
-    if not settings.auth_dev_header_bypass:
+    # Honored only in local/dev/test/ci; a leaked flag in staging/production is
+    # ignored (see Settings.dev_header_bypass_allowed).
+    if not settings.dev_header_bypass_allowed():
         return None
     if actor_role is None or not actor_role.strip():
         return None

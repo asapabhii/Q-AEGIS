@@ -11,18 +11,19 @@ import {
   X,
 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
+import NotPermitted from "@/components/ui/NotPermitted";
 import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import { useRole } from "@/lib/context/RoleContext";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
 import {
   checkHealth,
-  registerAndClassify,
+  registerUploadAndClassify,
   ApiError,
 } from "@/lib/api/client";
 import type {
   HealthResponse,
   ClassificationResponse,
   DocumentResponse,
-  UserRole,
 } from "@/lib/api/types";
 
 // ---------------------------------------------------------------------------
@@ -52,16 +53,19 @@ export default function ClassifyPage() {
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
-  // Classify flow
-  const { role, setRole } = useRole();
-  const [filename, setFilename] = useState("quarterly-report.pdf");
-  const [content, setContent] = useState(
-    "This document contains confidential financial projections and restricted trade secrets."
-  );
+  // Classify flow — the caller's role comes from the shell identity panel; the
+  // classify endpoint is gated to data_owner/security_admin server-side, so an
+  // unauthorized caller gets an honest 403 rather than a silent remap.
+  const { role } = useRole();
+  const permitted = roleAllowed(ACCESS.classify, role);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filename, setFilename] = useState("");
+  const [content, setContent] = useState("");
   const [registeredDocument, setRegisteredDocument] =
     useState<DocumentResponse | null>(null);
   const [classification, setClassification] =
     useState<ClassificationResponse | null>(null);
+  const [extractedChars, setExtractedChars] = useState<number | null>(null);
   const [classifyError, setClassifyError] = useState<string | null>(null);
   const [classifyLoading, setClassifyLoading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -80,23 +84,47 @@ export default function ClassifyPage() {
     }
   }, []);
 
-  // ------ Register + Classify ------
+  // ------ Register + Upload + Classify ------
+  // The file is uploaded so the backend can extract text from PDF/DOCX/CSV; the
+  // pasted preview is only a fallback used when server-side extraction is empty.
   const handleClassify = useCallback(async () => {
+    if (!selectedFile) return;
     setClassifyLoading(true);
     setClassifyError(null);
     setRegisteredDocument(null);
     setClassification(null);
+    setExtractedChars(null);
     try {
-      const { document: doc, classification: cls } =
-        await registerAndClassify(filename, content, role);
+      const { document: doc, upload, classification: cls } =
+        await registerUploadAndClassify(selectedFile, content, role);
       setRegisteredDocument(doc);
       setClassification(cls);
+      setExtractedChars(upload.extracted_text_chars);
     } catch (err) {
       setClassifyError(err instanceof ApiError ? err.message : "Network error");
     } finally {
       setClassifyLoading(false);
     }
-  }, [filename, content, role]);
+  }, [selectedFile, content, role]);
+
+  // Read a UTF-8 text preview for text-like files. Binary formats (PDF/DOCX)
+  // are extracted authoritatively on the server, so we skip the garbled
+  // client-side read and leave the preview empty for those.
+  const ingestFile = useCallback((file: File) => {
+    setSelectedFile(file);
+    setFilename(file.name);
+    setContent("");
+    const textLike =
+      /\.(txt|csv|md|json|log|xml|html?)$/i.test(file.name) ||
+      file.type.startsWith("text/");
+    if (!textLike) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = (event.target?.result as string) ?? "";
+      setContent(text.slice(0, 2000));
+    };
+    reader.readAsText(file);
+  }, []);
 
   // ------ Drag & Drop handlers ------
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -109,46 +137,32 @@ export default function ClassifyPage() {
     setIsDragOver(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      const file = files[0];
-      setFilename(file.name);
-      
-      // Read file content (for demo, just use placeholder)
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        setContent(text.slice(0, 500)); // First 500 chars
-      };
-      reader.readAsText(file);
-    }
-  }, []);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) ingestFile(files[0]);
+    },
+    [ingestFile]
+  );
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      setFilename(file.name);
-      
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        setContent(text.slice(0, 500));
-      };
-      reader.readAsText(file);
-    }
-  }, []);
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) ingestFile(files[0]);
+    },
+    [ingestFile]
+  );
 
   const handleReset = useCallback(() => {
     setRegisteredDocument(null);
     setClassification(null);
+    setExtractedChars(null);
     setClassifyError(null);
     setContent("");
     setFilename("");
+    setSelectedFile(null);
   }, []);
 
   return (
@@ -179,23 +193,8 @@ export default function ClassifyPage() {
             </p>
           </div>
 
-          {/* System Status and Role */}
+          {/* System Status */}
           <div className="flex items-center gap-3">
-            <label htmlFor="role-select" className="sr-only">Caller Role</label>
-            <select
-              id="role-select"
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2.5 py-1 text-xs rounded text-[var(--color-text-primary)]"
-            >
-              <option value="data_owner">Data Owner</option>
-              <option value="security_analyst">Security Analyst</option>
-              <option value="security_admin">Security Admin</option>
-              <option value="compliance_officer">Compliance Officer</option>
-              <option value="auditor">Auditor</option>
-              <option value="ciso">CISO</option>
-              <option value="engineer">Engineer</option>
-            </select>
             <div
               className={`status-dot ${
                 health ? "status-dot-pass" : "status-dot-pending"
@@ -234,18 +233,35 @@ export default function ClassifyPage() {
         )}
       </header>
 
+      {!permitted && (
+        <NotPermitted
+          role={role}
+          allowed={ACCESS.classify}
+          resource="Document upload and classification"
+        />
+      )}
+
       {/* Main Upload Zone or Results */}
-      {!registeredDocument && !classification ? (
+      {permitted && !registeredDocument && !classification && (
         <>
           {/* Upload Zone */}
           <div data-reveal className="card p-6">
             <div className="space-y-6">
               {/* Drag & Drop Zone */}
               <div
+                role="button"
+                tabIndex={0}
+                aria-label="Upload document: drag and drop a file here, or activate to browse"
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
                 className="rounded-lg p-12 text-center cursor-pointer transition-colors"
                 style={{
                   minHeight: "280px",
@@ -333,7 +349,9 @@ export default function ClassifyPage() {
                           className="text-xs"
                           style={{ color: "var(--color-text-tertiary)" }}
                         >
-                          {content.length} characters loaded
+                          {content.length > 0
+                            ? `${content.length} characters previewed`
+                            : "Binary format — text extracted on the server"}
                         </p>
                       </div>
                     </div>
@@ -346,27 +364,34 @@ export default function ClassifyPage() {
                     </button>
                   </div>
 
-                  {/* Content Preview */}
+                  {/* Content Preview — editable fallback used only if the
+                      backend extracts no text from the uploaded file. */}
                   <div>
                     <label
                       className="block text-sm font-medium mb-2"
                       style={{ color: "var(--color-text-primary)" }}
                     >
                       Content Preview
+                      <span
+                        className="ml-2 text-xs font-normal"
+                        style={{ color: "var(--color-text-tertiary)" }}
+                      >
+                        (extraction fallback — the server reads the uploaded file)
+                      </span>
                     </label>
                     <textarea
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
                       rows={6}
                       className="input mono-data resize-y"
-                      placeholder="Document content will appear here..."
+                      placeholder="For PDF/DOCX the server extracts the text automatically. Paste text here only to override or if extraction returns nothing."
                     />
                   </div>
 
                   {/* Classify Button */}
                   <button
                     onClick={handleClassify}
-                    disabled={classifyLoading || !content.trim()}
+                    disabled={classifyLoading || !selectedFile}
                     className="btn btn-primary w-full py-3"
                     style={{ justifyContent: "center" }}
                   >
@@ -399,7 +424,9 @@ export default function ClassifyPage() {
             </div>
           </div>
         </>
-      ) : (
+      )}
+
+      {permitted && (registeredDocument || classification) && (
         <div data-reveal className="space-y-6">
           {/* Success Banner */}
           <div
@@ -627,6 +654,26 @@ export default function ClassifyPage() {
                       {classification.model_version}
                     </dd>
                   </div>
+
+                  {/* Extracted text — evidence the server read the file */}
+                  {extractedChars !== null && (
+                    <div>
+                      <dt
+                        className="text-xs mb-1.5 uppercase tracking-wider"
+                        style={{ color: "var(--color-text-tertiary)" }}
+                      >
+                        Extracted Text
+                      </dt>
+                      <dd
+                        className="mono-data text-xs"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        {extractedChars > 0
+                          ? `${extractedChars.toLocaleString()} characters from uploaded file`
+                          : "No text extracted — classified from pasted fallback"}
+                      </dd>
+                    </div>
+                  )}
 
                   {/* Keywords */}
                   {classification.matched_keywords.length > 0 && (

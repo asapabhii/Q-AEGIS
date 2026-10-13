@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 from fastapi import APIRouter, HTTPException, status
@@ -20,14 +21,19 @@ from app.crypto.exceptions import CryptoConfigurationError, LiboqsUnavailableErr
 from app.db.enums import CryptoProfileType, PolicyAction
 from app.policy.engine import PolicyEngineError
 from app.risk_engine.pipeline import run_full_assessment
-from app.risk_engine.schemas import MAX_DEVICE_ID_CHARS
-from app.risk_engine.scorer import ContextSnapshot
+from app.risk_engine.schemas import MAX_DEVICE_ID_CHARS, derive_after_hours
+from app.risk_engine.scorer import DEFAULT_ORG_TIMEZONE, ContextSnapshot
 
 router = APIRouter(tags=["assessments"])
 
 
 class AssessmentRequest(BaseModel):
-    """Run the full protection pipeline for one classified document."""
+    """Run the full protection pipeline for one classified document.
+
+    ``after_hours`` is not a request field: like ``POST /risk-scores`` it is
+    derived server-side from ``accessed_at`` and ``org_timezone`` so a caller
+    cannot understate the contextual risk of its own access.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -35,7 +41,15 @@ class AssessmentRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=MAX_DEVICE_ID_CHARS)
     device_is_new: bool
     accessed_at: AwareDatetime
-    after_hours: bool
+    org_timezone: str = Field(
+        default=DEFAULT_ORG_TIMEZONE,
+        min_length=1,
+        max_length=80,
+        description=(
+            "IANA timezone the org's business hours are defined in; the server "
+            "derives after_hours against it."
+        ),
+    )
     content: str | None = Field(default=None, max_length=500_000)
     ai_recommendation: PolicyAction | None = None
 
@@ -47,6 +61,19 @@ class AssessmentRequest(BaseModel):
                 "device_id must contain at least one non-whitespace character"
             )
         return value
+
+    @field_validator("org_timezone")
+    @classmethod
+    def org_timezone_must_be_valid(cls, value: str) -> str:
+        """Require an IANA timezone for server-side ``after_hours`` derivation."""
+        zone_name = value.strip()
+        if not zone_name:
+            raise ValueError("org_timezone must contain a timezone name")
+        try:
+            ZoneInfo(zone_name)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("org_timezone must be a valid IANA timezone") from exc
+        return zone_name
 
 
 class AssessmentResponse(BaseModel):
@@ -89,7 +116,8 @@ def create_assessment(
         device_id=request.device_id,
         device_is_new=request.device_is_new,
         accessed_at=request.accessed_at,
-        after_hours=request.after_hours,
+        after_hours=derive_after_hours(request.accessed_at, request.org_timezone),
+        org_timezone=request.org_timezone,
     )
     plaintext = request.content.encode("utf-8") if request.content is not None else None
     try:

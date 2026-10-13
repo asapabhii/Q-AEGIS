@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api/client", () => ({
   getDocument: vi.fn(),
+  downloadDocumentSummary: vi.fn(),
   ApiError: class MockApiError extends Error {
     status: number;
     constructor(status: number, message: string, body?: unknown) {
@@ -73,7 +74,7 @@ describe("Document Summary Report (FR-16)", () => {
     await waitFor(() => {
       expect(screen.getByText(/Document Summary Report/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: /print/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /download pdf/i })).toBeInTheDocument();
     cleanup();
   });
 

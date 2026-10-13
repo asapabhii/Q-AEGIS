@@ -17,9 +17,9 @@
 | Ingestion / Event Bus | 3.1 | FR-2 (Partial) | ✅ Complete on main (Redis Streams, `qaegis:events`, outbox + consumer group, PR #25) |
 | Contextual Risk API | 3.3 | FR-2 | ✅ Complete on main (caller-triggered + scheduled recompute + triggers, PR #25) |
 | Multi-Agent Orchestration | 3.4 | FR-3 | ✅ Complete on main (LangGraph 5 parallel nodes, timeout fail-safe, `POST /assessments`, PR #25) |
-| Trust Score Computation | 3.5 | FR-4 | ✅ Complete on main (versioned equal-weight consensus, PR #13; bands calibrated via #30) |
+| Trust Score Computation | 3.5 | FR-4 | ✅ Complete on main (versioned weighted consensus; weights calibrated to NIST/ISO policy weights — security+compliance co-lead 0.250/0.250/0.200/0.175/0.125, `trust-weighted-mean-1.0.0`, decisions.md 2026-09-23) |
 | Knowledge Graph | 3.11 | FR-10 | 🟡 Mostly done on main (Neo4j attack paths, Bolt TLS, PR #28) — graph is populated by a synthetic **demo seed only**; no live event-bus sync, see "Needs to Be Connected" |
-| Agentic RAG | 3.12 | FR-11 | 🟡 Pipeline complete on main (4-node Planner→Retriever→Reasoner→Verifier on pgvector, PR #28); embeddings are `stub-hash-v1` (not semantic) — real embedder pending |
+| Agentic RAG | 3.12 | FR-11 | ✅ Pipeline complete on main (4-node Planner→Retriever→Reasoner→Verifier on pgvector, PR #28); real fastembed embeddings shipped — `BAAI/bge-large-en-v1.5`, `vector(1024)` + HNSW cosine index (uncommitted on `feat/real-embeddings-fastembed`), replacing the earlier `stub-hash-v1` |
 | Data model & migrations (§5) | 5 | all | ✅ Complete on main (12 tables, append-only triggers, PR #25 and follow-ups) |
 | CI/CD, JWT/auth, TLS | — | — | ✅ Complete on main (coverage gate, branch protection, PR #27: JWT login, upload, SSE, local TLS) |
 
@@ -38,7 +38,7 @@
 | Module | SPEC.md Section | PRD Requirement | Status |
 |--------|-----------------|-----------------|--------|
 | Sensitivity Classifier Stub | 3.2 | FR-1 | ✅ Complete (keyword stub + one-step fail-safe escalation, explicit default test) |
-| Sensitivity Classifier ML Model | 3.2 | FR-1 | ❌ Blocked (no labelled dataset; PRD §9 forbids building against synthetic labels) |
+| Sensitivity Classifier ML Model | 3.2 | FR-1 | ✅ Shipped (interim) — a calibrated linear SVM trained on a broad, public multi-genre corpus ships as `backend/artifacts/classifier/multigenre-hashing-svm-1.0.0.joblib` (streaming HashingVectorizer→TF-IDF→SGD, three ML tiers PUBLIC/CONFIDENTIAL/RESTRICTED; accuracy 0.886, macro F1 0.880); runtime engine `model_classifier.py` loads it when `CLASSIFIER_MODEL_PATH` is set, with the keyword rules and the high-precision content detectors (`detectors.py`) as escalation-only overrides and the low-confidence fail-safe preserved (decisions.md 2026-09-24). The earlier single-domain cables artifact is superseded and retained only for provenance. Retrain on gated FOIArchive pending Abhinav's HF terms acceptance |
 | Upload / Classify UI | 3.13 | FR-1 screen | ✅ Complete (redesign on main; RoleContext refinements in PR #24) |
 | Audit Viewer + Summary Redesign (Task 2) | 3.13 | FR-15/FR-16 | 🟡 Redesigned screens (`audit/[document_id]`, `documents/[id]/summary`, D3AuditChain, MetricCard, GSAP reveal) exist **in PR #24 only**; main has functional but unredesigned versions |
 | Risk Dashboard UI | 3.13 | FR-14 | ✅ Complete on main (PR #22; SSE live updates via #27) |
@@ -57,9 +57,34 @@ How the three workstreams fit together, and the one open conflict blocking PR #2
 
 **In PR #24 only (open, textually MERGEABLE).** API error boundary (`errors.py` — the sanitized 500/422 handlers go live on `main` only when this merges), frontend Audit Viewer + Document Summary redesign (`audit/[document_id]/page.tsx`, `documents/[id]/summary/page.tsx`, D3 chain visual, MetricCard, useGsapReveal), RoleContext refinements + test hardening, `evaluator.rego`, mock-data contract alignment.
 
-**⛔ Open conflict — PR #24 vs merged #30 (needs Udhav + Abhinav decision before #24 merges).** PR #24 as written silently reverts #30's merged calibration work: crypto selector bands back to 0.4/0.8 stubs (main: 0.50/0.85 policy bands), recommendation bands back to deny-0.300/MFA-0.800 (main: 0.250/0.750), `after_hours` back to caller-required (main: derived from `org_timezone`), `backend/app/classifier/training.py` + its tests deleted, `docs/classifier-dataset.md` deleted, and the two 2026-09-15 calibration entries removed from `docs/decisions.md`. GitHub reports no textual conflict; the clash is semantic. Do not merge #24 until the branch either keeps #30's calibration (restoring code + decision entries + dataset doc) or records an explicit superseding decision. Deleting logged decisions without a replacement entry is not a resolution either way.
+**✅ Resolved — PR #24 vs #30 calibration clash.** The concern was that PR #24 as
+written silently reverted #30's calibration (crypto bands back to 0.4/0.8,
+recommendation bands back to deny-0.300/MFA-0.800, `after_hours` back to
+caller-required, `training.py` + `docs/classifier-dataset.md` deleted, the
+2026-09-15 decision entries removed). Current `main`/working-tree state keeps
+#30's calibration as the in-force contract: crypto selector bands are 0.50/0.85
+(`trust-crypto-policy-bands-1.0.0`, `backend/app/crypto/selector.py`),
+recommendation bands 0.250/0.500/0.750, `after_hours` is server-derived from
+`org_timezone`, and the calibration decision entries stand in `docs/decisions.md`
+(2026-09-15), joined by the 2026-09-23 trust-weight calibration
+(`trust-weighted-mean-1.0.0`). The calibration is the source of truth; any branch
+reintroducing the placeholder cut-points is the regression, not the baseline.
 
-**Remaining gaps (not started, in priority order).** Real labelled classifier dataset (PRD §9 dependency, blocks FR-1 model + §8 accuracy metric); real RAG embeddings (stub-hash-v1 works but is not semantic; costs ~500MB torch dep); richer non-heuristic agent scorers (current five are deterministic rules, labelled provisional); measured latency/evaluation artifacts for §8 metrics. Known hardening notes, unchanged: `AUTH_DEV_HEADER_BYPASS=true` pinned in compose (local-dev choice, CI unaffected); Neo4j Browser `:7474` plaintext loopback; no `frontend` service in compose so `NEXT_PUBLIC_API_URL` must be set manually (documented in `.env.example`).
+**Remaining gaps (in priority order).** Interim classifier model now ships — a
+calibrated linear SVM over a broad, public multi-genre corpus
+(`multigenre-hashing-svm-1.0.0.joblib`, decisions.md 2026-09-24), superseding the
+earlier single-domain cables artifact; the gated FOIArchive retrain and the §8
+held-out accuracy metric are what remain there. Real RAG embeddings shipped
+(fastembed `BAAI/bge-large-en-v1.5`, 1024-dim, replacing the non-semantic
+`stub-hash-v1`). The five scoring agents have been deepened past the earlier
+`{label, risk, device_is_new, after_hours}` collapse: each now reads a distinct
+subset of an immutable per-access `AccessFeatures` bundle (device/actor/document
+history, role, payload), so SECURITY and CONTEXTUAL are no longer restatements of
+the risk engine (scorer versions `*-det-2.0.0`; consensus weights and
+`trust-weighted-mean-1.0.0` unchanged; decisions.md 2026-09-26). They remain
+reviewable deterministic rules by design; the real LLM path is live and
+key-gated on `AGENT_LLM_API_KEY`. Still open: measured latency/evaluation
+artifacts for §8 metrics. Known hardening notes, unchanged: `AUTH_DEV_HEADER_BYPASS=true` pinned in compose (local-dev choice, CI unaffected); Neo4j Browser `:7474` plaintext loopback; no `frontend` service in compose so `NEXT_PUBLIC_API_URL` must be set manually (documented in `.env.example`).
 
 ## 🔌 Needs to Be Connected (wiring gaps, verified 2026-09-15)
 
@@ -67,10 +92,10 @@ Built but not yet joined to the rest of the system. Each item is small-to-medium
 
 | # | What | Currently | Missing link | Owner |
 |---|------|-----------|--------------|-------|
-| 1 | PR #24 merge | Open PR carrying error boundary + frontend redesign; silently reverts #30 calibration | Resolve the ⛔ conflict above first (restore #30's bands + decision entries + dataset doc, or log a superseding decision), then merge | Udhav + Abhinav |
+| 1 | PR #24 merge | Open PR carrying error boundary + frontend redesign | Calibration clash resolved (#30's bands + decision entries are the in-force baseline, see the ✅ note above); any merge must keep the 0.50/0.85 crypto bands, 0.250/0.500/0.750 recommendation bands, derived `after_hours`, and the calibration decision entries | Udhav + Abhinav |
 | 2 | Neo4j graph population | `app/graph/seed.py` upserts a fixed synthetic demo topology | Subscribe to the Redis Streams bus (Task 6 output) so real users/documents/access events flow into Neo4j continuously; seed stays as demo fallback | Abhinav |
-| 3 | RAG semantic retrieval | `app/rag/embeddings.py` is `stub-hash-v1` (hash tokens, not semantic); pipeline works end-to-end | Swap in a real embedder behind the same `embed_text` interface once an embedding path is chosen (model size vs. local-only constraint is the decision) | Abhinav |
-| 4 | Classifier ML model | Keyword stub + fail-safe escalation, tested | Blocked on labelled dataset (PRD §9) — do not train on synthetic labels | Sukhmani |
+| 3 | RAG semantic retrieval | ✅ Real fastembed embeddings shipped (`BAAI/bge-large-en-v1.5`, `vector(1024)` + HNSW cosine index) behind the same `embed_text` interface, replacing `stub-hash-v1` | Done on `feat/real-embeddings-fastembed`; deterministic-hash embedder retained for hermetic tests only | Abhinav |
+| 4 | Classifier ML model | ✅ Interim trained SVM ships (`multigenre-hashing-svm-1.0.0.joblib`, broad public multi-genre corpus), loaded by `model_classifier.py` when `CLASSIFIER_MODEL_PATH` is set; keyword + content-detector escalation-only overrides and the low-confidence fail-safe preserved | Retrain on gated FOIArchive once Abhinav accepts HF terms; interim artifact retired the day that lands | Abhinav |
 | 5 | `errors.py` activation | Sanitized 500/422 global handlers live only on the #24 branch | Goes live automatically once #24 merges cleanly with #30 preserved | Udhav |
 | 6 | Frontend service in compose | No `frontend` service in `infra/docker-compose.yml`; `NEXT_PUBLIC_API_URL` set by hand | Add a frontend service (or document-run script) so `docker compose up` is genuinely full-stack | Sukhmani |
 | 7 | Dedicated end-to-end chain test | Chain covered piecewise across `test_api.py` flows, `test_audit_chain.py`, `test_api_persistence.py` | One `test_integration_chain.py` asserting full pipeline + contiguous `prev_hash` chain in a single run (Task 3 as specified) | Sukhmani |
@@ -130,7 +155,7 @@ All AI agents and developers implementing tasks in this roadmap must consult the
 | **Frontend Design Doc** | `frontend/agentDocs/designDoc.md` | Detailed color palette, typography tokens, clinical cybersecurity aesthetic, micro-interactions, layout principles. |
 | **Data Dictionary** | `docs/data-dictionary.md` | Source of truth for database schema, columns, types, constraints, and enums. |
 | **Technical Specification** | `SPEC.md` | Architecture blueprint covering all 13 modules. |
-| **Product Requirements** | `PRD.md` | System requirements, functional requirements (FR-01 to FR-18), and acceptance criteria. |
+| **Product Requirements** | `PRD.md` | System requirements, functional requirements (FR-1 to FR-16), and acceptance criteria. |
 | **Agent Standing Orders** | `AGENTS.md` | Security and version control standing orders, ownership rules, and coding standards. |
 | **Work Division** | `WORK_DIVISION.md` | Module ownership and sprint distribution. |
 
@@ -356,7 +381,7 @@ The individual modules (Classification, Policy, Crypto) have unit tests, but the
 
 ---
 
-### [SUKHMANI] Task 4: Sensitivity Classification ML Model — ❌ BLOCKED (no labelled dataset, PRD §9)
+### [SUKHMANI] Task 4: Sensitivity Classification ML Model — ✅ SHIPPED (interim; trained on public-domain WikiLeaks cables, gated-FOIArchive retrain pending — decisions.md 2026-09-24)
 **Target Files:** `backend/app/classifier/model.py`, `backend/tests/test_classifier.py`
 **Dependencies:** Labeled Dataset (PRD NG9)
 
@@ -537,5 +562,5 @@ Relational databases fail at multi-hop queries. We need a graph to link employee
 - PRs touching `crypto/`, `policy/`, or `audit/` require Udhav's review.
 
 ---
-*Last Updated: 2026-09-15 (status tables, integration status, per-task statuses, and wiring-gap table verified against code and merged PRs; task prompts retained as history)*
+*Last Updated: 2026-09-24 (classifier interim model, real fastembed RAG embeddings, calibrated trust weights, and the resolved #24/#30 calibration clash reconciled against code and `docs/decisions.md`; underlying status tables and task prompts otherwise verified 2026-09-15 and retained as history)*
 *Aligns with Phase 4/5 of SPEC.md*

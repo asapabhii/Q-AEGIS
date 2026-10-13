@@ -1,7 +1,7 @@
 """Add rag_chunks + pgvector for FR-11 agentic RAG.
 
 Revision ID: e1a9c3f70b22
-Revises: c4f8a1e92b03
+Revises: d8e2b4c91a07
 Create Date: 2026-09-14
 """
 

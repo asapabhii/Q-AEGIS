@@ -2,8 +2,11 @@
 
 ``POST /api/v1/crypto-profiles`` persists a ``crypto_profiles`` row and an
 audit entry from a real ``trust_score_id``. The score-to-profile map in
-:mod:`app.crypto.selector` is still a stub: its thresholds are uncalibrated
-placeholders. Byte encryption lives in :mod:`app.crypto.engine`.
+:mod:`app.crypto.selector` is calibrated as the versioned policy bands
+``trust-crypto-policy-bands-1.0.0`` (``docs/decisions.md``, 2026-09-15): a
+deterministic risk posture, not incident-derived statistics, and honestly
+documented as such rather than claimed as empirical precision. Byte encryption
+lives in :mod:`app.crypto.engine`.
 
 SECURITY CAVEAT, restate this in every docstring in this package: liboqs is NOT
 independently audited, and OQS-OpenSSL is documented by its own maintainers as

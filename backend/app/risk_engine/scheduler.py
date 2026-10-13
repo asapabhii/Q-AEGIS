@@ -57,8 +57,13 @@ def start_risk_scheduler() -> None:
     """Start the background ticker and, when Redis is set, the stream consumer."""
     global _thread
     from app.event_bus.consumer import start_risk_consumer
+    from app.event_bus.relay import start_outbox_relay
 
     start_risk_consumer()
+    # Drain the transactional outbox to Redis. Independent of the ticker interval:
+    # events are enqueued by request handlers regardless of scheduled recomputes,
+    # so the relay must run whenever the bus is configured.
+    start_outbox_relay()
 
     interval = get_settings().risk_recompute_interval_seconds
     if interval <= 0:
@@ -75,6 +80,8 @@ def start_risk_scheduler() -> None:
 def stop_risk_scheduler() -> None:
     """Signal the ticker and consumer to stop (tests / shutdown)."""
     from app.event_bus.consumer import stop_risk_consumer
+    from app.event_bus.relay import stop_outbox_relay
 
     _stop.set()
     stop_risk_consumer()
+    stop_outbox_relay()

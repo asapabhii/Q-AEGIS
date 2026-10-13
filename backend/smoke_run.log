@@ -1,0 +1,41 @@
+=== Q-AEGIS live end-to-end smoke @ 2026-09-25T12:59:31.594870+00:00 ===
+target: https://127.0.0.1:8443/api/v1
+
+[PASS] health -- 200 {'status': 'ok', 'service': 'q-aegis-shield-backend', 'version': '0.1.0'}
+[PASS] register doc a -- 201 id=96fc4e40-268a-4123-9cbe-41cf2e195444
+[PASS] upload doc a -- stored, extracted 349 chars
+[PASS] classify doc a -- label=CONFIDENTIAL conf=0.797 model_version=multigenre-hashing-svm-1.0.0
+[PASS] classify doc a uses REAL trained model -- got 'multigenre-hashing-svm-1.0.0', expected 'multigenre-hashing-svm-1.0.0'
+[PASS] risk score -- risk_value=0.8000 after_hours(derived)=True
+[PASS] after_hours derived server-side -- expected True from 02:00Z / Asia/Kolkata, got True
+[PASS] trust score -- consensus=0.762 v=trust-weighted-mean-1.0.0
+[FAIL] policy rule create -- 500 {"detail":"Internal server error."}
+[PASS] policy decision -- ai_rec=allow final=force_pqc rule=restricted-forces-pqc-a0d67f1d overridden=True
+[PASS] crypto profile -- profile_type=hybrid consensus=0.762
+[PASS] manual override -- CONFIDENTIAL -> PUBLIC
+[FAIL] migration rank #1 -- 500 {"detail":"Internal server error."}
+[FAIL] migration rank #2 -- 500 {"detail":"Internal server error."}
+[PASS] graph status -- configured=True
+[PASS] graph seed -- nodes=5 rels=6
+[PASS] graph document paths -- 200 paths=3
+[PASS] rag ingest -- chunks=11 model=BAAI/bge-large-en-v1.5
+[PASS] rag ask (grounded) -- verified=True citations=2 refusal=None
+[PASS] rag ask (ungrounded -> refusal) -- verified=False refusal=No retrieved record cleared the grounding similarity floor for this question. Ingest relevant document records first (POST /api/v1/rag/ingest).
+[PASS] audit entries (doc a) -- 200 count=13
+[PASS] audit verify (doc a chain) -- 200 valid=True
+[PASS] audit verify (system chain) -- 200 valid=True entries=14
+[PASS] audit checkpoint (ML-DSA-87 sign) -- alg=ML-DSA-87 tree_size=13 sig_len=9254 key=228662cf-f5f8-498f-8eb3-2fb892226496
+[PASS] audit checkpoint verify -- valid=True sig=True root=True
+[PASS] audit signing-key -- 200 alg=ML-DSA-87
+[PASS] audit inclusion-proof -- 200 ok
+[PASS] audit consistency-proof -- 200 1->13
+[PASS] register doc b -- 201 id=eb7a6370-667a-4443-a7bc-662fc4ce32e9
+[PASS] classify doc b -- label=CONFIDENTIAL conf=0.797 model_version=multigenre-hashing-svm-1.0.0
+[PASS] classify doc b uses REAL trained model -- got 'multigenre-hashing-svm-1.0.0', expected 'multigenre-hashing-svm-1.0.0'
+[PASS] assessment (real 5 agents) -- consensus=0.708 ai_rec=require_mfa final=force_pqc profile=hybrid encrypted=True reselected=False
+
+=== 29/32 checks passed ===
+FAILURES:
+  - policy rule create: 500 {"detail":"Internal server error."}
+  - migration rank #1: 500 {"detail":"Internal server error."}
+  - migration rank #2: 500 {"detail":"Internal server error."}

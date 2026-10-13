@@ -1,10 +1,21 @@
 """Explicit weighted-mean consensus, ``SPEC.md`` 3.5, ``PRD.md`` FR-4.
 
-THIS MODULE'S WEIGHTS ARE PLACEHOLDERS. They have no calibration against real
-incident data. Equal fifths exist so the function is deterministic and
-reviewable, not because 0.200 is an empirically justified share. Changing any
-weight requires bumping ``CONSENSUS_VERSION`` so stored rows remain attributable
-to the formula that produced them.
+The five agent weights are *principled policy weights*, not an incident-derived
+calibration: no labelled outcomes dataset exists in this repository, so this
+module does not claim empirical precision. It records the risk posture the
+consensus enforces until a measured calibration pack supersedes it, exactly as
+the trust-to-crypto and trust-to-action bands do (``docs/decisions.md``,
+2026-09-23 and 2026-09-15 entries).
+
+SECURITY and COMPLIANCE co-lead: NIST SP 800-53 / CSF core risk and ISO/IEC
+27001 + regulatory obligation are both first-order for a regulated platform.
+CONTEXTUAL (NIST SP 800-207 zero-trust, per-access) sits below them, QUANTUM
+(harvest-now-decrypt-later, forward-looking) below that, and SUSTAINABILITY — an
+efficiency signal that rewards lighter protection — carries the least say in a
+*protection* trust score. Weighting the efficiency agent lowest is itself the
+"ambiguity resolves toward more protection" posture. Changing any weight
+requires bumping ``CONSENSUS_VERSION`` so stored rows remain attributable to the
+formula that produced them.
 
 v1 is a weighted arithmetic mean over exactly the five ``AgentType`` values.
 A partial set is refused, not filled in. Inventing a missing agent's score
@@ -26,15 +37,16 @@ from app.db.enums import AgentType
 from app.db.models.risk import EXPECTED_AGENT_COUNT
 
 #: Recorded on every ``trust_scores`` row and its audit payload.
-CONSENSUS_VERSION = "trust-weighted-mean-0.1.0"
+CONSENSUS_VERSION = "trust-weighted-mean-1.0.0"
 
-#: Equal fifths. Sum is exactly ``1.000``. See the module docstring.
+#: Principled NIST/ISO policy weights (security + compliance co-lead). Sum is
+#: exactly ``1.000``. See the module docstring and ``docs/decisions.md``.
 WEIGHTS: dict[AgentType, Decimal] = {
-    AgentType.SECURITY: Decimal("0.200"),
-    AgentType.COMPLIANCE: Decimal("0.200"),
+    AgentType.SECURITY: Decimal("0.250"),
+    AgentType.COMPLIANCE: Decimal("0.250"),
     AgentType.CONTEXTUAL: Decimal("0.200"),
-    AgentType.QUANTUM: Decimal("0.200"),
-    AgentType.SUSTAINABILITY: Decimal("0.200"),
+    AgentType.QUANTUM: Decimal("0.175"),
+    AgentType.SUSTAINABILITY: Decimal("0.125"),
 }
 
 #: Three decimal places, matching ``trust_scores.consensus_value`` ``numeric(4,3)``

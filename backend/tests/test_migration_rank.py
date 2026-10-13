@@ -2,6 +2,7 @@
 
 from app.scheduler.baselines import greedy_select, simulated_annealing_select
 from app.scheduler.candidates import MigrationCandidate
+from app.scheduler import qaoa as qaoa_mod
 from app.scheduler.qaoa import qaoa_select
 from app.db.enums import CryptoProfileType
 from uuid import uuid4
@@ -73,9 +74,69 @@ def test_rank_endpoint_returns_baselines(client, db_session, registered_document
     assert "baselines" in body
     assert len(body["baselines"]) == 2
     assert body["primary"]["method"].startswith("qaoa")
-    assert "qiskit" not in body["primary"]["method"]
+    # Qiskit is installed here, so a genuine Qiskit QAOA run is expected. The
+    # numpy statevector fallback (also "qaoa*") is accepted for hosts without a
+    # working Qiskit build.
+    assert body["primary"]["method"] in {
+        "qaoa_qiskit",
+        "qaoa_numpy",
+        "qaoa_numpy_approx",
+    }
     assert "budget" in body["constraint_snapshot"]
     assert "baselines" in body["constraint_snapshot"]
     assert body["constraint_snapshot"]["window_days"] == 30
     assert body["schedule"]
     assert body["schedule"][0]["scheduled_upgrade_date"] is not None
+
+
+def _unit_cost_cands() -> list[MigrationCandidate]:
+    """Three unit-cost candidates so a budget of 1.0 admits exactly one."""
+    return [
+        MigrationCandidate(
+            document_id=uuid4(),
+            filename=name,
+            score=score,
+            cost=1.0,
+            profile_type=CryptoProfileType.AES256,
+            sensitivity_label="RESTRICTED",
+            trust_score="0.20",
+            risk_value="0.80",
+        )
+        for name, score in (("a.pdf", 0.9), ("b.pdf", 0.85), ("c.pdf", 0.1))
+    ]
+
+
+def test_qaoa_uses_numpy_fallback_when_qiskit_unavailable(monkeypatch) -> None:
+    """With Qiskit reported absent, the exact numpy statevector QAOA runs."""
+    monkeypatch.setattr(qaoa_mod, "qiskit_available", lambda: False)
+    cands = _unit_cost_cands()
+    budget = 1.0
+
+    result = qaoa_select(cands, budget=budget, seed=1)
+
+    assert result.method == "qaoa_numpy"
+    assert result.total_cost <= budget + 1e-6
+    assert len(result.selected_ids) >= 1
+    # Unit costs + budget 1.0 mean a compliant solver cannot take every item;
+    # the budget genuinely constrains the selection rather than being trivially
+    # satisfied.
+    assert len(result.selected_ids) < len(cands)
+
+
+def test_qaoa_falls_back_to_numpy_when_qiskit_raises(monkeypatch) -> None:
+    """A Qiskit build that raises is caught and the numpy path takes over."""
+    monkeypatch.setattr(qaoa_mod, "qiskit_available", lambda: True)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("qiskit build broken")
+
+    monkeypatch.setattr(qaoa_mod, "_qiskit_qaoa_select", _boom)
+    cands = _unit_cost_cands()
+    budget = 1.0
+
+    result = qaoa_select(cands, budget=budget, seed=1)
+
+    assert result.method == "qaoa_numpy"
+    assert result.total_cost <= budget + 1e-6
+    assert len(result.selected_ids) >= 1
+    assert len(result.selected_ids) < len(cands)

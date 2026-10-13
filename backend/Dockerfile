@@ -89,6 +89,26 @@ COPY --from=builder /opt/liboqs /opt/liboqs
 WORKDIR /srv
 COPY --chown=qaegis:qaegis app ./app
 
+# The trained sensitivity classifier (FR-1, SPEC.md 3.2). Baked like liboqs and
+# the embedding model so the image is self-contained and the runtime never
+# fetches it. Ships the multi-genre hashing-SVM bundle (its evaluation report
+# rides along for provenance) — trained across diplomatic cables, code, prose,
+# forms, medical/financial and synthetic detector-positive documents so it
+# generalises beyond any single genre. CLASSIFIER_MODEL_PATH below activates the
+# trained engine (paired with the deterministic detector backstop in
+# app/classifier/detectors.py); clear it to fall back to the keyword engine.
+COPY --chown=qaegis:qaegis \
+     artifacts/classifier/multigenre-hashing-svm-1.0.0.joblib \
+     artifacts/classifier/multigenre-hashing-svm-1.0.0.evaluation.json \
+     ./artifacts/classifier/
+ENV CLASSIFIER_MODEL_PATH=/srv/artifacts/classifier/multigenre-hashing-svm-1.0.0.joblib
+
+# Uploaded document bytes live here (DOCUMENT_STORAGE_DIR). Create and hand the
+# tree to the unprivileged user BEFORE dropping privileges, so writes under the
+# mounted volume succeed. The compose volume must be fresh (or chowned) to
+# inherit this ownership; a pre-existing root-owned volume masks it.
+RUN mkdir -p /data/documents && chown -R qaegis:qaegis /data
+
 USER qaegis
 
 EXPOSE 8000

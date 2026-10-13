@@ -16,7 +16,12 @@ from app.risk_engine.scheduler import _tick_once
 from tests.factories import make_risk_score
 
 
-def test_snapshot_from_stored_refreshes_accessed_at() -> None:
+def test_snapshot_from_stored_rederives_after_hours() -> None:
+    """The refreshed wall-clock re-derives after_hours; the stored bool is
+    never trusted. Stored ``after_hours`` is False, but a 22:00 UTC tick is
+    03:30 in Asia/Kolkata — after hours — so the rebuilt snapshot flips to
+    True, and the default timezone is applied when the row predates 0.2.0.
+    """
     raw = {
         "actor_user_id": str(uuid4()),
         "device_id": "laptop-1",
@@ -28,6 +33,24 @@ def test_snapshot_from_stored_refreshes_accessed_at() -> None:
     snap = snapshot_from_stored(raw, accessed_at=tick)
     assert snap.accessed_at == tick
     assert snap.device_is_new is True
+    assert snap.after_hours is True
+    assert snap.org_timezone == "Asia/Kolkata"
+
+
+def test_snapshot_from_stored_honours_stored_timezone() -> None:
+    """A stored non-default timezone drives the re-derivation."""
+    raw = {
+        "actor_user_id": str(uuid4()),
+        "device_id": "laptop-1",
+        "device_is_new": False,
+        "accessed_at": "2026-01-01T10:00:00+00:00",
+        "after_hours": True,
+        "org_timezone": "UTC",
+    }
+    # 12:00 UTC is inside 09:00-18:00 on a Monday in UTC -> business hours.
+    tick = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
+    snap = snapshot_from_stored(raw, accessed_at=tick)
+    assert snap.org_timezone == "UTC"
     assert snap.after_hours is False
 
 

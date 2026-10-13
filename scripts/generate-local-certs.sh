@@ -41,6 +41,8 @@ DNS.4 = backend
 DNS.5 = qaegis-postgres
 DNS.6 = qaegis-redis
 DNS.7 = qaegis-backend
+DNS.8 = neo4j
+DNS.9 = qaegis-neo4j
 IP.1 = 127.0.0.1
 EOF
 

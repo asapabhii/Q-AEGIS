@@ -73,6 +73,27 @@ class Settings(BaseSettings):
     # scheduler tick (tests, CI). Triggers via the bus still work.
     risk_recompute_interval_seconds: int = Field(default=300, ge=0)
 
+    # Transactional outbox relay, SPEC.md 3.1. Every domain write persists its
+    # events to the ``event_outbox`` table in the same transaction; this relay
+    # drains pending rows to Redis Streams. Durability lives in the table, not in
+    # process memory, so an event committed to the database is delivered even if
+    # the process dies before publishing.
+    #
+    # Poll interval in seconds between relay drains. 0 disables the background
+    # relay thread (tests / CI drive ``drain_once`` directly). A committed row is
+    # still published promptly via the after-commit nudge when the thread runs.
+    outbox_relay_interval_seconds: float = Field(default=2.0, ge=0.0, le=3600.0)
+    # Rows claimed per drain. FOR UPDATE SKIP LOCKED means several relay workers
+    # can run without double-publishing, so this bounds one worker's batch.
+    outbox_relay_batch_size: int = Field(default=100, ge=1, le=1000)
+    # Publish attempts before a row is dead-lettered (status='dead'). The row is
+    # retained for inspection and manual requeue, never dropped.
+    outbox_max_attempts: int = Field(default=8, ge=1, le=100)
+    # Exponential backoff base, in seconds: delay = base * 2**(attempts-1),
+    # capped at ``outbox_retry_cap_seconds``.
+    outbox_retry_base_seconds: float = Field(default=2.0, gt=0.0, le=3600.0)
+    outbox_retry_cap_seconds: float = Field(default=300.0, gt=0.0, le=86400.0)
+
     # AES wrapping key for document DEKs, SPEC.md Section 6 / NG5.
     # Base64url-encoded 32-byte key. Optional until encrypt is invoked.
     crypto_master_key: str | None = None
@@ -121,10 +142,57 @@ class Settings(BaseSettings):
     # sensitive label. Load-bearing for the system's security posture, see
     # app/classifier/stub_classifier.py.
     classifier_confidence_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    # Path to a trained classifier artifact (produced by
+    # app/classifier/training.py). When set and the file exists, the runtime
+    # loads the model and the keyword rules become an escalation-only override;
+    # when unset or missing, the classifier falls back to the keyword engine.
+    # The trained model predicts only the three markings present in the training
+    # corpus (PUBLIC/CONFIDENTIAL/RESTRICTED); INTERNAL is a policy-layer tier,
+    # never an ML output. See docs/classifier-dataset.md.
+    classifier_model_path: str | None = None
+
+    # Five-agent scoring, SPEC.md 3.4 / FR-3.
+    # Backend: "anthropic" (real Claude scoring; each agent's model, prompt, and
+    # response are recorded in the audit) or "deterministic" (the reviewable
+    # heuristic scorers). Default is deterministic so the app runs without
+    # credentials; set anthropic + AGENT_LLM_API_KEY to activate real agents.
+    agent_llm_backend: str = "deterministic"
+    agent_llm_model: str = "claude-opus-4-8"
+    agent_llm_api_key: str | None = None
+    # Optional override for Anthropic-compatible gateways/proxies.
+    agent_llm_base_url: str | None = None
+    agent_llm_max_tokens: int = Field(default=512, ge=64, le=4096)
+    agent_llm_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    # Extra CA bundle (PEM path) to trust for the agent LLM endpoint ONLY, on top
+    # of the public roots. Set this when the endpoint is reached through a
+    # corporate TLS-inspection proxy (e.g. Sophos/Zscaler) that re-signs traffic
+    # with a private CA the public bundle does not contain. When set, the pedantic
+    # VERIFY_X509_STRICT check (Python 3.13 default) is relaxed for this client
+    # only, since interception CAs frequently ship a non-critical basicConstraints
+    # extension; hostname and chain verification stay on. Scoped to the LLM client,
+    # so datastore and other outbound TLS are unaffected.
+    agent_llm_ca_bundle: str | None = None
 
     def cors_origin_list(self) -> list[str]:
         """Parse ``cors_origins`` into a list of non-empty origins."""
         return [part.strip() for part in self.cors_origins.split(",") if part.strip()]
+
+    #: Environments where the forgeable X-Q-AEGIS-Actor-Role header may act as an
+    #: identity bypass. Anything else (staging, production) must use real JWTs.
+    _DEV_BYPASS_ENVS = frozenset({"local", "dev", "development", "test", "ci"})
+
+    def dev_header_bypass_allowed(self) -> bool:
+        """Whether the dev role-header bypass is actually honored.
+
+        Defence in depth: even if ``AUTH_DEV_HEADER_BYPASS`` is left true, a
+        non-local ``APP_ENV`` disables it, so a flag that leaks into staging or
+        production cannot authenticate anyone. Callers must gate the bypass on
+        this method, never on the raw flag.
+        """
+        return (
+            self.auth_dev_header_bypass
+            and self.app_env.strip().lower() in self._DEV_BYPASS_ENVS
+        )
 
 
 @lru_cache(maxsize=1)

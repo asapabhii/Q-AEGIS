@@ -19,12 +19,22 @@ export type SessionUser = {
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    // localStorage can throw (private mode, blocked cookies, quota).
+    return null;
+  }
 }
 
 export function getSessionUser(): SessionUser | null {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(USER_KEY);
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(USER_KEY);
+  } catch {
+    return null;
+  }
   if (!raw) return null;
   try {
     return JSON.parse(raw) as SessionUser;
@@ -33,25 +43,40 @@ export function getSessionUser(): SessionUser | null {
   }
 }
 
-export function setSession(
-  token: string,
-  user: SessionUser
-): void {
-  window.localStorage.setItem(TOKEN_KEY, token);
-  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+export function setSession(token: string, user: SessionUser): void {
+  try {
+    window.localStorage.setItem(TOKEN_KEY, token);
+    window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    // Non-fatal: auth still works for this tab via in-memory context state.
+  }
 }
 
 export function clearSession(): void {
-  window.localStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem(USER_KEY);
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(USER_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
+  }
 }
 
 /** Dev-only role when no JWT is present. */
 export function getDevRole(): UserRole | null {
   if (typeof window === "undefined") return null;
-  return (window.localStorage.getItem(DEV_ROLE_KEY) as UserRole | null) ?? null;
+  try {
+    return (
+      (window.localStorage.getItem(DEV_ROLE_KEY) as UserRole | null) ?? null
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function setDevRole(role: UserRole): void {
-  window.localStorage.setItem(DEV_ROLE_KEY, role);
+  try {
+    window.localStorage.setItem(DEV_ROLE_KEY, role);
+  } catch {
+    // Non-fatal: the role still applies in-memory for this session.
+  }
 }

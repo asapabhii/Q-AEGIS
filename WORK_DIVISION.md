@@ -2,6 +2,8 @@
 
 Ownership by module. Reference: `SPEC.md` for what each module does, `PRD.md` for the requirement each module satisfies.
 
+This is the current, authoritative allocation of work across the three inventors — Abhinav, Udhav, and Sukhmani — not a historical record. The split is intended to be equitable: each owner carries a comparable share of the system's substance — Abhinav the shared foundation and the scoring spine (data model, contextual risk, five-agent orchestration, trust consensus, knowledge graph, agentic RAG), Udhav the entire enforcement-and-cryptography half (policy engine, crypto-agile engine, tamper-evident audit, crypto-shredding, migration scheduler), and Sukhmani the classification model, the full operator frontend, documentation, and cross-module test authorship. All three are named inventors on the patent filing and authors on the project; keep `PRD.md`, `Q-AEGIS-PATENT-SPECIFICATION.md`, and `Q-AEGIS-PROJECT-REPORT.md` consistent with this file.
+
 ---
 
 ## Abhinav

@@ -6,10 +6,23 @@ from uuid import uuid4
 
 import pytest
 
-from app.agents import AssessmentInput, FAILURE_TRUST_SCORE, run_assessment
-from app.agents.scoring import SCORERS, score_security
+from app.agents import (
+    AccessFeatures,
+    AssessmentInput,
+    FAILURE_TRUST_SCORE,
+    run_assessment,
+)
+from app.agents.scoring import (
+    SCORER_VERSIONS,
+    SCORERS,
+    score_compliance,
+    score_contextual,
+    score_quantum,
+    score_security,
+    score_sustainability,
+)
 from app.classifier.labels import SensitivityLabel
-from app.db.enums import AgentType
+from app.db.enums import AgentType, UserRole
 from app.risk_engine.scorer import ContextSnapshot
 from app.trust_engine.consensus import combine
 
@@ -35,6 +48,7 @@ def _input(
     filename: str = "quarterly-report.pdf",
     device_is_new: bool = False,
     after_hours: bool = False,
+    features: AccessFeatures | None = None,
 ) -> AssessmentInput:
     return AssessmentInput(
         sensitivity_label=label,
@@ -44,6 +58,7 @@ def _input(
             device_is_new=device_is_new,
             after_hours=after_hours,
         ),
+        features=features if features is not None else AccessFeatures(),
     )
 
 
@@ -124,3 +139,115 @@ def test_security_scorer_matches_orchestrated_output() -> None:
     )
     assert actual.score == expected.score
     assert actual.rationale == expected.rationale
+
+
+def test_every_scorer_stamps_its_version_in_the_rationale() -> None:
+    outputs = run_assessment(_input())
+    for item in outputs:
+        assert SCORER_VERSIONS[item.agent_type] in item.rationale
+        assert "backend=deterministic" in item.rationale
+
+
+def test_access_features_json_round_trips() -> None:
+    features = AccessFeatures(
+        actor_prior_access_count=9,
+        actor_device_prior_count=4,
+        actor_after_hours_count=3,
+        device_distinct_actor_count=2,
+        document_prior_access_count=5,
+        document_prior_risk_value=Decimal("0.4500"),
+        actor_role=UserRole.DATA_OWNER.value,
+        payload_byte_size=2048,
+    )
+    assert AccessFeatures.from_json(features.as_json()) == features
+
+
+def test_rich_features_round_trip_through_the_graph() -> None:
+    # A feature bundle must survive serialisation into LangGraph state and be
+    # rebuilt identically, so the orchestrated output equals the direct call.
+    features = AccessFeatures(
+        actor_prior_access_count=12,
+        actor_device_prior_count=7,
+        actor_after_hours_count=1,
+        device_distinct_actor_count=3,
+        document_prior_access_count=4,
+        document_prior_risk_value=Decimal("0.3000"),
+        actor_role=UserRole.SECURITY_ADMIN.value,
+        payload_byte_size=4096,
+    )
+    assessment_input = _input(
+        label=SensitivityLabel.CONFIDENTIAL,
+        device_is_new=True,
+        after_hours=True,
+        features=features,
+    )
+    expected = score_security(assessment_input)
+    actual = next(
+        item
+        for item in run_assessment(assessment_input)
+        if item.agent_type == AgentType.SECURITY
+    )
+    assert actual.score == expected.score
+    assert actual.rationale == expected.rationale
+
+
+def test_security_penalises_a_shared_device() -> None:
+    known = AccessFeatures(actor_prior_access_count=5, actor_device_prior_count=5)
+    shared = AccessFeatures(
+        actor_prior_access_count=5,
+        actor_device_prior_count=5,
+        device_distinct_actor_count=4,
+    )
+    private_score = score_security(_input(features=known)).score
+    shared_score = score_security(_input(features=shared)).score
+    assert shared_score < private_score
+
+
+def test_contextual_rewards_a_device_known_to_the_actor() -> None:
+    first_contact = score_contextual(_input(features=AccessFeatures())).score
+    familiar = score_contextual(
+        _input(
+            features=AccessFeatures(
+                actor_prior_access_count=8, actor_device_prior_count=8
+            )
+        )
+    ).score
+    assert familiar > first_contact
+
+
+def test_compliance_flags_privileged_role_on_a_new_device() -> None:
+    ordinary = AccessFeatures(actor_role=UserRole.DATA_OWNER.value)
+    privileged = AccessFeatures(actor_role=UserRole.SECURITY_ADMIN.value)
+    ordinary_score = score_compliance(
+        _input(label=SensitivityLabel.RESTRICTED, device_is_new=True, features=ordinary)
+    ).score
+    privileged_score = score_compliance(
+        _input(
+            label=SensitivityLabel.RESTRICTED, device_is_new=True, features=privileged
+        )
+    ).score
+    assert privileged_score < ordinary_score
+
+
+def test_quantum_uses_longevity_and_has_no_risk_cliff() -> None:
+    long_lived = score_quantum(
+        _input(label=SensitivityLabel.CONFIDENTIAL, filename="archive.zip")
+    ).score
+    short_lived = score_quantum(
+        _input(label=SensitivityLabel.CONFIDENTIAL, filename="scratch.tmp")
+    ).score
+    assert short_lived > long_lived
+    # Continuous risk term: a hair over the old 0.50 boundary must not jump.
+    below = score_quantum(_input(risk_value="0.5000")).score
+    above = score_quantum(_input(risk_value="0.5100")).score
+    assert abs(below - above) < Decimal("0.01")
+
+
+def test_sustainability_reflects_payload_size() -> None:
+    small = score_sustainability(
+        _input(features=AccessFeatures(payload_byte_size=1024))
+    ).score
+    large = score_sustainability(
+        _input(features=AccessFeatures(payload_byte_size=10_000_000))
+    ).score
+    assert large < small

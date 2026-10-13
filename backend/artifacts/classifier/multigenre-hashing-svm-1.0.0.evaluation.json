@@ -1,0 +1,48 @@
+{
+  "calibration_size": 4016,
+  "dataset_fingerprint": "7d66c0f4f7f318d9ca889e60ea0f0f7ec21c5492bca7fd0c0963a267a96dda27",
+  "epochs": 5,
+  "labels": [
+    "CONFIDENTIAL",
+    "PUBLIC",
+    "RESTRICTED"
+  ],
+  "model_version": "multigenre-hashing-svm-1.0.0",
+  "n_features": 1048576,
+  "report": {
+    "CONFIDENTIAL": {
+      "f1-score": 0.8565531475748194,
+      "precision": 0.8767605633802817,
+      "recall": 0.8372562205783457,
+      "support": 1487.0
+    },
+    "PUBLIC": {
+      "f1-score": 0.9484334203655352,
+      "precision": 0.9380245319561007,
+      "recall": 0.9590759075907591,
+      "support": 1515.0
+    },
+    "RESTRICTED": {
+      "f1-score": 0.8349788434414669,
+      "precision": 0.8222222222222222,
+      "recall": 0.8481375358166189,
+      "support": 1047.0
+    },
+    "accuracy": 0.8856507779698691,
+    "macro avg": {
+      "f1-score": 0.8799884704606072,
+      "precision": 0.8790024391862016,
+      "recall": 0.8814898879952412,
+      "support": 4049.0
+    },
+    "weighted avg": {
+      "f1-score": 0.885352929459313,
+      "precision": 0.885580832384944,
+      "recall": 0.8856507779698691,
+      "support": 4049.0
+    }
+  },
+  "test_size": 4049,
+  "train_size": 33139,
+  "training_method": "streaming-hashing-tfidf-svm"
+}

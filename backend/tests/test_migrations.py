@@ -15,7 +15,7 @@ from sqlalchemy import Engine, text
 
 from tests.conftest import alembic_config
 
-#: Tables the initial migration creates, excluding Alembic's own bookkeeping.
+#: Tables the migrations create by ``head``, excluding Alembic's own bookkeeping.
 EXPECTED_TABLES = frozenset(
     {
         "users",
@@ -32,6 +32,9 @@ EXPECTED_TABLES = frozenset(
         "migration_schedule",
         "audit_log",
         "rag_chunks",
+        "event_outbox",
+        "audit_signing_keys",
+        "audit_checkpoints",
     }
 )
 
@@ -48,7 +51,7 @@ EXPECTED_ENUM_TYPES = frozenset(
     }
 )
 
-#: Every trigger the migration installs, as (table, trigger) pairs.
+#: Every trigger the migrations install, as (table, trigger) pairs.
 EXPECTED_TRIGGERS = frozenset(
     {
         ("audit_log", "trg_audit_log_no_update"),
@@ -58,6 +61,14 @@ EXPECTED_TRIGGERS = frozenset(
         ("risk_scores", "trg_risk_scores_no_update"),
         ("trust_scores", "trg_trust_scores_no_update"),
         ("crypto_profiles", "trg_crypto_profiles_no_update"),
+        # PQ-signed checkpoints and their signing keys are tamper-evidence, so
+        # both reject UPDATE, DELETE, and TRUNCATE, like audit_log.
+        ("audit_signing_keys", "trg_audit_signing_keys_no_update"),
+        ("audit_signing_keys", "trg_audit_signing_keys_no_delete"),
+        ("audit_signing_keys", "trg_audit_signing_keys_no_truncate"),
+        ("audit_checkpoints", "trg_audit_checkpoints_no_update"),
+        ("audit_checkpoints", "trg_audit_checkpoints_no_delete"),
+        ("audit_checkpoints", "trg_audit_checkpoints_no_truncate"),
     }
 )
 

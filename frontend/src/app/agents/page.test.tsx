@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import AgentsPage from "./page";
 import { getDocumentAgents } from "@/lib/api/client";
+import { RoleProvider } from "@/lib/context/RoleContext";
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/client")>();
@@ -13,6 +14,7 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("document_id=doc-1"),
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 const mockAgents = vi.mocked(getDocumentAgents);
@@ -35,8 +37,12 @@ describe("AgentsPage", () => {
   });
 
   it("loads agent deep-dive for the query document", async () => {
-    render(<AgentsPage />);
-    expect(screen.getByText(/agent deep-dive/i)).toBeInTheDocument();
+    render(
+      <RoleProvider>
+        <AgentsPage />
+      </RoleProvider>
+    );
+    expect(screen.getByText(/agent analysis/i)).toBeInTheDocument();
     expect(
       await screen.findByText(/no risk assessment has been recorded/i)
     ).toBeInTheDocument();
