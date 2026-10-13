@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import { useRole } from "@/lib/context/RoleContext";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
+import NotPermitted from "@/components/ui/NotPermitted";
 import {
   ApiError,
   createPolicyRule,
@@ -21,7 +23,6 @@ import type {
   PolicyAction,
   PolicyRuleResponse,
   PolicyRuleTestResponse,
-  UserRole,
 } from "@/lib/api/types";
 import {
   CONDITION_FIELDS,
@@ -47,12 +48,12 @@ function valueChoices(field: ConditionField): readonly string[] | null {
   return null;
 }
 
-const RULES_ALLOWED_ROLES: UserRole[] = ["security_admin", "compliance_officer", "ciso"];
-
 export function RuleBuilderScreen() {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role: contextRole } = useRole();
-  const role = RULES_ALLOWED_ROLES.includes(contextRole) ? contextRole : "compliance_officer";
+  const { role } = useRole();
+  // POST /policy-rules[/test] is compliance_officer-only server-side. Send the
+  // real role; unauthorized callers get an honest 403 state, never a remap.
+  const permitted = roleAllowed(ACCESS.rules, role);
   const [ruleName, setRuleName] = useState("");
   const [action, setAction] = useState<PolicyAction>("deny");
   const [priority, setPriority] = useState("10");
@@ -164,8 +165,18 @@ export function RuleBuilderScreen() {
 
       </header>
 
-      {/* Success Banner */}
-      {saved && (
+      {!permitted && (
+        <NotPermitted
+          role={role}
+          allowed={ACCESS.rules}
+          resource="Authoring policy rules"
+        />
+      )}
+
+      {permitted && (
+        <>
+          {/* Success Banner */}
+          {saved && (
         <div
           data-reveal
           className="card p-6 flex items-start gap-4"
@@ -714,6 +725,8 @@ export function RuleBuilderScreen() {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

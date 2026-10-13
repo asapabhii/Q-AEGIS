@@ -3,13 +3,13 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { SiteNav } from "@/components/SiteNav";
 import { ApiError, login } from "@/lib/api/client";
-import { clearSession, getSessionUser } from "@/lib/auth/session";
+import { useRole } from "@/lib/context/RoleContext";
+import { ROLE_LABELS, landingPathForRole } from "@/lib/auth/roles";
 
 export default function LoginPage() {
   const router = useRouter();
-  const existing = typeof window !== "undefined" ? getSessionUser() : null;
+  const { user, isAuthenticated, signIn, signOut } = useRole();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -20,8 +20,19 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login({ email, password });
-      router.push("/dashboard");
+      const result = await login({ email, password });
+      // login() already persisted the JWT via setSession; adopt it into the
+      // shared role context so the shell and every page see it immediately.
+      signIn({
+        id: result.user_id,
+        email: result.email,
+        role: result.role,
+        name: result.name,
+      });
+      // Land on the role's most useful screen. A fixed "/dashboard" here sent
+      // data_owner and compliance_officer straight to a "not permitted" wall,
+      // since that route is gated to the inventory readers.
+      router.push(landingPathForRole(result.role));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Network error");
     } finally {
@@ -47,7 +58,6 @@ export default function LoginPage() {
               </p>
             </div>
           </div>
-          <SiteNav active="/login" />
         </div>
       </header>
 
@@ -56,16 +66,13 @@ export default function LoginPage() {
           onSubmit={handleSubmit}
           className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 space-y-4"
         >
-          {existing && (
+          {isAuthenticated && user && (
             <p className="text-sm text-[var(--color-text-secondary)]">
-              Signed in as {existing.email} ({existing.role}).{" "}
+              Signed in as {user.email} ({ROLE_LABELS[user.role]}).{" "}
               <button
                 type="button"
                 className="text-cyan-400 hover:underline"
-                onClick={() => {
-                  clearSession();
-                  window.location.reload();
-                }}
+                onClick={signOut}
               >
                 Sign out
               </button>

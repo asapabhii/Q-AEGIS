@@ -54,7 +54,10 @@ class RiskScore(Base):
     # three would store a different number than the API returned. Same reason
     # as classification_metadata.confidence_score.
     risk_value: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
-    model_version: Mapped[str] = mapped_column(String(30), nullable=False)
+    # 64, not 30: kept in step with classification_metadata.model_version. The
+    # current "contextual-risk-additive-0.1.0" is exactly 30 chars, so any longer
+    # scorer version would overflow the old width. See that column's note.
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     context_snapshot: Mapped[dict[str, Any]] = jsonb_column()
     computed_at: Mapped[datetime] = created_timestamp(index=True)
 

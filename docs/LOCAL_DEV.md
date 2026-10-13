@@ -341,8 +341,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/risk-scores \
   }'
 ```
 
-`after_hours` is whatever the caller asserts, not something the server derives
-from `accessed_at`. Re-scoring appends a new row; prior scores stay.
+`after_hours` is derived by the server from `accessed_at` and the request's
+`org_timezone` (weekday 09:00–18:00 local counts as business hours; anything else
+is after-hours) when the caller omits it, and honoured as sent when the caller
+supplies it explicitly, as above. `org_timezone` defaults to `Asia/Kolkata`. See
+`derive_after_hours` in `backend/app/risk_engine/schemas.py`. Re-scoring appends a
+new row; prior scores stay.
 
 ### Compute a trust score
 
@@ -446,8 +450,11 @@ hybrid (`X25519MLKEM768`), or full post-quantum. The server computes
 `profile_type`; the client cannot supply it. Roles: `security_analyst` and
 `security_admin`. An unknown `trust_score_id` is a 404. If this document has
 no `policy_decisions` row yet, the call is 422 — run the policy gate first
-(FR-6). A `deny` still counts. Thresholds are placeholders (`<= 0.4`
-post-quantum, `<= 0.8` hybrid, else AES-256). This does not encrypt bytes.
+(FR-6). A `deny` still counts. Thresholds are the calibrated policy bands
+`trust-crypto-policy-bands-1.0.0` (`<= 0.50` post-quantum, `<= 0.85` hybrid, else
+AES-256; boundaries resolve toward more protection). See `POST_QUANTUM_MAX` /
+`HYBRID_MAX` in `backend/app/crypto/selector.py` and `docs/decisions.md`
+(2026-09-15). This does not encrypt bytes.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/crypto-profiles \
@@ -472,8 +479,9 @@ flake8 .
 ```
 
 `black .` without `--check` applies the formatting. The floor is 70% on new code
-per `AGENTS.md`; the suite currently sits at 100%, so a drop is a signal you left
-something untested, not headroom to spend.
+per `AGENTS.md`, enforced in CI by `--cov-fail-under=70`; the gate is a floor, not
+a report, so a drop is a signal you left something untested, not headroom to
+spend.
 
 Warnings are errors in this suite (`backend/pyproject.toml`). If a dependency
 bump starts emitting a `DeprecationWarning`, the suite fails at that commit

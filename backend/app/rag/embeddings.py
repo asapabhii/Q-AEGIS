@@ -51,6 +51,9 @@ def _fastembed_model(model_name: str):
     """
     from fastembed import TextEmbedding
 
+    cache_dir = get_settings().rag_embedding_cache_dir
+    if cache_dir:
+        return TextEmbedding(model_name=model_name, cache_dir=cache_dir)
     return TextEmbedding(model_name=model_name)
 
 

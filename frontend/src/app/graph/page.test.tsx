@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import GraphPage from "./page";
 import { getGraphStatus, seedGraph } from "@/lib/api/client";
+import { RoleProvider } from "@/lib/context/RoleContext";
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/client")>();
@@ -31,8 +32,12 @@ describe("GraphPage", () => {
       relationships_upserted: 6,
       demo: true,
     });
-    render(<GraphPage />);
-    expect(await screen.findByText(/Neo4j configured: yes/i)).toBeInTheDocument();
+    render(
+      <RoleProvider>
+        <GraphPage />
+      </RoleProvider>
+    );
+    expect(await screen.findByText(/Neo4j connected/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /seed demo graph/i }));
     expect(await screen.findByText(/Seeded 5 nodes/i)).toBeInTheDocument();
   });

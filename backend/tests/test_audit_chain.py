@@ -598,6 +598,67 @@ def test_an_ambiguous_system_chain_is_refused_too(db_session: Session) -> None:
         append(db_session, None, "next")
 
 
+def test_a_repeated_payload_on_one_chain_is_refused(
+    db_session: Session, registered_document: Document
+) -> None:
+    """A byte-identical payload twice on one chain is refused, not silently taken.
+
+    Two entries with the same payload share a ``payload_hash``, so the next
+    entry's ``prev_hash`` no longer names a single predecessor: tail-finding sees
+    both as built-on, returns ``None``, and every later append is computed as a
+    second genesis that collides on ``no_forked_chain``. One deterministic event
+    type would wedge the whole chain, and the failure would surface far from the
+    duplicate. The append path refuses it up front, attributably.
+    """
+    append(db_session, registered_document.id, "same")
+
+    with pytest.raises(audit_repo.DuplicateAuditPayloadError, match="distinct"):
+        append(db_session, registered_document.id, "same")
+
+
+def test_a_repeated_payload_on_the_system_chain_is_refused(
+    db_session: Session,
+) -> None:
+    """The null-document chain gets the same guard — its live failure mode.
+
+    A re-seed of the fixed demo graph, or a ranking run with no candidates,
+    produces a byte-identical system-chain payload every time. Before the guard,
+    the second such write poisoned tail-finding and every subsequent system event
+    (policy-rule creation, migration ranking) then failed with an opaque
+    ``no_forked_chain`` violation. Asserted separately because the tail query
+    branches on a null ``document_id`` and runs different SQL.
+    """
+    append(db_session, None, "system-same")
+
+    with pytest.raises(audit_repo.DuplicateAuditPayloadError):
+        append(db_session, None, "system-same")
+
+
+def test_the_same_payload_on_different_chains_is_allowed(
+    db_session: Session, registered_document: Document, seeded_users: dict
+) -> None:
+    """The guard is per-chain: one document's payload never blocks another's.
+
+    A hash that recurs on a *different* document's chain is not a collision, since
+    the two chains link independently. Only a repeat within a single chain breaks
+    that chain's links, so the guard must not reject an identical event body
+    recorded against a different document.
+    """
+    other = documents_repo.register_document(
+        db_session,
+        uploaded_by=seeded_users[UserRole.DATA_OWNER].id,
+        filename="other-shared-body.pdf",
+    )
+
+    first = append(db_session, registered_document.id, "shared-body")
+    second = append(db_session, other.id, "shared-body")
+
+    # Same content identity, different chains — both genesis, both accepted.
+    assert first.payload_hash == second.payload_hash
+    assert first.prev_hash is None
+    assert second.prev_hash is None
+
+
 def test_a_tampered_stored_frontier_is_refused_on_the_next_append(
     db_session: Session, registered_document: Document
 ) -> None:

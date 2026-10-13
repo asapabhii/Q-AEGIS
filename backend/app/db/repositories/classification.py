@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.classifier.stub_classifier import ClassificationResult
+from app.classifier.result import ClassificationResult
 from app.db.models import ClassificationMetadata
 
 #: Decimal places stored for ``confidence_score``, matching ``numeric(5,4)``.

@@ -36,6 +36,11 @@ redis==6.4.0
 # Multi-agent orchestration, SPEC.md 3.4 / PRD FR-3.
 langgraph==0.6.11
 
+# Real LLM scoring for the five agents, SPEC.md 3.4 / PRD FR-3. The Anthropic
+# (Claude) client is used only when AGENT_LLM_BACKEND=anthropic and credentials
+# are set; otherwise the deterministic backend runs and this import is never hit.
+anthropic==1.8.0
+
 # Crypto engine, SPEC.md 3.7. AES-256-GCM and X25519 via cryptography; ML-KEM
 # and ML-DSA via liboqs-python. Pin the exact liboqs-python version and re-run
 # the full crypto test suite after any bump; this library's API has changed
@@ -60,3 +65,13 @@ pgvector==0.4.1
 # BAAI/bge-large-en-v1.5 (1024-dim); weights download once, cache on disk, then
 # run fully offline with no API key. Re-pin and re-run the RAG tests after a bump.
 fastembed==0.8.0
+
+# Sensitivity classifier, SPEC.md 3.2 / PRD FR-1. scikit-learn trains and runs
+# the calibrated model behind the trained-artifact engine; joblib loads the
+# shipped bundle. Pinned to the exact versions the shipped artifact was trained
+# with — a version skew risks an unpickling incompatibility on load, and the
+# engine fails loud rather than silently downgrading. These are only load-bearing
+# once CLASSIFIER_MODEL_PATH points at a bundle; the keyword engine is the
+# labelled fallback otherwise.
+scikit-learn==1.7.2
+joblib==1.5.2

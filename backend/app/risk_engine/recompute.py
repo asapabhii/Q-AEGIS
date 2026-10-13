@@ -1,7 +1,11 @@
 """Scheduled and bus-driven contextual risk recomputes, ``SPEC.md`` 3.3 / FR-2.
 
 Uses each document's latest ``context_snapshot`` (device and actor flags) with a
-fresh ``accessed_at``. System ticks write audit rows with no human actor.
+fresh ``accessed_at``. ``after_hours`` is *re-derived* against the stored
+``org_timezone`` and the refreshed wall-clock — never carried over from the
+stored boolean — so a document that was scored during business hours correctly
+becomes after-hours on a later tick (and vice versa). System ticks write audit
+rows with no human actor.
 """
 
 from __future__ import annotations
@@ -18,7 +22,8 @@ from app.db.models import RiskScore
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import risk as risk_repo
 from app.db.session import session_scope
-from app.risk_engine.scorer import ContextSnapshot, score
+from app.risk_engine.schemas import derive_after_hours
+from app.risk_engine.scorer import DEFAULT_ORG_TIMEZONE, ContextSnapshot, score
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +36,11 @@ def snapshot_from_stored(
     """Rebuild a :class:`ContextSnapshot` from a persisted JSON blob.
 
     When ``accessed_at`` is provided it replaces the stored timestamp (schedule
-    ticks refresh wall-clock while keeping caller-asserted device flags).
+    ticks refresh wall-clock while keeping the caller-asserted device flag).
+    ``after_hours`` is re-derived from the stored ``org_timezone`` against that
+    timestamp; the stored boolean is never trusted, so a refreshed wall-clock
+    that crosses the business-hours boundary flips it. ``org_timezone`` defaults
+    when a pre-0.2.0 row omits it.
     """
     stored_accessed = raw["accessed_at"]
     if not isinstance(stored_accessed, str):
@@ -39,12 +48,14 @@ def snapshot_from_stored(
     when = accessed_at or datetime.fromisoformat(stored_accessed)
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
+    org_timezone = str(raw.get("org_timezone") or DEFAULT_ORG_TIMEZONE)
     return ContextSnapshot(
         actor_user_id=UUID(str(raw["actor_user_id"])),
         device_id=str(raw["device_id"]),
         device_is_new=bool(raw["device_is_new"]),
         accessed_at=when,
-        after_hours=bool(raw["after_hours"]),
+        after_hours=derive_after_hours(when, org_timezone),
+        org_timezone=org_timezone,
     )
 
 
@@ -126,12 +137,15 @@ def recompute_from_trigger_payload(payload: dict[str, object]) -> RiskScore | No
     through ``POST /risk-triggers`` (which already scores synchronously).
     """
     document_id = UUID(str(payload["document_id"]))
+    accessed_at = datetime.fromisoformat(str(payload["accessed_at"]))
+    org_timezone = str(payload.get("org_timezone") or DEFAULT_ORG_TIMEZONE)
     snapshot = ContextSnapshot(
         actor_user_id=UUID(str(payload["actor_user_id"])),
         device_id=str(payload["device_id"]),
         device_is_new=bool(payload["device_is_new"]),
-        accessed_at=datetime.fromisoformat(str(payload["accessed_at"])),
-        after_hours=bool(payload["after_hours"]),
+        accessed_at=accessed_at,
+        after_hours=derive_after_hours(accessed_at, org_timezone),
+        org_timezone=org_timezone,
     )
     with session_scope() as session:
         from app.db.repositories import documents as documents_repo

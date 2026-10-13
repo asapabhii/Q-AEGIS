@@ -62,6 +62,15 @@ RUN python -m venv /opt/venv \
 ENV OQS_INSTALL_PATH=/opt/liboqs
 RUN /opt/venv/bin/python -c "import oqs; kem=oqs.get_enabled_kem_mechanisms(); sig=oqs.get_enabled_sig_mechanisms(); assert 'ML-KEM-1024' in kem, 'ML-KEM-1024 missing'; assert 'ML-KEM-768' in kem, 'ML-KEM-768 missing'; assert 'ML-DSA-87' in sig, 'ML-DSA-87 missing'; print('liboqs OK: ML-KEM + ML-DSA enabled')"
 
+# Bake the RAG embedding model into the image, exactly like liboqs above: the
+# runtime must not reach the network on first use. fastembed would otherwise
+# download BAAI/bge-large-en-v1.5 from HuggingFace on the first /rag call, which
+# fails closed in an air-gapped or private-CA environment (the container's TLS
+# trust is scoped to the local CA for the datastores). Downloading here makes
+# the image self-contained and reproducible. Keep the model id in step with
+# app.config.Settings.rag_embedding_model; a mismatch re-downloads at runtime.
+RUN /opt/venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-large-en-v1.5', cache_dir='/opt/models/fastembed'); print('fastembed model baked: BAAI/bge-large-en-v1.5')"
+
 # --------------------------------------------------------------------------
 # Stage 2: runtime.
 # --------------------------------------------------------------------------
@@ -76,6 +85,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OQS_INSTALL_PATH=/opt/liboqs \
     LD_LIBRARY_PATH=/opt/liboqs/lib
 
+# Root CA store for outbound TLS. The slim base omits ca-certificates, so any
+# TLS the app initiates (e.g. the optional Anthropic agent backend) would fail
+# to verify a public issuer. Datastore connections (Postgres/Redis/Neo4j) do
+# NOT rely on this — each pins the local CA via its own connection parameter.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Run as an unprivileged user. A container process does not need root, and
 # defaulting to it turns a container escape into a host-root problem.
 RUN groupadd --system --gid 1001 qaegis \
@@ -85,9 +102,33 @@ COPY --from=builder /opt/venv /opt/venv
 # The compiled post-quantum library. Without this the PQ/hybrid profiles fail
 # closed at runtime (LiboqsUnavailableError); AES-256 would still work.
 COPY --from=builder /opt/liboqs /opt/liboqs
+# The pre-downloaded RAG embedding model (baked in the builder stage). Runtime
+# reads it via RAG_EMBEDDING_CACHE_DIR; no network fetch on first /rag call.
+COPY --from=builder --chown=qaegis:qaegis /opt/models /opt/models
+ENV RAG_EMBEDDING_CACHE_DIR=/opt/models/fastembed
 
 WORKDIR /srv
 COPY --chown=qaegis:qaegis app ./app
+
+# The trained sensitivity classifier (FR-1, SPEC.md 3.2). Baked like liboqs and
+# the embedding model so the image is self-contained and the runtime never
+# fetches it. Ships the multi-genre hashing-SVM bundle (its evaluation report
+# rides along for provenance) — trained across diplomatic cables, code, prose,
+# forms, medical/financial and synthetic detector-positive documents so it
+# generalises beyond any single genre. CLASSIFIER_MODEL_PATH below activates the
+# trained engine (paired with the deterministic detector backstop in
+# app/classifier/detectors.py); clear it to fall back to the keyword engine.
+COPY --chown=qaegis:qaegis \
+     artifacts/classifier/multigenre-hashing-svm-1.0.0.joblib \
+     artifacts/classifier/multigenre-hashing-svm-1.0.0.evaluation.json \
+     ./artifacts/classifier/
+ENV CLASSIFIER_MODEL_PATH=/srv/artifacts/classifier/multigenre-hashing-svm-1.0.0.joblib
+
+# Uploaded document bytes live here (DOCUMENT_STORAGE_DIR). Create and hand the
+# tree to the unprivileged user BEFORE dropping privileges, so writes under the
+# mounted volume succeed. The compose volume must be fresh (or chowned) to
+# inherit this ownership; a pre-existing root-owned volume masks it.
+RUN mkdir -p /data/documents && chown -R qaegis:qaegis /data
 
 USER qaegis
 

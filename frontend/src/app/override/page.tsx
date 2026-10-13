@@ -11,8 +11,10 @@ import {
   X,
 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
+import NotPermitted from "@/components/ui/NotPermitted";
 import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import { useRole } from "@/lib/context/RoleContext";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
 import {
   ApiError,
   getDocument,
@@ -22,7 +24,6 @@ import type {
   DocumentSnapshot,
   ManualOverrideResponse,
   SensitivityLabel,
-  UserRole,
 } from "@/lib/api/types";
 import {
   MIN_JUSTIFICATION_CHARS,
@@ -41,18 +42,15 @@ const LABEL_TONES: Record<
   RESTRICTED: "restricted",
 };
 
+// Sensitivity → semantic design-system color. These are the same status vars
+// used across the app (pass/info/override/fail), ordered by escalating
+// sensitivity, rather than one-off hex literals.
 const LABEL_COLORS: Record<SensitivityLabel, string> = {
-  PUBLIC: "#10B981",
-  INTERNAL: "#3B82F6",
-  CONFIDENTIAL: "#F59E0B",
-  RESTRICTED: "#EF4444",
+  PUBLIC: "var(--status-pass)",
+  INTERNAL: "var(--status-info)",
+  CONFIDENTIAL: "var(--status-override)",
+  RESTRICTED: "var(--status-fail)",
 };
-
-const OVERRIDE_ALLOWED_ROLES: UserRole[] = [
-  "security_admin",
-  "security_analyst",
-  "ciso",
-];
 
 export function OverrideScreen({
   initialDocumentId = "",
@@ -60,8 +58,11 @@ export function OverrideScreen({
   initialDocumentId?: string;
 }) {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role: contextRole } = useRole();
-  const role = OVERRIDE_ALLOWED_ROLES.includes(contextRole) ? contextRole : "security_analyst";
+  const { role } = useRole();
+  // POST /manual-overrides is gated to security_analyst/security_admin
+  // server-side. Send the caller's real role and render an honest 403 rather
+  // than silently remapping an unauthorized caller to an allowed one.
+  const permitted = roleAllowed(ACCESS.override, role);
   const [documentId, setDocumentId] = useState(initialDocumentId);
   const [snapshot, setSnapshot] = useState<DocumentSnapshot | null>(null);
   const [newLabel, setNewLabel] = useState<SensitivityLabel | "">("");
@@ -98,6 +99,7 @@ export function OverrideScreen({
   );
 
   useEffect(() => {
+    if (!permitted) return;
     const id = initialDocumentId.trim();
     if (!id) return;
     let cancelled = false;
@@ -120,7 +122,7 @@ export function OverrideScreen({
     return () => {
       cancelled = true;
     };
-  }, [initialDocumentId, role]);
+  }, [initialDocumentId, role, permitted]);
 
   const snapshotMatchesInput =
     snapshot !== null && snapshot.id === documentId.trim();
@@ -202,8 +204,18 @@ export function OverrideScreen({
 
       </header>
 
-      {/* Success Banner */}
-      {result && (
+      {!permitted && (
+        <NotPermitted
+          role={role}
+          allowed={ACCESS.override}
+          resource="The override console"
+        />
+      )}
+
+      {permitted && (
+        <>
+          {/* Success Banner */}
+          {result && (
         <div
           data-reveal
           className="card p-6 flex items-start gap-4"
@@ -334,9 +346,7 @@ export function OverrideScreen({
                             border: `var(--border-width-hairline) solid ${
                               isSelected ? color : "var(--color-border)"
                             }`,
-                            backgroundColor: isSelected
-                              ? `rgba(99, 102, 241, 0.05)`
-                              : "var(--color-bg-tertiary)",
+                            backgroundColor: "var(--color-bg-tertiary)",
                             opacity: isCurrent ? 0.5 : 1,
                             cursor: isCurrent ? "not-allowed" : "pointer",
                           }}
@@ -698,6 +708,8 @@ export function OverrideScreen({
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

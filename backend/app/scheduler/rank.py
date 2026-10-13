@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -121,8 +121,22 @@ def migration_audit_payload(
     outcome: RankOutcome,
     schedule_ids: list[UUID],
 ) -> dict[str, Any]:
-    """Audit payload for one ranking run. JSON primitives only."""
+    """Audit payload for one ranking run. JSON primitives only.
+
+    Carries a unique ``ranking_run_id`` (and the run's ``ranked_at``) because the
+    audit chain links entries by ``payload_hash`` (the SHA-256 of this payload),
+    and a chain cannot contain two entries with the same hash without its
+    ``prev_hash`` links becoming ambiguous. A ranking run with no eligible
+    candidates produces an otherwise byte-identical payload every time (empty
+    schedule, same budget/window/seed), so two such runs would collide on the
+    system chain and corrupt tail-finding. The per-run id makes every entry
+    distinct, mirroring how ``policy_rule_created`` is disambiguated by its rule
+    id. This is a record of a distinct event, not a reproducible computation, so
+    a fresh identifier and timestamp belong in it.
+    """
     return {
+        "ranking_run_id": str(uuid4()),
+        "ranked_at": outcome.constraint_snapshot["ranked_at"],
         "schedule_ids": [str(item) for item in schedule_ids],
         "primary_method": outcome.primary.method,
         "primary_total_score": outcome.primary.total_score,

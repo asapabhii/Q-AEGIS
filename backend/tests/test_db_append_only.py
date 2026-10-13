@@ -12,6 +12,7 @@ Python layer can be credited for a refusal the database is supposed to make.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import psycopg
 import pytest
@@ -28,6 +29,7 @@ from app.db.models import (
     User,
 )
 from app.db.repositories import audit as audit_repo
+from app.db.repositories import checkpoint as checkpoint_repo
 from tests import factories
 
 #: Every append-only table paired with a column an UPDATE would plausibly target.
@@ -39,6 +41,8 @@ UPDATE_TARGETS = {
     "trust_scores": "consensus_value = 0.999",
     "crypto_profiles": "profile_type = 'aes256'",
     "audit_log": "event_type = 'tampered'",
+    "audit_signing_keys": "algorithm = 'tampered'",
+    "audit_checkpoints": "tree_size = 999999",
 }
 
 
@@ -93,12 +97,33 @@ def one_row_per_history_table(
         actor_id=seeded_users[UserRole.DATA_OWNER].id,
         payload={"note": "seed entry for trigger tests"},
     )
+    # Seeded directly through the repository, not the checkpoint service: these
+    # rows only exercise the append-only triggers, so a real ML-DSA-87 signature
+    # (which would need liboqs on the host) is unnecessary. The values are
+    # syntactically valid placeholders, never verified here.
+    signing_key = checkpoint_repo.insert_signing_key(
+        db_session,
+        algorithm="ML-DSA-87",
+        public_key="ab" * 32,
+        wrapped_secret_key=b"seed-wrapped-secret-key",
+    )
+    checkpoint = checkpoint_repo.insert_checkpoint(
+        db_session,
+        document_id=registered_document.id,
+        signing_key_id=signing_key.id,
+        tree_size=1,
+        merkle_root="a" * 64,
+        signature="cd" * 32,
+        signed_at=datetime.now(timezone.utc),
+    )
     return {
         "classification_metadata": str(classification.id),
         "risk_scores": str(risk_score.id),
         "trust_scores": str(trust_score.id),
         "crypto_profiles": str(crypto_profile.id),
         "audit_log": str(entry.id),
+        "audit_signing_keys": str(signing_key.id),
+        "audit_checkpoints": str(checkpoint.id),
     }
 
 
@@ -142,7 +167,12 @@ def test_the_row_is_unchanged_after_a_rejected_update(
 def test_delete_is_rejected_on_the_audit_log(
     db_session: Session, one_row_per_history_table: dict[str, str], table: str
 ) -> None:
-    """``PRD.md`` FR-7: no code path can delete an existing entry."""
+    """``PRD.md`` FR-7: no code path can delete an existing entry.
+
+    Covers ``audit_log`` and, held to the same bar, the checkpoint tables: a
+    Signed Tree Head and the key that signed it are tamper-evidence, defeated
+    the moment either can be deleted.
+    """
     with statement_expected_to_fail(db_session):
         with pytest.raises(IntegrityError) as exc_info:
             db_session.execute(
@@ -174,10 +204,17 @@ def test_truncate_is_rejected_on_the_audit_log(
     Without the statement-level trigger the whole log would stay erasable in one
     statement while every DELETE test above still passed, which is the most
     dangerous shape this bug could take: the protection appears to work.
+
+    CASCADE, not a bare TRUNCATE: ``audit_checkpoints`` has a foreign key to
+    ``audit_signing_keys``, so Postgres refuses a bare ``TRUNCATE
+    audit_signing_keys`` with ``FeatureNotSupported`` before any trigger runs.
+    CASCADE is the form that would actually erase the table, so it is the form
+    the guard must stop; it also fires the BEFORE TRUNCATE trigger on every
+    table in the cascade, which is what reaches our guard here.
     """
     with statement_expected_to_fail(db_session):
         with pytest.raises(IntegrityError) as exc_info:
-            db_session.execute(text(f"TRUNCATE {table}"))
+            db_session.execute(text(f"TRUNCATE {table} CASCADE"))
 
     assert_rejected_by_append_only_trigger(exc_info)
 

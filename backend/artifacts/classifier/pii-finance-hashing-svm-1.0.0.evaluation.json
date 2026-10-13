@@ -1,0 +1,48 @@
+{
+  "calibration_size": 4960,
+  "dataset_fingerprint": "885f27c08a0f4d07b333c674fe5582a71ac31e2693f3431d8c6a80eafca39a62",
+  "epochs": 5,
+  "labels": [
+    "CONFIDENTIAL",
+    "PUBLIC",
+    "RESTRICTED"
+  ],
+  "model_version": "pii-finance-hashing-svm-1.0.0",
+  "n_features": 1048576,
+  "report": {
+    "CONFIDENTIAL": {
+      "f1-score": 0.727151136870263,
+      "precision": 0.7116055846422339,
+      "recall": 0.7433910665451231,
+      "support": 2194.0
+    },
+    "PUBLIC": {
+      "f1-score": 0.729049452176488,
+      "precision": 0.7006260671599317,
+      "recall": 0.7598765432098765,
+      "support": 1620.0
+    },
+    "RESTRICTED": {
+      "f1-score": 0.5956416464891041,
+      "precision": 0.6721311475409836,
+      "recall": 0.5347826086956522,
+      "support": 1150.0
+    },
+    "accuracy": 0.7004431909750202,
+    "macro avg": {
+      "f1-score": 0.683947411845285,
+      "precision": 0.6947875997810496,
+      "recall": 0.6793500728168839,
+      "support": 4964.0
+    },
+    "weighted avg": {
+      "f1-score": 0.6973041096457971,
+      "precision": 0.6988774579323694,
+      "recall": 0.7004431909750202,
+      "support": 4964.0
+    }
+  },
+  "test_size": 4964,
+  "train_size": 40258,
+  "training_method": "streaming-hashing-tfidf-svm"
+}

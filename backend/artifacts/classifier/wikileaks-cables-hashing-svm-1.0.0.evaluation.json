@@ -1,0 +1,48 @@
+{
+  "calibration_size": 12605,
+  "dataset_fingerprint": "f03e1762565212ed9847eeeea05b104c6d92b8e7476d27d60b5af87672ab9ff8",
+  "epochs": 8,
+  "labels": [
+    "CONFIDENTIAL",
+    "PUBLIC",
+    "RESTRICTED"
+  ],
+  "model_version": "wikileaks-cables-hashing-svm-1.0.0",
+  "n_features": 1048576,
+  "report": {
+    "CONFIDENTIAL": {
+      "f1-score": 0.9365186398227531,
+      "precision": 0.9206439393939394,
+      "recall": 0.9529504018819839,
+      "support": 5101.0
+    },
+    "PUBLIC": {
+      "f1-score": 0.9732732732732733,
+      "precision": 0.9670296881993138,
+      "recall": 0.9795980051382802,
+      "support": 6617.0
+    },
+    "RESTRICTED": {
+      "f1-score": 0.7261632341723875,
+      "precision": 0.9101338432122371,
+      "recall": 0.6040609137055838,
+      "support": 788.0
+    },
+    "accuracy": 0.9450663681432913,
+    "macro avg": {
+      "f1-score": 0.878651715756138,
+      "precision": 0.9326024902684967,
+      "recall": 0.8455364402419493,
+      "support": 12506.0
+    },
+    "weighted avg": {
+      "f1-score": 0.9427112953392736,
+      "precision": 0.9445246801626889,
+      "recall": 0.9450663681432913,
+      "support": 12506.0
+    }
+  },
+  "test_size": 12506,
+  "train_size": 99634,
+  "training_method": "streaming-hashing-tfidf-svm"
+}

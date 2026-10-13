@@ -12,6 +12,12 @@ def redis_from_settings(**extra: Any):
 
     Without ``REDIS_SSL_CA_CERTS`` (or ``SSL_CERT_FILE``), redis-py rejects the
     self-signed compose CA and the event bus dies while the HTTP app stays up.
+
+    TLS verification is only ever relaxed for ``APP_ENV=local``, where the
+    self-signed compose CA is expected. In any other environment a ``rediss://``
+    URL with no CA configured is a misconfiguration that would otherwise silently
+    disable certificate verification (a MITM opening); we fail closed instead and
+    demand ``REDIS_SSL_CA_CERTS`` so the connection is actually authenticated.
     """
     import redis
 
@@ -23,16 +29,19 @@ def redis_from_settings(**extra: Any):
     kwargs: dict[str, Any] = {"decode_responses": True, **extra}
     if url.startswith("rediss://"):
         ca = settings.redis_ssl_ca_certs
-        # OpenSSL 3 rejects our local CA when keyUsage is missing on the CA
-        # cert. Prefer verify-ca when the CA is correct; for APP_ENV=local
-        # fall back to CERT_NONE so the bus still works until certs are
-        # regenerated with proper CA extensions.
-        if settings.app_env == "local":
+        if settings.app_env.strip().lower() == "local":
+            # Local only: OpenSSL 3 rejects our self-signed compose CA when
+            # keyUsage is missing, so accept it unverified to keep the bus up
+            # until the certs are regenerated with proper CA extensions.
             kwargs.setdefault("ssl_cert_reqs", "none")
             kwargs.setdefault("ssl_check_hostname", False)
         elif ca:
             kwargs.setdefault("ssl_ca_certs", ca)
         else:
-            kwargs.setdefault("ssl_cert_reqs", "none")
-            kwargs.setdefault("ssl_check_hostname", False)
+            # Non-local + no CA: fail closed rather than silently downgrade to
+            # an unverified TLS connection (MITM risk).
+            raise RuntimeError(
+                "rediss:// requires REDIS_SSL_CA_CERTS outside APP_ENV=local; "
+                "refusing to connect with certificate verification disabled"
+            )
     return redis.Redis.from_url(url, **kwargs)

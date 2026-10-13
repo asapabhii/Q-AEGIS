@@ -1,23 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileText,
   AlertTriangle,
   ShieldCheck,
   TrendingUp,
-  TrendingDown,
 } from "lucide-react";
 
 import Badge from "@/components/ui/Badge";
 import DataTable from "@/components/ui/DataTable";
-import { listDocuments, ApiError } from "@/lib/api/client";
+import NotPermitted from "@/components/ui/NotPermitted";
+import StatusDot from "@/components/ui/StatusDot";
+import { listDocuments, subscribeEvents, ApiError } from "@/lib/api/client";
 import { useRole } from "@/lib/context/RoleContext";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
+import { cryptoLabel, cryptoTone } from "@/lib/crypto-labels";
 import type {
   CryptoProfileType,
   DocumentSnapshot,
   SensitivityLabel,
-  UserRole,
 } from "@/lib/api/types";
 
 const HIGH_RISK_THRESHOLD = 0.5;
@@ -32,18 +34,6 @@ const LABEL_TONES: Record<
   RESTRICTED: "restricted",
 };
 
-const PROFILE_TONES: Record<CryptoProfileType, "aes" | "hybrid" | "pqc"> = {
-  aes256: "aes",
-  hybrid: "hybrid",
-  post_quantum: "pqc",
-};
-
-const PROFILE_LABELS: Record<CryptoProfileType, string> = {
-  aes256: "AES-256",
-  hybrid: "Hybrid",
-  post_quantum: "PQC",
-};
-
 function parseRisk(value: string | null): number | null {
   if (value === null) return null;
   const n = Number(value);
@@ -54,41 +44,109 @@ function formatScore(value: number, digits = 2): string {
   return value.toFixed(digits);
 }
 
-const DASHBOARD_ALLOWED_ROLES: UserRole[] = [
-  "security_admin",
-  "security_analyst",
-  "auditor",
-  "ciso",
-  "engineer",
-];
+const DASHBOARD_ALLOWED = ACCESS.inventory;
 
 export default function RiskDashboardPage() {
-  const { role: contextRole } = useRole();
-  const role = DASHBOARD_ALLOWED_ROLES.includes(contextRole) ? contextRole : "security_admin";
+  const { role } = useRole();
+  // The inventory read is gated server-side; send the caller's real role and
+  // render an honest "not permitted" state rather than remapping them.
+  const permitted = roleAllowed(DASHBOARD_ALLOWED, role);
   const [documents, setDocuments] = useState<DocumentSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
+
+  const mountedRef = useRef(true);
+  const reqSeqRef = useRef(0);
 
   useEffect(() => {
-    let cancelled = false;
-    listDocuments(role)
-      .then((res) => {
-        if (cancelled) return;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const load = useCallback(
+    async (silent: boolean) => {
+      if (!permitted) {
+        setLoading(false);
+        return;
+      }
+      const seq = ++reqSeqRef.current;
+      if (!silent) setLoading(true);
+      try {
+        const res = await listDocuments(role);
+        if (!mountedRef.current || seq !== reqSeqRef.current) return;
         setDocuments(res.documents);
         setError(null);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setDocuments([]);
-        setError(err instanceof ApiError ? err.message : "Network error");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
+      } catch (err) {
+        if (!mountedRef.current || seq !== reqSeqRef.current) return;
+        // A silent (SSE-triggered) refresh that fails leaves the last-known
+        // inventory on screen rather than blanking it; only a foreground load
+        // surfaces the error.
+        if (!silent) {
+          setDocuments([]);
+          setError(err instanceof ApiError ? err.message : "Network error");
+        }
+      } finally {
+        if (mountedRef.current && seq === reqSeqRef.current && !silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [role, permitted]
+  );
+
+  // Initial load, and reload whenever the caller's role/permission changes.
+  useEffect(() => {
+    void load(false);
+  }, [load]);
+
+  // Live refresh: subscribe to the SSE bus and silently re-pull inventory on
+  // any document/trust/risk event (falls back to inventory-fingerprint frames
+  // when Redis is not configured). Debounced so a burst of events triggers a
+  // single refresh. The stream is gated to the same roles as the inventory
+  // read, so a permitted dashboard viewer can always open it.
+  useEffect(() => {
+    if (!permitted) return;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => void load(true), 400);
     };
-  }, [role]);
+    const unsubscribe = subscribeEvents((eventName) => {
+      if (eventName === "ready") {
+        setLive(true);
+        return;
+      }
+      if (eventName === "error") {
+        setLive(false);
+        return;
+      }
+      if (eventName === "ping") return;
+      // "bus" (document.uploaded / document.classified / risk.trigger /
+      // trust.updated) or "inventory" (fingerprint changed) → inventory moved.
+      setLive(true);
+      scheduleRefresh();
+    }, role);
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      setLive(false);
+      unsubscribe();
+    };
+  }, [role, permitted, load]);
+
+  if (!permitted) {
+    return (
+      <div className="mx-auto w-full max-w-screen-xl px-6 py-8">
+        <NotPermitted
+          role={role}
+          allowed={DASHBOARD_ALLOWED}
+          resource="The risk dashboard"
+        />
+      </div>
+    );
+  }
 
   const riskValues = documents
     .map((d) => parseRisk(d.risk_value))
@@ -120,14 +178,23 @@ export default function RiskDashboardPage() {
     return (
       <div className="mx-auto w-full max-w-screen-xl px-6 py-8">
         <div className="card p-6" style={{ borderColor: "var(--status-fail)" }}>
-          <div className="flex items-center gap-3">
-            <AlertTriangle
-              className="h-5 w-5"
-              style={{ color: "var(--status-fail)" }}
-            />
-            <p className="text-sm" style={{ color: "var(--status-fail)" }}>
-              {error}
-            </p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <AlertTriangle
+                className="h-5 w-5"
+                style={{ color: "var(--status-fail)" }}
+              />
+              <p className="text-sm" style={{ color: "var(--status-fail)" }}>
+                {error}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void load(false)}
+              className="btn btn-secondary"
+            >
+              Retry
+            </button>
           </div>
         </div>
       </div>
@@ -180,8 +247,8 @@ export default function RiskDashboardPage() {
           ),
         profile: doc.profile_type ? (
           <Badge
-            label={PROFILE_LABELS[doc.profile_type]}
-            tone={PROFILE_TONES[doc.profile_type]}
+            label={cryptoLabel(doc.profile_type)}
+            tone={cryptoTone(doc.profile_type)}
             size="sm"
           />
         ) : (
@@ -193,24 +260,30 @@ export default function RiskDashboardPage() {
   return (
     <div className="mx-auto w-full max-w-screen-xl px-6 py-8 space-y-8">
       {/* Page Header */}
-      <header>
-        <h1
-          className="font-semibold mb-1"
-          style={{
-            fontSize: "var(--font-size-2xl)",
-            color: "var(--color-text-primary)",
-          }}
-        >
-          Security Dashboard
-        </h1>
-        <p
-          style={{
-            fontSize: "var(--font-size-sm)",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          Real-time document classification and risk assessment status
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1
+            className="font-semibold mb-1"
+            style={{
+              fontSize: "var(--font-size-2xl)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Security Dashboard
+          </h1>
+          <p
+            style={{
+              fontSize: "var(--font-size-sm)",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            Real-time document classification and risk assessment status
+          </p>
+        </div>
+        <StatusDot
+          variant={live ? "online" : "offline"}
+          label={live ? "Live — streaming updates" : "Live updates offline"}
+        />
       </header>
 
       {/* Metrics Grid */}
@@ -283,10 +356,7 @@ export default function RiskDashboardPage() {
               style={{ color: "var(--color-text-secondary)" }}
             >
               {highRiskCount > 0 ? (
-                <>
-                  <TrendingDown className="h-3 w-3" />
-                  <span>3 resolved</span>
-                </>
+                <span>At or above risk threshold</span>
               ) : (
                 <span>No active alerts</span>
               )}
@@ -495,8 +565,8 @@ export default function RiskDashboardPage() {
                   <div key={profile}>
                     <div className="flex items-center justify-between mb-1.5">
                       <Badge
-                        label={PROFILE_LABELS[profile]}
-                        tone={PROFILE_TONES[profile]}
+                        label={cryptoLabel(profile)}
+                        tone={cryptoTone(profile)}
                         size="sm"
                       />
                       <span

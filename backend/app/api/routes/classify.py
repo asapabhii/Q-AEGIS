@@ -5,8 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import ClassifyCaller, DbSession, resolve_seeded_actor
+from app.classifier import classify
 from app.classifier.schemas import ClassificationRequest, ClassificationResponse
-from app.classifier.stub_classifier import classify
 from app.db.enums import AuditEventType
 from app.db.repositories import audit as audit_repo
 from app.db.repositories import classification as classification_repo
@@ -20,7 +20,7 @@ router = APIRouter(tags=["classifier"])
     "/classify",
     response_model=ClassificationResponse,
     status_code=status.HTTP_200_OK,
-    summary="Classify a document's sensitivity (stub implementation)",
+    summary="Classify a document's sensitivity",
 )
 def classify_document(
     request: ClassificationRequest,
@@ -35,9 +35,12 @@ def classify_document(
     defect, so a committed classification that lost its log entry to a partial
     failure would itself be the defect.
 
-    Note what the classifier is and is not: the label and confidence come from a
-    keyword stub (``SPEC.md`` 3.2), while the fail-safe escalation that low
-    confidence triggers is real and is not a stub.
+    Note what the classifier is and is not: the label and confidence come from
+    the active engine — the trained model when an artifact is configured, else
+    the keyword engine (``SPEC.md`` 3.2). The fail-safe escalation that low
+    confidence triggers is real in both, and is not a stub. Each result records
+    its own ``model_version`` so the persisted row names the engine that produced
+    it.
 
     Raises:
         HTTPException: 404 if the document is not registered. Classifying an

@@ -301,7 +301,7 @@ async def upload_document_file(
     data = await _read_upload_capped(file, settings.upload_max_bytes)
     if not data:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Uploaded file is empty.",
         )
 

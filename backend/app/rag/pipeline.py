@@ -1,7 +1,23 @@
 """Four-node LangGraph RAG pipeline, ``SPEC.md`` 3.12 / PRD FR-11.
 
-Nodes: Planner → Retriever → Reasoner → Verifier. Answers are refused when
-the Verifier cannot ground claims in retrieved records.
+Nodes: Planner → Retriever → Reasoner → Verifier. Answers are refused when the
+Verifier cannot ground claims in retrieved records.
+
+Grounding is enforced at two independent points, so a refusal is never cosmetic:
+
+* the **Retriever** applies a semantic similarity floor
+  (:func:`app.rag.store.effective_min_similarity`); when no stored chunk clears
+  it there are no hits and the answer is refused;
+* the **Verifier** independently re-checks that the best hit clears the floor,
+  that every citation is one of the retrieved hits, and that the drafted answer
+  actually reproduces a contiguous span of retrieved text (so it cannot assert
+  anything the evidence does not contain).
+
+The **Reasoner** here is a deterministic *extractive* synthesizer: it quotes the
+strongest retrieved record rather than generating prose. That is the documented
+offline default (mirroring the deterministic agent scorers); a generative LLM
+reasoner is the gated upgrade, and the Verifier's span/citation checks are what
+keep such a generator honest once it is enabled.
 """
 
 from __future__ import annotations
@@ -14,7 +30,14 @@ from sqlalchemy.orm import Session
 
 from app.rag.embeddings import embedding_model_name
 from app.rag.schemas import RagAnswer, RagCitation
-from app.rag.store import similarity_search
+from app.rag.store import effective_min_similarity, similarity_search
+
+#: Minimum length, in whitespace tokens, of a contiguous span that the drafted
+#: answer must share with some retrieved chunk for the answer to count as
+#: grounded. Long enough that the pipeline's own framing ("Grounded summary
+#: for ...") cannot satisfy it on its own, so the match must come from quoted
+#: evidence. For a chunk shorter than this, the whole chunk is the span.
+_GROUNDING_SPAN_TOKENS = 6
 
 
 class RagState(TypedDict, total=False):
@@ -62,23 +85,12 @@ def _make_retriever(session: Session):
 def _reasoner(state: RagState) -> dict[str, Any]:
     hits = state.get("hits") or []
     if not hits:
-        return {
-            "draft_answer": "",
-            "citations": [],
-        }
-    bullets = []
-    citations: list[dict[str, Any]] = []
-    for hit in hits:
-        bullets.append(f"- ({hit['source_type']}) {hit['content'][:500]}")
-        citations.append(hit)
-    draft = (
-        f"Based on {len(hits)} retrieved system record(s):\n"
-        + "\n".join(bullets)
-        + f"\n\nDirect answer to the question «{state['question']}»: "
-        "the records above are the grounded evidence. Summarize only what they "
-        "state; do not invent facts beyond them."
-    )
-    # Produce a concise grounded summary from the first hit + count.
+        return {"draft_answer": "", "citations": []}
+    # Deterministic extractive synthesis (the documented offline default): quote
+    # the strongest retrieved record verbatim rather than generate prose. Every
+    # retrieved hit is offered as a citation; the Verifier independently confirms
+    # each is in the retrieved set and that the draft reproduces retrieved text.
+    citations: list[dict[str, Any]] = list(hits)
     top = hits[0]["content"]
     draft = (
         f"Grounded summary for «{state['question']}»: "
@@ -90,6 +102,36 @@ def _reasoner(state: RagState) -> dict[str, Any]:
     return {"draft_answer": draft, "citations": citations}
 
 
+def _tokenize(value: str) -> list[str]:
+    """Lowercase whitespace tokens, used for the contiguous-span grounding check."""
+    return value.lower().split()
+
+
+def _answer_grounded_in_hits(answer: str, hits: list[dict[str, Any]]) -> bool:
+    """True when ``answer`` reproduces a contiguous span of some hit's text.
+
+    This is the substance of the grounding gate for a generated (or extractive)
+    answer: it must contain a run of at least ``_GROUNDING_SPAN_TOKENS`` tokens
+    that appears verbatim in a retrieved chunk (or the whole chunk, when it is
+    shorter). An answer that shares no such span with any evidence — e.g. a
+    hallucinated claim — fails and is refused. It is deliberately independent of
+    how the draft was built, so it still bites when the LLM reasoner is enabled.
+    """
+    answer_joined = " ".join(_tokenize(answer))
+    if not answer_joined:
+        return False
+    for hit in hits:
+        tokens = _tokenize(str(hit.get("content") or ""))
+        if not tokens:
+            continue
+        span = min(_GROUNDING_SPAN_TOKENS, len(tokens))
+        for start in range(len(tokens) - span + 1):
+            window = " ".join(tokens[start : start + span])
+            if window and window in answer_joined:
+                return True
+    return False
+
+
 def _verifier(state: RagState) -> dict[str, Any]:
     hits = state.get("hits") or []
     draft = (state.get("draft_answer") or "").strip()
@@ -97,13 +139,14 @@ def _verifier(state: RagState) -> dict[str, Any]:
         return {
             "verified": False,
             "refusal_reason": (
-                "No grounded records were retrieved for this question. "
-                "Ingest document records first (POST /api/v1/rag/ingest)."
+                "No retrieved record cleared the grounding similarity floor for "
+                "this question. Ingest relevant document records first "
+                "(POST /api/v1/rag/ingest)."
             ),
             "draft_answer": "",
             "citations": [],
         }
-    # Require every citation id to appear in hits (identity ground check).
+    # 1. Citation integrity: every citation must be one of the retrieved hits.
     hit_ids = {str(h["chunk_id"]) for h in hits}
     for cite in state.get("citations") or []:
         if str(cite["chunk_id"]) not in hit_ids:
@@ -116,20 +159,30 @@ def _verifier(state: RagState) -> dict[str, Any]:
                 "draft_answer": "",
                 "citations": [],
             }
-    # Require draft to share substantial tokens with at least one hit.
-    draft_tokens = set(draft.lower().split())
-    grounded = False
-    for hit in hits:
-        hit_tokens = set(str(hit["content"]).lower().split())
-        if len(draft_tokens & hit_tokens) >= 3:
-            grounded = True
-            break
-    if not grounded:
+    # 2. Relevance floor (re-checked here, not trusted from the Retriever): the
+    #    best hit must clear the semantic similarity floor. On the deterministic
+    #    backend the floor is 0.0, so this is a no-op there by design.
+    floor = effective_min_similarity()
+    best_score = max((float(h.get("score") or 0.0) for h in hits), default=0.0)
+    if best_score < floor:
         return {
             "verified": False,
             "refusal_reason": (
-                "Verifier rejected the draft: it was not sufficiently grounded "
-                "in retrieved record text."
+                "Verifier rejected the draft: the best retrieved record "
+                f"(similarity {best_score:.3f}) is below the grounding floor "
+                f"({floor:.3f})."
+            ),
+            "draft_answer": "",
+            "citations": [],
+        }
+    # 3. Answer support: the draft must reproduce a contiguous span of retrieved
+    #    text, so it cannot claim anything the evidence does not contain.
+    if not _answer_grounded_in_hits(draft, hits):
+        return {
+            "verified": False,
+            "refusal_reason": (
+                "Verifier rejected the draft: it did not reproduce any span of "
+                "the retrieved record text."
             ),
             "draft_answer": "",
             "citations": [],

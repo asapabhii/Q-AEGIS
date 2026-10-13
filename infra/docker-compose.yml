@@ -179,9 +179,23 @@ services:
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=verify-ca&sslrootcert=/certs/ca.crt"
       REDIS_URL: "rediss://:${REDIS_PASSWORD}@redis:6379/0"
       REDIS_SSL_CA_CERTS: /certs/ca.crt
-      SSL_CERT_FILE: /certs/ca.crt
+      # Neo4j over Bolt TLS, in-network host. Overrides the host-oriented values
+      # in ../.env (which target 127.0.0.1 and a relative CA path for host-run
+      # tooling). The CA path is the container mount, not the host path.
+      QAEGIS_NEO4J_URI: "bolt+s://neo4j:7687"
+      QAEGIS_NEO4J_SSL_CA_CERTS: /certs/ca.crt
+      # Public root CA bundle for outbound TLS. NOT the local /certs/ca.crt:
+      # scoping the whole process trust store to the private CA breaks any
+      # public-issuer TLS the app initiates. Datastores pin the local CA per
+      # connection (see REDIS_SSL_CA_CERTS / sslrootcert / QAEGIS_NEO4J_SSL_CA_CERTS),
+      # so they are unaffected. This overrides the host path in ../.env.
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       AUTH_DEV_HEADER_BYPASS: "true"
       DOCUMENT_STORAGE_DIR: /data/documents
+      # Trained sensitivity classifier (FR-1). The image bakes the bundle at this
+      # path; set it explicitly so it wins over any CLASSIFIER_MODEL_PATH inherited
+      # from ../.env (an empty value there must not mask the baked model).
+      CLASSIFIER_MODEL_PATH: /srv/artifacts/classifier/multigenre-hashing-svm-1.0.0.joblib
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set in .env}
       QAEGIS_DEV_SEED_PASSWORD: ${QAEGIS_DEV_SEED_PASSWORD:?QAEGIS_DEV_SEED_PASSWORD is not set in .env}
     ports:
