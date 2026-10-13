@@ -51,10 +51,15 @@ def shred_document(
     session: DbSession,
     caller: ShredCaller,
 ) -> ShredResponse:
-    """Overwrite wrapped DEKs so ciphertext becomes permanently unreadable.
+    """Overwrite wrapped DEKs so the ciphertext can no longer be decrypted here.
 
     Audit rows are never deleted. Ciphertext bytes remain as evidence. Calling
     again on an already-shredded document is idempotent and still audited.
+
+    The destruction is irreversible at the application layer: no undo, no escrow.
+    Complete erasure of every physical copy of the prior key bytes (MVCC dead
+    tuples, WAL, replicas, backups) is bounded by the deployment's retention and
+    vacuum policies; see ``app.crypto.shred`` and ``SPEC.md`` 3.9.
 
     SECURITY CAVEAT: liboqs is NOT independently audited.
     """

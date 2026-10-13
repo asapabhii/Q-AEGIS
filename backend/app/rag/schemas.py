@@ -31,7 +31,11 @@ class RagAnswer(BaseModel):
     plan: str
     citations: list[RagCitation]
     embedding_model: str = Field(
-        description="Always names the stub or real embedding implementation."
+        description=(
+            "Identifier of the embedding model that produced the query and "
+            "chunk vectors (e.g. the fastembed model id, or the deterministic "
+            "hash backend name under tests / air-gapped smoke)."
+        )
     )
     refusal_reason: str | None = None
 

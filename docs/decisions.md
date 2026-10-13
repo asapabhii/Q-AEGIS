@@ -13,6 +13,215 @@ Postgres/Redis/API TLS landed via #27)_
 
 ## Log
 
+### 2026-09-26: Five scoring agents deepened to distinct lenses over an AccessFeatures bundle
+
+Decided by: Claude (Opus 4.8), pending Abhinav's review.
+
+The five deterministic scorers (`app/agents/scoring.py`) had collapsed to pure
+functions of `{sensitivity_label, risk_value, device_is_new, after_hours}` — and
+`risk_value` is itself a function of the two booleans (`app/risk_engine/scorer.py`)
+— so the whole panel spanned ~16 distinct contexts and, worse, SECURITY and
+CONTEXTUAL merely restated the contextual risk engine rather than adding an
+independent perspective. A five-agent consensus over five near-duplicate signals
+is not a defensible inventive step.
+
+Fix: a new immutable `app/agents/features.py::AccessFeatures` bundle carries
+independent per-access signals — actor/device/document history counts,
+`document_prior_risk_value`, `actor_role`, `payload_byte_size`, plus closed
+file-extension maps for data longevity (HNDL) and payload cost. The bundle is
+computed **once** on the request thread that owns the SQLAlchemy `Session`
+(`db/repositories/risk.py::access_history`, windowed JSONB `context_snapshot`
+queries, counts excluding the current access), frozen onto `AssessmentInput`
+before the parallel fan-out, and round-trips through LangGraph state via
+`as_json`/`from_json`. Scorers stay pure functions over the frozen bundle and
+never touch the database (the `Session` is request-thread-bound and unsafe inside
+the `ThreadPoolExecutor` workers; the per-agent timeout only stays a real bound if
+each worker is fast and pure). Each scorer now reads a distinct subset:
+
+- SECURITY — device familiarity, device sharing, actor-relative timing.
+- COMPLIANCE — label regime, actor-role separation-of-duties, actor history.
+- CONTEXTUAL — zero-trust deviation from this actor/device baseline + risk *trend*.
+- QUANTUM — continuous risk term (replacing the old 0.50 cliff) + HNDL longevity.
+- SUSTAINABILITY — payload size band + content-cost class (real protection cost).
+
+Neutral "first-contact" defaults keep the bundle optional, so a fresh deployment
+or a unit test with no history gets a well-defined bundle the scorers read as
+ambiguity and resolve toward more protection (fail-safe).
+
+Versioning: `SCORER_VERSIONS` advanced to `*-det-2.0.0`, stamped into each
+rationale. The consensus weights and the consensus function are **unchanged**, so
+`trust_engine.consensus.CONSENSUS_VERSION` stays fixed at
+`trust-weighted-mean-1.0.0` — the aggregation contract did not change, only the
+per-agent evidence did. Rejected: bumping the consensus version too (would falsely
+signal a weight/aggregation change and churn every stored trust-score provenance
+string). The real LLM scoring path (`app/agents/llm.py`) is unchanged and reads
+`AssessmentInput` by explicit field, so it safely ignores the new bundle.
+
+### 2026-09-25: Interim classifier retrained on a broad multi-genre corpus
+
+Decided by: Claude (Opus 4.8), pending Abhinav's review.
+
+The first interim model was trained on a single public-domain domain (diplomatic
+cables). It scored well in-domain but generalised poorly to arbitrary documents,
+biasing unseen genres toward PUBLIC — the wrong direction for a fail-safe
+classifier. The shipping interim artifact is now
+`multigenre-hashing-svm-1.0.0.joblib`, a calibrated linear SVM over a broad,
+public multi-genre corpus (same three ML tiers PUBLIC/CONFIDENTIAL/RESTRICTED;
+same streaming HashingVectorizer→injected-IDF→SGD recipe). Held-out accuracy
+0.886, macro F1 0.880; the safety-critical RESTRICTED recall rose to 0.848 (from
+0.604 on the cables-only model). The single-domain artifact is superseded and
+retained only for provenance. This is orthogonal to the gated-FOIArchive retrain,
+which still supersedes this interim model once Abhinav accepts the HF terms. As
+before, the trained artifact ships; no labelled corpus is committed. See
+`docs/classifier-dataset.md`.
+
+### 2026-09-24: RAG "refuse if ungrounded" floor recalibrated (0.30 → 0.57)
+
+Decided by: Claude (Opus 4.8) during live end-to-end verification, pending
+Abhinav's review. Fixes a real gap flagged in the full-repo audit ("RAG
+ungrounded gate").
+
+FR-11 / `SPEC.md` 3.12 claim a Verifier that **refuses to answer when retrieval
+is ungrounded**. A live smoke exposed the gate as cosmetic under the real
+`fastembed` (`BAAI/bge-large-en-v1.5`) backend: an off-topic question ("boiling
+point of liquid helium at 3 atm?") asked against a fully-processed document
+returned a confident, "verified" answer instead of refusing.
+
+Two compounding causes, both fixed here:
+
+1. **Wrong grounding corpus in the first calibration attempt.** An initial floor
+   of 0.46 was probed against the document's *body text* (the cable prose). But
+   `app/rag/ingest.py` does **not** ingest document body — by design it grounds
+   answers on each document's **governance records**: the inventory snapshot
+   (filename, status, sensitivity, risk, trust, policy, crypto) and the
+   append-only **audit-trail** entries. That is deliberate: grounding on the
+   audit chain keeps answers independently verifiable and avoids the RAG
+   re-exposing classified document contents. So the floor must separate
+   governance questions from off-topic ones **against that governance text**,
+   which has a different cosine distribution than the body prose.
+
+2. **Floor set below the off-topic cluster.** Re-probing the deployed model over
+   a fully-processed document's actual ingested chunks:
+
+   | query kind | best-chunk cosine |
+   |---|---|
+   | governance ("policy decision / crypto profile / risk score / sensitivity label / audit history / trust consensus / override?") | 0.635 – 0.725 |
+   | off-topic ("helium boiling point?", "capital of Australia?", "bake cookies?", "diesel compression?", "1998 NBA champion?", "photosynthesis?", "roast turkey temp?", "reverse a linked list in Python?", "rain in London?") | 0.343 – 0.509 |
+
+   The off-topic ceiling is the inventory-snapshot chunk acting as a generic
+   "document" magnet (helium topped the off-topic set at 0.509). Both 0.30 and
+   the mis-probed 0.46 sat below that ceiling, so essentially every English
+   question cleared the floor and nothing was ever refused — the pipeline's
+   headline novelty was inert.
+
+**0.57** is the separating-band choice: off-topic ceiling 0.509, grounded floor
+0.635, ≈0.06 margin each side. On the probe set it refuses all 9 off-topic
+questions and admits all 7 governance questions (0 false-admit, 0 false-refuse).
+Both the Retriever and the Verifier read this one floor
+(`store.effective_min_similarity`), so retrieval and verification refuse
+identically. Because every document's governance text follows the same template,
+the band generalizes across documents; absolute cosine scale is still somewhat
+document/length-dependent, so the floor stays env-tunable
+(`RAG_MIN_SIMILARITY`) and remains disabled (0.0) for the non-semantic
+deterministic backend. Revisit against the FOIArchive corpus when it lands.
+
+Also verified but *not* changed: prepending bge's documented query instruction
+("Represent this sentence for searching relevant passages: ") moved cosines by
+< 0.02 and did not improve separation, so it was not added — cargo-cult, not a
+fix.
+
+Rejected: (a) raising to 0.65+ — it starts refusing legitimate governance
+questions for negligible off-topic benefit; (b) ingesting document body text to
+"strengthen" grounding — that would let the RAG surface classified content and
+inverts the deliberate audit-grounded design; (c) folding groundedness into the
+span-overlap check alone — the extractive reasoner quotes the top chunk verbatim,
+so span overlap always passes and cannot be the semantic gate (it exists to keep
+a *generative* reasoner honest, a separate concern).
+
+### 2026-09-24: FR-1 classifier trained on an interim public-domain corpus, out-of-core
+
+Decided by: Abhinav, unblocking FR-1 training (`SPEC.md` 3.2 / PRD FR-1) while
+FOIArchive access is pending. Complements the 2026-09-22 runtime-engine work
+(`model_classifier.py`); this entry is about the *training* half.
+
+FOIArchive (`HistoryLab/foiarchive`, gated) remains the intended primary label
+source, but its terms have not yet been accepted, so training was blocked. Rather
+than stall, the classifier is trained now on an **interim** corpus — the WikiLeaks
+diplomatic cables (`fn5/wikileaks-cables`, US Government works, public domain,
+non-gated) — which carries the same marking vocabulary and reuses the same
+`map_marking`/`convert` core. This is explicitly a development stand-in: the model
+is retrained on FOIArchive and the interim artifact retired the day access lands.
+
+Two engineering decisions worth recording:
+
+- **No label leakage.** Cables print their own classification in the body
+  (`S E C R E T`, letter-spaced). `strip_cable_markings` scrubs the marking
+  tokens, handling caveats, and pagination while preserving legitimate prose
+  (`Secretary`, `SECSTATE`); standalone-marking survival is asserted to ~0 before
+  training, so the model learns genuine features, not a string-match on the label.
+- **Out-of-core training.** The full corpus (124,745 rows) OOMs the in-memory
+  TF-IDF path on a RAM-limited host. `train_from_csv_streaming` (`--streaming`)
+  trains the *same representation* out-of-core: `HashingVectorizer` counts +
+  streamed document-frequency → injected scikit-learn smooth-IDF `TfidfTransformer`
+  + `SGDClassifier(loss="hinge")` (the linear-SVM objective the in-memory
+  `LinearSVC` uses) via minibatch `partial_fit`, prefit-sigmoid calibrated on a
+  held-out fold. Peak memory is bounded by `batch_size`, not corpus size — needed
+  for FOIArchive too.
+
+Held-out (test 12,506): accuracy 0.945, macro F1 0.879; RESTRICTED (the
+safety-critical minority tier) precision 0.910 / recall 0.604 / F1 0.726. A first
+attempt using plain hashed term-frequency + logistic loss was **rejected**: it
+dropped RESTRICTED recall to 0.362 because it discarded the IDF weighting the
+minority class depends on. Restoring IDF and switching to the hinge objective
+recovered recall to the in-memory baseline's level (0.609) at higher precision.
+
+The interim corpus CSV is **not** committed (public domain, but large and
+regenerable); only the trained artifact + its `.evaluation.json` ship, keeping
+every stored classification attributable via `model_version` + `dataset_fingerprint`.
+
+Rejected: stalling FR-1 until FOIArchive access (indefinite external dependency).
+Rejected: a 25k subsample (trains cleanly in memory but discards ~80% of the
+labelled signal). Rejected: plain-TF streaming (collapses minority recall).
+Rejected: committing the corpus (unnecessary; the artifact is the deliverable).
+
+### 2026-09-23: Trust consensus weights calibrated to principled NIST/ISO policy weights
+
+Decided by: Abhinav, closing the last placeholder in the trust engine (`SPEC.md`
+3.5 / PRD FR-4). Supersedes the 2026-09-09 "Trust v1 is an equal-weight mean"
+entry below, which is retained as history.
+
+The five `AgentType` weights are no longer equal fifths. Equal weighting gave
+the SUSTAINABILITY agent — an efficiency signal that *rewards lighter
+protection* — the same say as SECURITY over how strongly data is encrypted,
+which is not a defensible posture for a security platform. The weights are now:
+
+- **SECURITY `0.250`** and **COMPLIANCE `0.250`** co-lead. NIST SP 800-53 / CSF
+  core risk and ISO/IEC 27001 + regulatory obligation are both first-order for a
+  regulated platform; neither dominates.
+- **CONTEXTUAL `0.200`** — NIST SP 800-207 zero-trust, per-access evaluation.
+- **QUANTUM `0.175`** — harvest-now-decrypt-later is real but forward-looking.
+- **SUSTAINABILITY `0.125`** — a genuine ESG/efficiency signal, kept non-trivial
+  so it still breaks ties, but the *least* say in a protection trust score.
+  Weighting the efficiency agent lowest is itself the "ambiguity resolves toward
+  more protection" invariant applied to the consensus.
+
+Weights sum to exactly `1.000`. Versioned `trust-weighted-mean-1.0.0` (was
+`trust-weighted-mean-0.1.0`); the bump keeps every stored `trust_scores` row
+attributable to the formula that produced it. Locked in
+`test_trust_consensus.py` (exact weights + a distinct-score worked example).
+
+As with the 2026-09-15 bands, this entry does **not** claim empirical
+calibration: no labelled incident/outcomes dataset exists in this repository, so
+these are principled *policy* weights, not an incident-fitted model. A measured
+"corpus fit" is deferred until such an outcomes dataset exists; the version bump
+is the mechanism by which it will supersede these numbers.
+
+Rejected: keeping equal fifths (lets an efficiency signal veto protection).
+Rejected: a security-only lead (understates the regulatory floor a bank-grade
+platform answers to). Rejected: claiming model-derived calibration without a
+labelled outcomes dataset. Rejected: zeroing SUSTAINABILITY (it is a real,
+documented agent; silently dropping it would misrepresent the pipeline).
+
 ### 2026-09-15: after_hours derives from org timezone when omitted
 
 Decided by: Abhinav, with Codex implementation support, closing a small Track C
@@ -243,7 +452,7 @@ Decided by: Abhinav, implementing 3.7 persist.
 v1 selection, `SPEC.md` 3.7, `PRD.md` FR-6:
 
 - `POST /api/v1/crypto-profiles` body is `{ "trust_score_id": "<uuid>" }` only. Extra keys forbidden. The client cannot supply `profile_type` or `document_id`.
-- The stored `consensus_value` is mapped with the existing `select_crypto_profile` stub. Thresholds stay `POST_QUANTUM_MAX = 0.4` inclusive and `HYBRID_MAX = 0.8` inclusive; they remain uncalibrated placeholders.
+- The stored `consensus_value` is mapped with `select_crypto_profile`. At the time of this entry the thresholds were `POST_QUANTUM_MAX = 0.4` / `HYBRID_MAX = 0.8`, labelled placeholders. **Superseded by the 2026-09-15 calibration entry above:** the bands are now `POST_QUANTUM_MAX = 0.50` / `HYBRID_MAX = 0.85`, versioned `trust-crypto-policy-bands-1.0.0`. This line is retained as history, not the current contract.
 - Persist writes one `crypto_profiles` row and `CRYPTO_PROFILE_SELECTED` in the same transaction. Reselection is a new row. `documents.current_status` is not changed.
 - FR-6 is after the policy gate. v1 enforces that by requiring at least one `policy_decisions` row for the same `document_id`. The endpoint does not re-run OPA. A `deny` still counts; this table is separate history.
 - Roles: `security_analyst` and `security_admin`, same allow-list as 3.3 and 3.5.

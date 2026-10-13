@@ -32,10 +32,17 @@ def _five(
     ]
 
 
-def test_weights_are_equal_fifths_and_sum_to_one() -> None:
+def test_weights_are_principled_and_sum_to_one() -> None:
     assert set(WEIGHTS) == set(AgentType)
-    assert all(weight == Decimal("0.200") for weight in WEIGHTS.values())
+    # Security + compliance co-lead; sustainability (efficiency) carries least.
+    assert WEIGHTS[AgentType.SECURITY] == Decimal("0.250")
+    assert WEIGHTS[AgentType.COMPLIANCE] == Decimal("0.250")
+    assert WEIGHTS[AgentType.CONTEXTUAL] == Decimal("0.200")
+    assert WEIGHTS[AgentType.QUANTUM] == Decimal("0.175")
+    assert WEIGHTS[AgentType.SUSTAINABILITY] == Decimal("0.125")
     assert sum(WEIGHTS.values(), start=Decimal("0")) == Decimal("1.000")
+    # Efficiency gets strictly the least say in a protection trust score.
+    assert WEIGHTS[AgentType.SUSTAINABILITY] == min(WEIGHTS.values())
 
 
 def test_equal_scores_are_the_consensus() -> None:
@@ -57,7 +64,9 @@ def test_weighted_mean_of_distinct_scores() -> None:
             }
         )
     )
-    assert result.consensus_value == Decimal("0.300")
+    # 0.250*0.1 + 0.250*0.2 + 0.200*0.3 + 0.175*0.4 + 0.125*0.5 = 0.2675,
+    # quantized half-even to three places -> 0.268.
+    assert result.consensus_value == Decimal("0.268")
 
 
 def test_scores_are_quantized_before_they_are_weighted() -> None:

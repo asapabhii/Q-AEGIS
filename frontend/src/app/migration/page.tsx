@@ -1,27 +1,28 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { SiteNav } from "@/components/SiteNav";
-import { ApiError, rankMigration } from "@/lib/api/client";
-import type { MigrationRankResponse, UserRole } from "@/lib/api/types";
+import { ArrowRightLeft, Cpu, Layers } from "lucide-react";
 
-const ROLES: { value: UserRole; label: string }[] = [
-  { value: "security_admin", label: "Security Admin" },
-  { value: "security_analyst", label: "Security Analyst" },
-  { value: "compliance_officer", label: "Compliance Officer" },
-  { value: "data_owner", label: "Data Owner" },
-];
+import MetricCard from "@/components/ui/MetricCard";
+import NotPermitted from "@/components/ui/NotPermitted";
+import { EmptyState, ErrorState } from "@/components/ui/states";
+import { ApiError, rankMigration } from "@/lib/api/client";
+import { useRole } from "@/lib/context/RoleContext";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
+import type { MigrationRankResponse } from "@/lib/api/types";
+
+const MIGRATION_ALLOWED = ACCESS.migration;
 
 export default function MigrationPage() {
-  const [role, setRole] = useState<UserRole>("security_admin");
+  const { role } = useRole();
+  const permitted = roleAllowed(MIGRATION_ALLOWED, role);
   const [budget, setBudget] = useState("2");
   const [windowDays, setWindowDays] = useState("30");
   const [result, setResult] = useState<MigrationRankResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const canRun = role === "security_admin" && !loading;
+  const canRun = permitted && !loading;
 
   async function handleRank() {
     if (!canRun) return;
@@ -46,112 +47,195 @@ export default function MigrationPage() {
     }
   }
 
+  if (!permitted) {
+    return (
+      <div className="mx-auto w-full max-w-screen-xl px-6 py-8">
+        <NotPermitted
+          role={role}
+          allowed={MIGRATION_ALLOWED}
+          resource="Migration ranking"
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 flex flex-col">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-bold"
-            >
-              Q
-            </Link>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                Migration ranking
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                FR-9 QAOA + classical baselines under one budget
-              </p>
-            </div>
-          </div>
-          <SiteNav active="/migration" />
-        </div>
+    <div className="mx-auto w-full max-w-screen-xl px-6 py-8 space-y-8">
+      <header>
+        <h1
+          className="font-semibold mb-1"
+          style={{
+            fontSize: "var(--font-size-2xl)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          Migration Ranking
+        </h1>
+        <p
+          style={{
+            fontSize: "var(--font-size-sm)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          QAOA against greedy and annealing baselines on one identical budget and
+          constraint set
+        </p>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8 space-y-6">
-        <label className="block text-sm">
-          <span className="text-[var(--color-text-secondary)]">Caller role</span>
-          <select
-            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2"
-            value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
-          >
-            {ROLES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid grid-cols-2 gap-4">
-          <label className="block text-sm">
-            <span className="text-[var(--color-text-secondary)]">Budget</span>
+      <div className="card p-5 space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span
+              className="block text-xs uppercase tracking-wider mb-2"
+              style={{ color: "var(--color-text-tertiary)" }}
+            >
+              Budget
+            </span>
             <input
               type="number"
               min={0.1}
               step={0.1}
-              className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2"
+              className="input mono-data w-full"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-[var(--color-text-secondary)]">
+          <label className="block">
+            <span
+              className="block text-xs uppercase tracking-wider mb-2"
+              style={{ color: "var(--color-text-tertiary)" }}
+            >
               Window (days)
             </span>
             <input
               type="number"
               min={1}
-              className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2"
+              className="input mono-data w-full"
               value={windowDays}
               onChange={(e) => setWindowDays(e.target.value)}
             />
           </label>
         </div>
-
         <button
           type="button"
           disabled={!canRun}
           onClick={() => void handleRank()}
-          className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          className="btn btn-secondary"
         >
+          <Cpu className="h-4 w-4" />
           {loading ? "Ranking…" : "Rank with QAOA + baselines"}
         </button>
+      </div>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <ErrorState message={error} onRetry={() => void handleRank()} />}
 
-        {result && (
-          <div className="space-y-4 text-sm">
-            <div>
-              <h2 className="font-semibold">Primary ({result.primary.method})</h2>
-              <p className="text-[var(--color-text-secondary)]">
-                score {result.primary.total_score} / cost{" "}
-                {result.primary.total_cost} — {result.schedule.length} queued
-              </p>
-            </div>
-            <div>
-              <h2 className="font-semibold">Baselines (same constraints)</h2>
-              <ul className="mt-1 space-y-1 text-[var(--color-text-secondary)]">
-                {result.baselines.map((b) => (
-                  <li key={b.method}>
-                    {b.method}: score {b.total_score} / cost {b.total_cost}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <ol className="list-decimal pl-5 space-y-1 font-mono text-xs">
+      {!error && !result && !loading && (
+        <EmptyState
+          icon={<ArrowRightLeft className="h-8 w-8" />}
+          title="No ranking yet"
+          message="Set a budget and window, then rank to compare the quantum-optimizer schedule against classical baselines."
+        />
+      )}
+
+      {result && (
+        <div className="space-y-6">
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <MetricCard
+              icon={Cpu}
+              value={result.primary.method}
+              label="Primary optimizer"
+              hint={`${result.schedule.length} document(s) queued`}
+              valueColor="var(--crypto-pqc)"
+              iconColor="var(--crypto-pqc)"
+            />
+            <MetricCard
+              icon={Layers}
+              value={result.primary.total_score}
+              label="Total score"
+              hint="Higher is better"
+            />
+            <MetricCard
+              icon={Layers}
+              value={result.primary.total_cost}
+              label="Total cost"
+              hint="Under the fixed budget"
+            />
+          </section>
+
+          <div className="card p-5">
+            <h2
+              className="font-semibold mb-1"
+              style={{
+                fontSize: "var(--font-size-lg)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              Baselines
+            </h2>
+            <p
+              className="text-sm mb-4"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Same constraints, same budget — this is the apples-to-apples
+              comparison that makes the quantum ranking defensible.
+            </p>
+            <ul className="space-y-2">
+              {result.baselines.map((b) => (
+                <li
+                  key={b.method}
+                  className="flex items-center justify-between rounded-lg px-3 py-2"
+                  style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                >
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {b.method}
+                  </span>
+                  <span
+                    className="mono-data text-sm"
+                    style={{ color: "var(--color-text-secondary)" }}
+                  >
+                    score {b.total_score} / cost {b.total_cost}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="card p-5">
+            <h2
+              className="font-semibold mb-4"
+              style={{
+                fontSize: "var(--font-size-lg)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              Migration schedule
+            </h2>
+            <ol className="space-y-1.5">
               {result.schedule.map((row) => (
-                <li key={row.id}>
-                  rank {row.priority_rank}: {row.document_id}
+                <li
+                  key={row.id}
+                  className="flex items-center gap-3 text-sm"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  <span
+                    className="mono-data inline-flex h-6 w-6 items-center justify-center rounded-full text-xs"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {row.priority_rank}
+                  </span>
+                  <span className="mono-data text-xs">{row.document_id}</span>
                 </li>
               ))}
             </ol>
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }

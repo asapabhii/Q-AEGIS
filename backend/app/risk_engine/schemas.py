@@ -3,6 +3,11 @@
 No raw dicts cross this boundary. ``risk_value`` is not a request field: the
 server computes it. Extra keys are forbidden so a caller cannot smuggle
 signals this version does not score.
+
+``after_hours`` is *not* a request field either: it is server-derived from
+``accessed_at`` and the org timezone. A caller cannot assert it, so it cannot
+be used to understate risk (a client claiming ``after_hours=False`` on a 3 a.m.
+access no longer shaves the weight off its own score).
 """
 
 from datetime import datetime
@@ -12,12 +17,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
-from app.risk_engine.scorer import ContextSnapshot, RiskScoreResult
+from app.risk_engine.scorer import (
+    DEFAULT_ORG_TIMEZONE,
+    ContextSnapshot,
+    RiskScoreResult,
+)
 
 #: Matches ``documents.filename``: a device identifier is caller-supplied text,
 #: not an unbounded blob.
 MAX_DEVICE_ID_CHARS = 255
-DEFAULT_ORG_TIMEZONE = "Asia/Kolkata"
 BUSINESS_DAY_START_HOUR = 9
 BUSINESS_DAY_END_HOUR = 18
 
@@ -32,13 +40,14 @@ class RiskScoreRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=MAX_DEVICE_ID_CHARS)
     device_is_new: bool
     accessed_at: AwareDatetime
-    after_hours: bool | None = None
     org_timezone: str = Field(
         default=DEFAULT_ORG_TIMEZONE,
         min_length=1,
         max_length=80,
         description=(
-            "IANA timezone used to derive after_hours when the caller omits it."
+            "IANA timezone the org's business hours are defined in; the server "
+            "derives after_hours against it. after_hours is never accepted "
+            "from the client."
         ),
     )
 
@@ -66,17 +75,20 @@ class RiskScoreRequest(BaseModel):
         return zone_name
 
     def snapshot(self) -> ContextSnapshot:
-        """The five stored snapshot fields, excluding ``document_id``."""
+        """The stored snapshot fields, excluding ``document_id``.
+
+        ``after_hours`` is derived here from ``accessed_at`` and
+        ``org_timezone`` — never taken from the request — and the timezone it
+        was derived against is carried on the snapshot so a later recompute
+        reproduces the same derivation.
+        """
         return ContextSnapshot(
             actor_user_id=self.actor_user_id,
             device_id=self.device_id,
             device_is_new=self.device_is_new,
             accessed_at=self.accessed_at,
-            after_hours=(
-                derive_after_hours(self.accessed_at, self.org_timezone)
-                if self.after_hours is None
-                else self.after_hours
-            ),
+            after_hours=derive_after_hours(self.accessed_at, self.org_timezone),
+            org_timezone=self.org_timezone,
         )
 
 

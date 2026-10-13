@@ -46,31 +46,48 @@ its lifetime, and the audit log only means anything if past decisions are never
 silently overwritten. A new decision is a new row that supersedes the previous
 one; it never updates it.
 
-`audit_log` is stricter still: append-only against both UPDATE and DELETE.
+`audit_log` is stricter still: append-only against UPDATE, DELETE, and TRUNCATE.
+`audit_signing_keys` and `audit_checkpoints` (the PQ-signed Signed Tree Head
+anchoring tables, added on the `feat/real-embeddings-fastembed` branch) are held
+to the same absolute bar: a checkpoint and the key that signed it are
+tamper-evidence, and the anchoring guarantee is defeated the moment either can be
+rewritten or quietly removed, so both reject UPDATE, DELETE, and TRUNCATE.
+
+`event_outbox` (the durable transactional outbox, `SPEC.md` 3.1) is deliberately
+**not** append-only: the relay UPDATEs a row's `status` as it moves
+`pending → sent`, or `pending → dead` after exhausting retries, so no
+reject-UPDATE trigger is installed on it.
 
 Enforcement is at the database level, not by application convention
-(`SPEC.md` 3.8, `PRD.md` FR-7):
+(`SPEC.md` 3.8, `PRD.md` FR-7). The two source-of-truth tuples are
+`UPDATE_REJECTED_TABLES` and `DELETE_REJECTED_TABLES` in
+`backend/app/db/models/__init__.py`; the test suite asserts the triggers against
+them rather than a hand-maintained copy:
 
 | Table | UPDATE | DELETE | TRUNCATE |
 |---|---|---|---|
 | `audit_log` | rejected by trigger | rejected by trigger | rejected by trigger |
+| `audit_signing_keys` | rejected by trigger | rejected by trigger | rejected by trigger |
+| `audit_checkpoints` | rejected by trigger | rejected by trigger | rejected by trigger |
 | `classification_metadata` | rejected by trigger | permitted | permitted |
 | `risk_scores` | rejected by trigger | permitted | permitted |
 | `trust_scores` | rejected by trigger | permitted | permitted |
 | `crypto_profiles` | rejected by trigger | permitted | permitted |
+| `event_outbox` | permitted (relay mutates status) | permitted | permitted |
 
 The four history tables block UPDATE only, which is precisely what "never
 updated in place" requires, and no more. DELETE is left permitted there
 deliberately: erasure (`PRD.md` FR-8) works by destroying a document's key rather
 than its rows, so nothing in the design needs to delete them, but a blanket
 prohibition with no requirement behind it invites someone to disable the trigger
-later for an unrelated reason. `audit_log` is different, FR-7 states the
-guarantee absolutely, so it is enforced absolutely.
+later for an unrelated reason. `audit_log`, `audit_signing_keys`, and
+`audit_checkpoints` are different: FR-7 states the guarantee absolutely and the
+anchoring evidence inherits it, so all three are enforced absolutely.
 
 The `TRUNCATE` row is not redundant. `TRUNCATE` does not fire row-level
 triggers, so a row-level guard alone leaves the whole table erasable in one
-statement. `audit_log` therefore also carries a statement-level `BEFORE TRUNCATE`
-trigger.
+statement. `audit_log`, `audit_signing_keys`, and `audit_checkpoints` therefore
+each carry a statement-level `BEFORE TRUNCATE` trigger as well.
 
 Honest limit: a superuser can drop a trigger. This stops every application code
 path and every accidental migration, which is what it is for. It is not a
@@ -114,13 +131,19 @@ erDiagram
     documents ||--o{ document_ciphertexts : stores
     documents ||--o{ migration_schedule : queued_in
     documents |o--o{ audit_log : recorded_in
+    documents |o--o{ audit_checkpoints : anchored_by
 
     risk_scores ||--o{ agent_outputs : aggregates
     risk_scores ||--o{ trust_scores : consensus_over
     trust_scores ||--o{ crypto_profiles : drives
     crypto_profiles ||--o{ document_ciphertexts : encrypts_with
     policy_rules |o--o{ policy_decisions : matched_by
+    audit_signing_keys ||--o{ audit_checkpoints : signs
 ```
+
+`event_outbox` has no foreign key and is not drawn: it is the transactional
+outbox (`SPEC.md` 3.1), a standalone queue table the relay drains to Redis
+Streams.
 
 The four append-only history tables are `classification_metadata`,
 `risk_scores`, `trust_scores`, and `crypto_profiles`. Reading the diagram along
@@ -215,7 +238,7 @@ Append-only. One row per recomputation.
 | `document_id` | `uuid` FK → `documents.id` | no | Indexed |
 | `risk_value` | `numeric(5,4)` | no | `0.0000` to `1.0000`, `CHECK` enforced. The contextual engine's own score (`SPEC.md` 3.3), not the five-agent aggregate |
 | `model_version` | `varchar(30)` | no | Formula that produced `risk_value`. Bumped when any weight changes |
-| `context_snapshot` | `jsonb` | no | Closed v1 set: `actor_user_id`, `device_id`, `device_is_new`, `accessed_at`, `after_hours`. Extra keys forbidden at the API. Caller-asserted facts, not derived |
+| `context_snapshot` | `jsonb` | no | Closed v1 set: `actor_user_id`, `device_id`, `device_is_new`, `accessed_at`, `after_hours`. Extra keys forbidden at the API. `after_hours` is server-derived from `accessed_at` and the request's `org_timezone` (weekday 09:00–18:00 local) when the caller omits it, and caller-asserted when supplied; the other fields are caller-asserted. See `derive_after_hours` in `backend/app/risk_engine/schemas.py` and the `docs/decisions.md` 2026-09-15 entry |
 | `computed_at` | `timestamptz` | no | Indexed; dashboard queries filter by recency |
 
 `risk_value` is **not** an aggregate of `agent_outputs`. That aggregate is
@@ -253,7 +276,7 @@ Append-only. One row per recomputation. The Trust Engine's output
 | `document_id` | `uuid` FK → `documents.id` | no | Indexed |
 | `risk_score_id` | `uuid` FK → `risk_scores.id` | no | Indexed. The assessment whose `agent_outputs` produced this score |
 | `consensus_value` | `numeric(4,3)` | no | `0.000` to `1.000`, `CHECK` enforced |
-| `consensus_version` | `varchar(30)` | no | Version of the consensus function that produced this value. v1 is `trust-weighted-mean-0.1.0` |
+| `consensus_version` | `varchar(30)` | no | Version of the consensus function that produced this value. Current is `trust-weighted-mean-1.0.0` (calibrated NIST/ISO policy weights: security + compliance co-lead at 0.250 each, contextual 0.200, quantum 0.175, sustainability 0.125). See `backend/app/trust_engine/consensus.py` and the `docs/decisions.md` 2026-09-23 entry |
 | `computed_at` | `timestamptz` | no | Indexed, defaults to `now()` |
 
 ## `policy_rules`
@@ -344,6 +367,11 @@ encryption run; re-encryption is a new row.
 
 Parameter sets behind each profile are in `SPEC.md` Section 6. Shredding overwrites
 or deletes `wrapped_dek`; ciphertext may remain as proof that data existed.
+Overwriting the live row is the logical erasure: prior copies of the wrapped DEK
+can persist as MVCC dead tuples until `VACUUM`, in the WAL, on streaming replicas,
+and in base backups / PITR archives, so cryptographic erasure is complete only
+once those age out under the deployment's vacuum, WAL-retention, replica, and
+backup-retention policies.
 
 ## `migration_schedule`
 
@@ -429,6 +457,60 @@ whole consistent chain. `merkle_root_at_time` and external anchoring of the root
 are what make that detectable; the chain alone is not sufficient and should not
 be described as if it were.
 
+## `audit_signing_keys`
+
+Append-only against UPDATE, DELETE, and TRUNCATE. Holds the keypairs that sign
+Signed Tree Heads (`SPEC.md` 3.8, `PRD.md` FR-7). Created by Alembic
+`b5e1c9f0a2d4`; modelled in `backend/app/db/models/checkpoint.py`.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `uuid` PK | no | `gen_random_uuid()` |
+| `algorithm` | `varchar(32)` | no | Signature algorithm, e.g. `ML-DSA-87` |
+| `public_key` | `text` | no | Public key in the clear (hex), so an auditor can pin it out-of-band |
+| `wrapped_secret_key` | `bytea` | no | Secret key wrapped under `CRYPTO_MASTER_KEY` (NG5), never stored in the clear |
+| `created_at` | `timestamptz` | no | Indexed, defaults to `now()`. "Active key = latest row"; rotation is an INSERT, so no mutable `is_active` flag is needed and the table stays append-only |
+
+## `audit_checkpoints`
+
+Append-only against UPDATE, DELETE, and TRUNCATE. One PQ-signed Signed Tree Head
+per issuance, turning the Merkle root the audit layer recomputes into an
+externally verifiable commitment (RFC 6962 model, `SPEC.md` 3.8). Created by
+Alembic `b5e1c9f0a2d4`.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `uuid` PK | no | `gen_random_uuid()` |
+| `document_id` | `uuid` FK → `documents.id` | **yes** | `ON DELETE RESTRICT`, indexed. Null for a checkpoint over the system chain |
+| `signing_key_id` | `uuid` FK → `audit_signing_keys.id` | no | `ON DELETE RESTRICT`, indexed. The key whose signature is stored here |
+| `tree_size` | `int` | no | Number of leaves the signed root commits to |
+| `merkle_root` | `char(64)` | no | Hex SHA-256 Merkle root at `tree_size`, matching `audit_log` |
+| `signature` | `text` | no | ML-DSA-87 signature over the signing input `(tree_size, merkle_root, signed_at, document_id)`, domain `qaegis-audit-sth-v1` |
+| `signed_at` | `timestamptz` | no | Indexed, defaults to `now()`. Part of the signed input |
+| `created_at` | `timestamptz` | no | Defaults to `now()` |
+
+## `event_outbox`
+
+**Not** append-only: the relay UPDATEs `status` as a row is delivered. Backs the
+transactional-outbox pattern (`SPEC.md` 3.1): domain writes enqueue events here
+in the same transaction, and `backend/app/event_bus/relay.py` drains committed
+rows to Redis Streams. Created by Alembic `a3d8b1e4c907`; modelled in
+`backend/app/db/models/outbox.py`.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `uuid` PK | no | `gen_random_uuid()` |
+| `event_type` | `varchar(60)` | no | Same event-type vocabulary as `audit_log.event_type` |
+| `payload` | `jsonb` | no | The event body relayed to the stream |
+| `occurred_at` | `timestamptz` | no | When the domain event happened |
+| `status` | `varchar(16)` | no | `CHECK IN ('pending', 'sent', 'dead')`, defaults to `pending`. Indexed. The relay mutates this |
+| `attempts` | `int` | no | `CHECK >= 0`, defaults to `0`. Retry counter |
+| `next_attempt_at` | `timestamptz` | no | Defaults to `now()`. Backoff schedule; the hot relay query is a partial index on `(next_attempt_at, created_at)` where `status = 'pending'` |
+| `last_error` | `text` | yes | Last delivery error, for the DLQ path |
+| `stream_id` | `varchar(64)` | yes | Redis Streams id assigned on successful publish |
+| `published_at` | `timestamptz` | yes | When the row reached the stream |
+| `created_at` | `timestamptz` | no | Indexed, defaults to `now()` |
+
 ---
 
 ## Deviations from the CIA-I design
@@ -489,11 +571,15 @@ attack paths are Cypher, and `documents.id` is an application-level property on
 graph nodes, not a database-enforced foreign key.
 
 **pgvector (`SPEC.md` 3.12 / FR-11)** lands in Postgres as table `rag_chunks`
-(Alembic `e1a9c3f70b22`). It stores chunk text plus a `vector(64)` embedding for
-similarity search. That table is an implementation of the vector store decision
-(see `docs/decisions.md`); it is not one of the twelve core domain tables in
-Section 5 of `SPEC.md`, and it must not be used as a substitute for Neo4j path
-queries.
+(created by Alembic `e1a9c3f70b22`, widened to 1024 dims with an HNSW cosine
+index by `f2c7a9d15e30`). It stores chunk text plus a `vector(1024)` embedding
+for similarity search, produced by real fastembed transformer embeddings
+(default `BAAI/bge-large-en-v1.5`; a `deterministic-hash-v1` embedder is used for
+hermetic tests). The stored width must match `RAG_EMBEDDING_DIMS`
+(`backend/app/db/models/rag.py`). That table is an implementation of the vector
+store decision (see `docs/decisions.md`); it is not one of the twelve core domain
+tables in Section 5 of `SPEC.md`, and it must not be used as a substitute for
+Neo4j path queries.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -502,7 +588,7 @@ queries.
 | `source_type` | `varchar(80)` | inventory / audit / etc. |
 | `source_id` | `varchar(120)` | optional origin key |
 | `content` | `text` | chunk body |
-| `embedding` | `vector(64)` | stub-hash-v1 width this phase |
-| `embedding_model` | `varchar(80)` | always names the embedder |
+| `embedding` | `vector(1024)` | real fastembed width; default model `BAAI/bge-large-en-v1.5` |
+| `embedding_model` | `varchar(80)` | always names the embedder (e.g. `BAAI/bge-large-en-v1.5`) |
 | `metadata` | `jsonb` | default `{}` |
 | `created_at` | `timestamptz` | `now()` |

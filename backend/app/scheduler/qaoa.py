@@ -1,10 +1,16 @@
 """QAOA migration prioritization, ``SPEC.md`` 3.10 / ``PRD.md`` FR-9.
 
 Formulates the budgeted upgrade selection as a QUBO and solves it with a
-depth-``p`` QAOA. Prefers Qiskit when installed; falls back to an explicit
-statevector QAOA of the same Hamiltonian so CI and Windows hosts without a
-native Qiskit build still produce a comparable ranking on the identical
-constraint set.
+depth-``p`` QAOA. When Qiskit is installed the Quantum Approximate Optimization
+Algorithm genuinely runs: the diagonal cost Hamiltonian is expanded exactly into
+Pauli-Z terms (via a Walsh-Hadamard transform of the energy table), a
+:class:`~qiskit.circuit.library.QAOAAnsatz` is built from it, its
+gamma/beta angles are optimized with SciPy COBYLA against the Qiskit
+statevector expectation, and the optimized circuit is sampled to pick the best
+budget-feasible bitstring. When Qiskit is absent (or ``n`` exceeds the exact
+statevector limit) the module falls back to an explicit statevector QAOA of the
+*same* Hamiltonian so CI and hosts without a native Qiskit build still produce a
+comparable ranking on the identical constraint set.
 
 No comparative quality claim is made here — :mod:`app.scheduler.rank` records
 baseline totals alongside this method for FR-9's required comparison.
@@ -12,11 +18,26 @@ baseline totals alongside this method for FR-9's required comparison.
 
 from __future__ import annotations
 
+import logging
 import math
 import random
 
 from app.scheduler.baselines import SelectionResult, greedy_select
 from app.scheduler.candidates import MigrationCandidate
+
+logger = logging.getLogger(__name__)
+
+#: Largest candidate set for which the genuine Qiskit statevector QAOA runs.
+#: Beyond this the 2**n statevector is impractical, so the greedy-seeded local
+#: refinement (``_large_n_qaoa_approx``) takes over, exactly as in the numpy
+#: path.
+_QISKIT_MAX_QUBITS = 12
+
+#: Coefficients below this magnitude are dropped from the cost Hamiltonian.
+#: The one-sided overrun penalty makes the exact expansion dense, so tiny terms
+#: are pruned to keep the ``PauliEvolutionGate`` synthesizable without changing
+#: the selection.
+_HAMILTONIAN_COEFF_FLOOR = 1e-9
 
 
 def qiskit_available() -> bool:
@@ -191,6 +212,65 @@ def _numpy_local_refine(
     )
 
 
+def _diagonal_cost_hamiltonian(energies: list[float], n: int):
+    """Exact cost Hamiltonian for the diagonal QUBO as a ``SparsePauliOp``.
+
+    A cost that depends only on *which* items are selected is diagonal in the
+    computational basis, so it expands exactly in tensor products of ``I`` and
+    ``Z``::
+
+        E(x) = sum_S c_S * prod_{i in S} (-1)^{x_i}
+
+    The coefficients ``c_S`` are the Walsh-Hadamard transform of the energy
+    table divided by ``2**n`` (``prod_{i in S} Z_i`` has eigenvalue
+    ``(-1)^{popcount(x & S)}`` on basis state ``x``). Computed with an in-place
+    fast Walsh-Hadamard transform in ``O(n * 2**n)`` rather than the naive
+    ``O(4**n)`` double sum.
+    """
+    from qiskit.quantum_info import SparsePauliOp
+
+    dim = 1 << n
+    coeffs = list(energies)
+    step = 1
+    while step < dim:
+        for start in range(0, dim, step * 2):
+            for j in range(start, start + step):
+                a = coeffs[j]
+                b = coeffs[j + step]
+                coeffs[j] = a + b
+                coeffs[j + step] = a - b
+        step *= 2
+
+    norm = float(dim)
+    labels: list[str] = []
+    values: list[float] = []
+    for mask in range(dim):
+        coeff = coeffs[mask] / norm
+        if abs(coeff) <= _HAMILTONIAN_COEFF_FLOOR:
+            continue
+        label = ["I"] * n
+        for qubit in range(n):
+            if (mask >> qubit) & 1:
+                # Qiskit labels are big-endian: qubit i is at position n-1-i.
+                label[n - 1 - qubit] = "Z"
+        labels.append("".join(label))
+        values.append(coeff)
+
+    if not labels:
+        # Constant-zero Hamiltonian (all items free / no candidates): a valid
+        # identity operator so QAOAAnsatz still builds.
+        labels.append("I" * n)
+        values.append(0.0)
+    return SparsePauliOp(labels, values)
+
+
+def _qaoa_restart_count(n: int) -> int:
+    """More random restarts for small landscapes, fewer as the sim gets heavy."""
+    if n <= 6:
+        return 8
+    return 3
+
+
 def _qiskit_qaoa_select(
     candidates: list[MigrationCandidate],
     *,
@@ -198,61 +278,103 @@ def _qiskit_qaoa_select(
     seed: int,
     p: int,
 ) -> SelectionResult:
-    """Qiskit SamplingVQE/QAOA path when the package is available."""
-    from qiskit.circuit.library import QAOAAnsatz
-    from qiskit.quantum_info import SparsePauliOp
-    from qiskit.primitives import StatevectorSampler
+    """Genuine Qiskit QAOA over the knapsack QUBO.
+
+    Builds the exact diagonal cost Hamiltonian, constructs a ``QAOAAnsatz`` from
+    it, optimizes the gamma/beta angles with SciPy COBYLA against the Qiskit
+    statevector expectation, then samples the optimized circuit and returns the
+    lowest-energy budget-feasible bitstring the distribution supports. Reports
+    method ``"qaoa_qiskit"``. Raises on any Qiskit/SciPy failure so the caller
+    can fall back to the numpy statevector path.
+    """
     import numpy as np
+    from qiskit.circuit.library import QAOAAnsatz
+    from qiskit.quantum_info import Statevector
+    from scipy.optimize import minimize
 
     n = len(candidates)
     if n == 0:
-        return SelectionResult("qaoa_numpy", (), 0.0, 0.0, ())
-    if n > 12:
-        # Same large-n escape as numpy path. Do not claim a Qiskit run.
-        approx = _large_n_qaoa_approx(candidates, budget=budget, seed=seed)
-        return SelectionResult(
-            method="qaoa_numpy_approx",
-            selected_ids=approx.selected_ids,
-            total_score=approx.total_score,
-            total_cost=approx.total_cost,
-            ordered=approx.ordered,
-        )
+        return SelectionResult("qaoa_qiskit", (), 0.0, 0.0, ())
+    if n > _QISKIT_MAX_QUBITS:
+        # Same large-n escape as the numpy path: an exact 2**n statevector is
+        # impractical, so refine a greedy seed. Reported as an approximation,
+        # never as a genuine Qiskit run.
+        return _large_n_qaoa_approx(candidates, budget=budget, seed=seed)
 
     scores = [c.score for c in candidates]
     costs = [c.cost for c in candidates]
     penalty = max(sum(scores) * 2.0, 1.0)
-
-    # Build diagonal Ising/QUBO as Pauli Z string dict via energy table.
     dim = 1 << n
-    energies = []
-    for index in range(dim):
-        bits = [(index >> i) & 1 for i in range(n)]
-        energies.append(_bitstring_cost(bits, scores, costs, budget, penalty))
+    energies = [
+        _bitstring_cost(
+            [(index >> i) & 1 for i in range(n)], scores, costs, budget, penalty
+        )
+        for index in range(dim)
+    ]
+    energy_arr = np.asarray(energies, dtype=float)
 
-    # Construct a Qiskit cost ansatz to prove the stack imports, then evaluate
-    # the full QUBO with the numpy path. Method must report numpy — we never
-    # run a Qiskit sampler/optimizer on these energies in this build.
-    pauli_labels = []
-    pauli_coeffs = []
-    # Constant + Z terms approximating linear scores (enough to wire Qiskit).
-    for i, score in enumerate(scores):
-        label = ["I"] * n
-        label[n - 1 - i] = "Z"
-        pauli_labels.append("".join(label))
-        pauli_coeffs.append(-0.5 * score)
-    cost_op = SparsePauliOp(pauli_labels, pauli_coeffs)
+    cost_op = _diagonal_cost_hamiltonian(energies, n)
     ansatz = QAOAAnsatz(cost_op, reps=p)
-    _ = StatevectorSampler()  # prove primitives import
-    _ = np.zeros(ansatz.num_parameters)
-    _ = energies  # energy table retained for future sampler wiring
+    num_params = ansatz.num_parameters
 
-    result = _numpy_qaoa_select(candidates, budget=budget, seed=seed, p=p)
+    def expectation(params: "np.ndarray") -> float:
+        # <psi|H|psi> for a diagonal H equals sum_x P(x) E(x); evaluating it from
+        # the Qiskit-simulated amplitudes is exact and far cheaper than a dense
+        # operator contraction. The quantum part (cost + mixer evolution) is
+        # genuinely simulated by Qiskit below.
+        bound = ansatz.assign_parameters(params)
+        probs = np.abs(np.asarray(Statevector(bound).data)) ** 2
+        return float(np.dot(probs, energy_arr))
+
+    rng = random.Random(seed)
+    best_params: "np.ndarray | None" = None
+    best_value = float("inf")
+    for _ in range(_qaoa_restart_count(n)):
+        x0 = np.array([rng.uniform(0.0, math.pi) for _ in range(num_params)])
+        result = minimize(expectation, x0, method="COBYLA", options={"maxiter": 150})
+        if result.fun < best_value:
+            best_value = float(result.fun)
+            best_params = np.asarray(result.x)
+
+    assert best_params is not None
+    final_probs = (
+        np.abs(np.asarray(Statevector(ansatz.assign_parameters(best_params)).data)) ** 2
+    )
+
+    # Consider only basis states QAOA actually amplified, and among those pick
+    # the lowest-energy set that fits the budget — the standard "best measured"
+    # QAOA read-out, made robust against a high-probability infeasible state.
+    ranked = np.argsort(final_probs)[::-1]
+    prob_floor = float(final_probs[ranked[0]]) * 1e-3
+    best_index: int | None = None
+    best_energy = float("inf")
+    for raw in ranked:
+        index = int(raw)
+        if final_probs[index] < prob_floor:
+            break
+        bits = [(index >> i) & 1 for i in range(n)]
+        spent = sum(cost for bit, cost in zip(bits, costs) if bit)
+        if spent <= budget + 1e-9 and energies[index] < best_energy:
+            best_energy = energies[index]
+            best_index = index
+
+    if best_index is None:
+        best_index = int(ranked[0])  # repaired below
+
+    bits = [(best_index >> i) & 1 for i in range(n)]
+    chosen = [c for bit, c in zip(bits, candidates) if bit]
+    spent = sum(c.cost for c in chosen)
+    while spent > budget + 1e-9 and chosen:
+        dropped = min(chosen, key=lambda c: c.score / c.cost if c.cost else c.score)
+        chosen.remove(dropped)
+        spent = sum(c.cost for c in chosen)
+    chosen.sort(key=lambda c: c.score, reverse=True)
     return SelectionResult(
-        method="qaoa_numpy",
-        selected_ids=result.selected_ids,
-        total_score=result.total_score,
-        total_cost=result.total_cost,
-        ordered=result.ordered,
+        method="qaoa_qiskit",
+        selected_ids=tuple(str(c.document_id) for c in chosen),
+        total_score=round(sum(c.score for c in chosen), 6),
+        total_cost=round(sum(c.cost for c in chosen), 6),
+        ordered=tuple(chosen),
     )
 
 
@@ -268,5 +390,11 @@ def qaoa_select(
         try:
             return _qiskit_qaoa_select(candidates, budget=budget, seed=seed, p=p)
         except Exception:
+            # Genuine Qiskit/SciPy failures must not be invisible: log them, then
+            # fall back to the numpy statevector path over the same Hamiltonian.
+            logger.warning(
+                "Qiskit QAOA failed; falling back to the numpy statevector path",
+                exc_info=True,
+            )
             return _numpy_qaoa_select(candidates, budget=budget, seed=seed, p=p)
     return _numpy_qaoa_select(candidates, budget=budget, seed=seed, p=p)

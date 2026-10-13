@@ -148,7 +148,7 @@ describe("OverrideScreen", () => {
         new_label: "INTERNAL",
         justification: longJustification,
       },
-      "security_analyst"
+      "security_admin"
     );
     expect(mockOverride.mock.calls[0][0]).not.toHaveProperty("confirmed");
     expect(mockOverride.mock.calls[0][0]).not.toHaveProperty("original_label");
@@ -207,7 +207,7 @@ describe("OverrideScreen", () => {
     expect(screen.getByRole("button", { name: /RESTRICTED.*Current/i })).toBeDisabled();
     expect(mockGetDocument).toHaveBeenCalledWith(
       sampleSnapshot.id,
-      "security_analyst"
+      "security_admin"
     );
   });
 

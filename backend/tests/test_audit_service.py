@@ -23,7 +23,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.audit import service as audit_service
-from app.audit.service import verify_chain_range
+from app.audit.merkle import (
+    build,
+    canonicalize,
+    hash_leaf,
+    verify_consistency,
+    verify_inclusion,
+)
+from app.audit.service import (
+    build_consistency_proof,
+    build_inclusion_proof,
+    verify_chain_range,
+)
 from app.db.enums import AuditEventType, UserRole
 from app.db.models import Document
 from app.db.repositories import audit as audit_repo
@@ -32,6 +43,8 @@ EVENT = AuditEventType.CLASSIFICATION_COMPLETED.value
 
 VERIFY_URL = "/api/v1/audit/verify"
 ENTRIES_URL = "/api/v1/audit/entries"
+INCLUSION_URL = "/api/v1/audit/inclusion-proof"
+CONSISTENCY_URL = "/api/v1/audit/consistency-proof"
 ROLE_HEADER = "X-Q-AEGIS-Actor-Role"
 
 
@@ -471,3 +484,229 @@ def test_entries_endpoint_forked_chain_returns_409(
         )
     assert response.status_code == 409
     assert "forked" in response.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# build_inclusion_proof / build_consistency_proof: service over the real chain
+#
+# The proofs are the point where an auditor stops needing the whole log. These
+# tests build a proof from the stored chain, then verify it with the pure
+# functions given only the proof and roots — never the other entries.
+# ---------------------------------------------------------------------------
+
+
+def test_build_inclusion_proof_verifies_against_recomputed_root(
+    db_session: Session, registered_document: Document
+) -> None:
+    """A proof from the chain verifies for every entry against the real root."""
+    notes = ["a", "b", "c", "d", "e", "f", "g"]
+    for note in notes:
+        append(db_session, registered_document.id, note)
+
+    for index in range(len(notes)):
+        result = build_inclusion_proof(db_session, registered_document.id, index)
+        assert result.proof.leaf_index == index
+        assert result.proof.tree_size == len(notes)
+        assert verify_inclusion(result.proof, result.leaf_hash, result.root)
+        # The returned root is the chain's true root, not a stored claim.
+        assert result.root == audit_repo.current_root(
+            db_session, registered_document.id
+        )
+
+
+def test_inclusion_proof_leaf_hash_matches_the_stored_payload(
+    db_session: Session, registered_document: Document
+) -> None:
+    """leaf_hash is recomputable from the returned payload, closing the loop."""
+    for note in ("one", "two", "three"):
+        append(db_session, registered_document.id, note)
+
+    result = build_inclusion_proof(db_session, registered_document.id, 1)
+    assert result.payload == {"note": "two"}
+    assert result.leaf_hash == hash_leaf(canonicalize(result.payload))
+
+
+def test_inclusion_proof_against_an_older_tree_size(
+    db_session: Session, registered_document: Document
+) -> None:
+    """A proof can target a past size, i.e. an already-anchored root."""
+    for note in ("a", "b", "c", "d", "e"):
+        append(db_session, registered_document.id, note)
+
+    result = build_inclusion_proof(db_session, registered_document.id, 1, tree_size=3)
+    assert result.proof.tree_size == 3
+    # Root of the first three entries only, independently recomputed.
+    chain = audit_repo.load_chain(db_session, registered_document.id)
+    prefix_root = build([canonicalize(e.payload) for e in chain[:3]]).root
+    assert result.root == prefix_root
+    assert verify_inclusion(result.proof, result.leaf_hash, result.root)
+
+
+def test_inclusion_proof_out_of_range_raises(
+    db_session: Session, registered_document: Document
+) -> None:
+    """Indices and tree sizes outside the chain are caller errors."""
+    for note in ("a", "b"):
+        append(db_session, registered_document.id, note)
+
+    with pytest.raises(ValueError):
+        build_inclusion_proof(db_session, registered_document.id, 5)
+    with pytest.raises(ValueError):
+        build_inclusion_proof(db_session, registered_document.id, 0, tree_size=9)
+
+
+def test_inclusion_proof_empty_chain_raises(
+    db_session: Session, registered_document: Document
+) -> None:
+    """An empty chain has nothing to prove."""
+    with pytest.raises(ValueError):
+        build_inclusion_proof(db_session, registered_document.id, 0)
+
+
+def test_build_consistency_proof_verifies_every_prefix(
+    db_session: Session, registered_document: Document
+) -> None:
+    """Every earlier prefix proves consistent with the full chain."""
+    notes = ["a", "b", "c", "d", "e", "f"]
+    for note in notes:
+        append(db_session, registered_document.id, note)
+
+    for old_size in range(len(notes) + 1):
+        result = build_consistency_proof(db_session, registered_document.id, old_size)
+        assert verify_consistency(result.proof, result.old_root, result.new_root)
+
+
+def test_consistency_proof_detects_a_rewritten_prefix(
+    db_session: Session, registered_document: Document, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the anchored old root disagrees, consistency verification fails.
+
+    The DB trigger forbids editing a stored row, so the "rewrite" is a genuine
+    earlier root, captured before more entries were appended, checked against a
+    later chain whose head is rebuilt differently through the load_chain seam.
+    """
+    for note in ("a", "b", "c"):
+        append(db_session, registered_document.id, note)
+    genuine_old_root = audit_repo.current_root(db_session, registered_document.id)
+
+    for note in ("d", "e"):
+        append(db_session, registered_document.id, note)
+
+    real_chain = audit_repo.load_chain(db_session, registered_document.id)
+    rewritten = [
+        SimpleNamespace(
+            payload=({"note": "a-ALTERED"} if i == 0 else dict(entry.payload)),
+            merkle_root_at_time=entry.merkle_root_at_time,
+        )
+        for i, entry in enumerate(real_chain)
+    ]
+    monkeypatch.setattr(audit_service, "load_chain", lambda session, doc_id: rewritten)
+
+    result = build_consistency_proof(db_session, registered_document.id, 3)
+    # The proof is built over the rewritten chain, so its old_root no longer
+    # matches the genuine earlier root an auditor anchored.
+    assert result.old_root != genuine_old_root
+    assert not verify_consistency(result.proof, genuine_old_root, result.new_root)
+
+
+def test_consistency_proof_out_of_range_raises(
+    db_session: Session, registered_document: Document
+) -> None:
+    """Sizes must satisfy 0 <= old_size <= new_size <= chain length."""
+    for note in ("a", "b", "c"):
+        append(db_session, registered_document.id, note)
+
+    with pytest.raises(ValueError):
+        build_consistency_proof(db_session, registered_document.id, 5)
+    with pytest.raises(ValueError):
+        build_consistency_proof(db_session, registered_document.id, 2, new_size=9)
+
+
+# ---------------------------------------------------------------------------
+# Proof API endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_inclusion_proof_endpoint_returns_a_verifiable_proof(
+    client: TestClient, registered_document: Document, db_session: Session
+) -> None:
+    """The endpoint hands back a proof a client verifies with the pure code."""
+    for note in ("a", "b", "c", "d"):
+        append(db_session, registered_document.id, note)
+
+    response = client.get(
+        INCLUSION_URL,
+        params={"document_id": str(registered_document.id), "leaf_index": 2},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["leaf_index"] == 2
+    assert data["tree_size"] == 4
+    assert data["payload"] == {"note": "c"}
+    # Reconstruct the pure proof from the response and verify independently.
+    from app.audit.merkle import InclusionProof
+
+    proof = InclusionProof(
+        leaf_index=data["leaf_index"],
+        tree_size=data["tree_size"],
+        audit_path=tuple(data["audit_path"]),
+    )
+    assert verify_inclusion(proof, data["leaf_hash"], data["root"])
+
+
+def test_consistency_proof_endpoint_returns_a_verifiable_proof(
+    client: TestClient, registered_document: Document, db_session: Session
+) -> None:
+    """The endpoint hands back a consistency proof checkable client-side."""
+    for note in ("a", "b", "c", "d", "e"):
+        append(db_session, registered_document.id, note)
+
+    response = client.get(
+        CONSISTENCY_URL,
+        params={"document_id": str(registered_document.id), "old_size": 2},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["old_size"] == 2
+    assert data["new_size"] == 5
+    from app.audit.merkle import ConsistencyProof
+
+    proof = ConsistencyProof(
+        old_size=data["old_size"],
+        new_size=data["new_size"],
+        nodes=tuple(data["nodes"]),
+    )
+    assert verify_consistency(proof, data["old_root"], data["new_root"])
+
+
+@pytest.mark.parametrize("url", [INCLUSION_URL, CONSISTENCY_URL])
+def test_proof_endpoints_require_a_permitted_role(
+    client: TestClient, registered_document: Document, url: str
+) -> None:
+    """Missing header is 401; an excluded role is 403."""
+    param = "leaf_index" if url == INCLUSION_URL else "old_size"
+    base = {"document_id": str(registered_document.id), param: 0}
+
+    assert client.get(url, params=base).status_code == 401
+    assert (
+        client.get(
+            url, params=base, headers={ROLE_HEADER: UserRole.ENGINEER.value}
+        ).status_code
+        == 403
+    )
+
+
+@pytest.mark.parametrize("url", [INCLUSION_URL, CONSISTENCY_URL])
+def test_proof_endpoints_empty_chain_is_422(
+    client: TestClient, registered_document: Document, url: str
+) -> None:
+    """A chain with no entries yields 422, not a false proof."""
+    param = "leaf_index" if url == INCLUSION_URL else "old_size"
+    response = client.get(
+        url,
+        params={"document_id": str(registered_document.id), param: 0},
+        headers={ROLE_HEADER: UserRole.AUDITOR.value},
+    )
+    assert response.status_code == 422

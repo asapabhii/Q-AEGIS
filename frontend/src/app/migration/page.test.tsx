@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import MigrationPage from "./page";
 import { ApiError, rankMigration } from "@/lib/api/client";
+import { RoleProvider } from "@/lib/context/RoleContext";
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/client")>();
@@ -60,7 +61,11 @@ describe("MigrationPage", () => {
       ranked_at: "2026-09-14T00:00:00Z",
     });
 
-    render(<MigrationPage />);
+    render(
+      <RoleProvider>
+        <MigrationPage />
+      </RoleProvider>
+    );
     await user.click(
       screen.getByRole("button", { name: /rank with qaoa \+ baselines/i })
     );
@@ -70,8 +75,12 @@ describe("MigrationPage", () => {
       "security_admin"
     );
     expect(await screen.findByText(/qaoa_numpy/i)).toBeInTheDocument();
-    expect(screen.getByText(/greedy:/i)).toBeInTheDocument();
-    expect(screen.getByText(/rank 1: doc-1/i)).toBeInTheDocument();
+    expect(screen.getByText("greedy")).toBeInTheDocument();
+    const scheduleRow = screen.getByText("doc-1").closest("li");
+    expect(scheduleRow).not.toBeNull();
+    expect(
+      within(scheduleRow as HTMLElement).getByText("1")
+    ).toBeInTheDocument();
   });
 
   it("shows API errors from ranking", async () => {
@@ -79,7 +88,11 @@ describe("MigrationPage", () => {
     mockRank.mockRejectedValueOnce(
       new ApiError(403, "Forbidden", { detail: "not permitted" })
     );
-    render(<MigrationPage />);
+    render(
+      <RoleProvider>
+        <MigrationPage />
+      </RoleProvider>
+    );
     await user.click(
       screen.getByRole("button", { name: /rank with qaoa \+ baselines/i })
     );

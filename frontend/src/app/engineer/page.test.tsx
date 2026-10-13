@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import EngineerPage from "./page";
 import { checkHealth, listDocuments } from "@/lib/api/client";
+import { RoleProvider } from "@/lib/context/RoleContext";
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/client")>();
@@ -30,9 +31,18 @@ describe("EngineerPage", () => {
     cleanup();
   });
 
-  it("renders ops heading and health", async () => {
-    render(<EngineerPage />);
-    expect(screen.getByText(/engineer ops/i)).toBeInTheDocument();
-    expect(await screen.findByText(/ok · q-aegis-shield-backend · 0\.1\.0/i)).toBeInTheDocument();
+  it("renders the system health heading and backend health details", async () => {
+    render(
+      <RoleProvider>
+        <EngineerPage />
+      </RoleProvider>
+    );
+    // The page renders its heading immediately (the caller is permitted).
+    expect(screen.getByText(/system health/i)).toBeInTheDocument();
+    // After the health probe resolves it surfaces the backend status, service,
+    // and version across the metric cards.
+    expect(await screen.findByText(/q-aegis-shield-backend/i)).toBeInTheDocument();
+    expect(screen.getByText("v0.1.0")).toBeInTheDocument();
+    expect(screen.getByText(/online/i)).toBeInTheDocument();
   });
 });

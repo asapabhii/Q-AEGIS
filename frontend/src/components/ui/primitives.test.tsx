@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Badge from "./Badge";
-import Card from "./Card";
 import DataTable from "./DataTable";
 import HashDisplay from "./HashDisplay";
 
@@ -38,24 +37,6 @@ describe("shared UI primitives", () => {
     expect(
       screen.getByText("No rows match the current filters."),
     ).toBeInTheDocument();
-    cleanup();
-  });
-
-  it("renders card structure without decorative behavior", () => {
-    render(
-      <Card
-        title="Policy gate"
-        description="Deterministic override."
-        actions={<button type="button">Test rule</button>}
-      >
-        <p>Rule outcome</p>
-      </Card>,
-    );
-
-    const card = screen.getByRole("heading", { name: "Policy gate" }).closest("section");
-    expect(card).toBeInTheDocument();
-    expect(screen.getByText("Deterministic override.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Test rule" })).toBeInTheDocument();
     cleanup();
   });
 

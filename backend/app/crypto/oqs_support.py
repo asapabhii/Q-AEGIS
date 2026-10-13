@@ -89,3 +89,31 @@ def require_oqs_for_profile(profile_type: CryptoProfileType) -> None:
                 f"{profile_type.value} encryption requires {', '.join(missing)}, "
                 "which is not enabled."
             )
+
+
+def require_oqs_for_signature(algorithm: str) -> None:
+    """Refuse a signature operation when liboqs lacks the named algorithm.
+
+    SECURITY CAVEAT: liboqs is NOT independently audited.
+
+    Used by the audit-checkpoint signer (:mod:`app.audit.checkpoint`), which
+    signs Merkle roots with ML-DSA-87. Fails closed: a checkpoint is never
+    "signed" with a missing library, because an unsigned or absent commitment is
+    worse than an explicit refusal an operator must notice.
+
+    Args:
+        algorithm: The liboqs signature mechanism name, e.g. ``"ML-DSA-87"``.
+
+    Raises:
+        LiboqsUnavailableError: when liboqs is missing or does not enable
+            ``algorithm``.
+    """
+    if not oqs_available():
+        raise LiboqsUnavailableError(
+            f"{algorithm} signing requires liboqs-python, which is not installed."
+        )
+    if algorithm not in _enabled_sig_mechanisms():
+        raise LiboqsUnavailableError(
+            f"{algorithm} signing requires the {algorithm} mechanism, "
+            "which is not enabled."
+        )

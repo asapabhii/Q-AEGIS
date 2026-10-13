@@ -54,6 +54,28 @@ class AuditChainError(RuntimeError):
     """
 
 
+class DuplicateAuditPayloadError(AuditChainError):
+    """Raised when an append would repeat a payload already on the same chain.
+
+    The chain links each entry to the one before it by ``payload_hash`` (the next
+    row's ``prev_hash`` names it). Two entries on one chain with a byte-identical
+    payload therefore share a ``payload_hash``, and "which entry does the next one
+    build on" stops having a single answer: tail-finding
+    (:func:`_chain_tail`) sees both as built-on and returns ``None``, so every
+    later append is computed as a second genesis and collides on
+    ``no_forked_chain``. One deterministic event type is enough to wedge a whole
+    chain this way, and the failure surfaces far from its cause.
+
+    So the append path refuses a duplicate up front, attributably: every audit
+    payload must be intrinsically distinct. Where an event could otherwise repeat
+    (a ranking run with no candidates, a re-seed of a fixed demo graph), the call
+    site carries a unique element — see ``migration_audit_payload``'s
+    ``ranking_run_id`` and ``graph.seed``'s ``seed_run_id``. This is the mechanical
+    enforcement of that convention, not a substitute for it: it converts a silent,
+    chain-corrupting collision into a loud error naming the offending event.
+    """
+
+
 def hash_payload(payload: Mapping[str, Any]) -> str:
     """Return the SHA-256 of ``payload``'s canonical serialisation.
 
@@ -211,6 +233,25 @@ def append_entry(
 
     stored_payload = normalize_payload(payload)
     canonical = canonicalize(stored_payload)
+    payload_hash = hash_payload(stored_payload)
+
+    # Refuse a payload already present on this chain, before touching the tail or
+    # the frontier. A duplicate payload_hash makes the prev_hash links ambiguous
+    # and silently wedges every later append (see DuplicateAuditPayloadError); a
+    # bounded lookup here turns that into a loud, attributable failure at the
+    # write that introduced it. The advisory lock taken above serialises appends
+    # to this chain, so the check and the insert cannot race. .limit(1) keeps the
+    # read bounded — an unbounded scan here would make the write path O(n).
+    if _payload_already_on_chain(session, document_id, payload_hash):
+        raise DuplicateAuditPayloadError(
+            f"Refusing to append event {event_type!r} to the chain for "
+            f"document_id={document_id!r}: a byte-identical payload is already "
+            "recorded on it, so the two would share a payload_hash and make the "
+            "chain's prev_hash links ambiguous. Every audit payload must be "
+            "intrinsically distinct; give this event a unique element (a per-run "
+            "id or timestamp), as migration_audit_payload and graph.seed do."
+        )
+
     tail = _chain_tail(session, document_id)
 
     if tail is None:
@@ -226,7 +267,7 @@ def append_entry(
         actor_id=actor_id,
         event_type=event_type,
         payload=stored_payload,
-        payload_hash=hash_payload(stored_payload),
+        payload_hash=payload_hash,
         prev_hash=prev_hash,
         merkle_root_at_time=root_of(extended),
         frontier=frontier_to_json(extended),
@@ -244,6 +285,25 @@ def _chain_query(document_id: UUID | None):
     if document_id is None:
         return statement.where(AuditLog.document_id.is_(None))
     return statement.where(AuditLog.document_id == document_id)
+
+
+def _payload_already_on_chain(
+    session: Session, document_id: UUID | None, payload_hash: str
+) -> bool:
+    """Whether an entry with ``payload_hash`` is already on this chain.
+
+    A bounded lookup (``LIMIT 1``): existence is all the append path needs, and an
+    unbounded read of ``audit_log`` on every write would make appending O(n) in
+    the chain length. Filtered to the one chain via ``document_id`` so a hash that
+    legitimately recurs on a *different* document's chain is not treated as a
+    collision — only a repeat within a single chain breaks that chain's links.
+    """
+    found = session.scalar(
+        _chain_query(document_id)
+        .where(AuditLog.payload_hash == payload_hash)
+        .limit(1)
+    )
+    return found is not None
 
 
 def _chain_tail(session: Session, document_id: UUID | None) -> AuditLog | None:

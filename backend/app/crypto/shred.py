@@ -1,8 +1,26 @@
-"""Crypto-shredding: irreversible destruction of wrapped DEKs, ``SPEC.md`` 3.9.
+"""Crypto-shredding: destruction of wrapped DEKs, ``SPEC.md`` 3.9.
 
 ``PRD.md`` FR-8: erasure destroys the document's encryption key material, not
-the audit trail. Ciphertext rows remain as proof that data existed; after shred
-they cannot be decrypted.
+the audit trail. Ciphertext rows remain as proof that data existed; once the
+wrapped DEK is gone they cannot be decrypted through this system.
+
+What "irreversible" means here, precisely: the wrapped DEK in the *live* row is
+overwritten in place with a marker plus fresh randomness, and there is no
+application path — no soft-delete, no undo window, no key escrow — to recover it
+past the confirmation step. That is the guarantee the API makes and the audit
+``irreversible`` flag asserts.
+
+STORAGE REMANENCE CAVEAT: overwriting the live row does not by itself erase
+every physical copy of the prior bytes. On PostgreSQL the pre-overwrite tuple
+survives as a dead row version until ``VACUUM``, the change is written to the
+write-ahead log, and both propagate to any streaming replica and to every base
+backup / PITR archive taken before the shred. Cryptographic erasure is therefore
+complete only once those copies have aged out under the deployment's vacuum, WAL
+retention, replica, and backup-retention policies. This module performs the
+logical destruction; closing the remanence window is an operational
+responsibility of the platform those policies govern, and is out of scope for a
+single request. It is documented in ``docs/data-dictionary.md`` and ``SPEC.md``
+3.9 rather than silently implied away.
 
 SECURITY CAVEAT: liboqs is NOT independently audited. Shredding applies to all
 profiles, including hybrid and post-quantum rows that used liboqs.
@@ -32,11 +50,14 @@ def is_shredded(wrapped_dek: bytes) -> bool:
 
 
 def shred_wrapped_dek(wrapped_dek: bytes) -> bytes:
-    """Return irreversible replacement bytes for one wrapped DEK.
+    """Return replacement bytes that destroy one wrapped DEK.
 
     Same length as the original so the ``bytea`` column stays non-null. The
-    marker plus fresh randomness replace every key bit; there is no recovery
-    path.
+    marker plus fresh randomness replace every bit of the wrapped key, so the
+    value stored in the live row can no longer be unwrapped. This is the
+    in-application destruction; see the module docstring's storage-remanence
+    caveat for why prior physical copies (MVCC, WAL, replicas, backups) are a
+    separate, operational concern.
 
     SECURITY CAVEAT: liboqs is NOT independently audited.
     """
@@ -82,6 +103,12 @@ def shred_audit_payload(
     newly_destroyed: int,
 ) -> dict[str, object]:
     """Audit payload for one erasure. JSON primitives only.
+
+    ``irreversible`` records that the wrapped DEK was overwritten with no
+    application recovery path past confirmation; it is a statement about this
+    system's behavior, not a claim that every physical copy of the prior bytes
+    has already left the storage substrate (see the module docstring's
+    storage-remanence caveat).
 
     SECURITY CAVEAT: liboqs is NOT independently audited.
     """

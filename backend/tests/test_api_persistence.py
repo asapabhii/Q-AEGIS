@@ -107,7 +107,6 @@ def score_risk(
         "device_id": "laptop-12",
         "device_is_new": False,
         "accessed_at": "2026-09-09T12:00:00+00:00",
-        "after_hours": False,
     }
     body.update(overrides)
     return client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
@@ -479,6 +478,43 @@ def test_scoring_risk_persists_the_row_and_the_audit_entry(
     assert risk_events[0].payload["risk_score_id"] == str(scores[0].id)
 
 
+def test_risk_audit_records_the_reporter_distinct_from_the_subject(
+    client: TestClient, db_session: Session
+) -> None:
+    """FR-2 third-party reporting: who reported is recorded apart from whom.
+
+    ``score_risk`` authenticates as the seeded Security Analyst (the reporter)
+    and names the seeded Data Owner as ``actor_user_id`` (the subject of the
+    access). The record must not conflate them: the entry's ``actor_id`` column
+    and the payload's ``reported_by_*`` keys carry the reporter, while the
+    snapshot's ``actor_user_id`` carries the subject.
+    """
+    document_id = register(client)["id"]
+    subject_id = owner_user_id(db_session)
+    reporter_id = str(
+        db_session.query(User)
+        .filter(User.role == UserRole.SECURITY_ANALYST)
+        .one()
+        .id
+    )
+    assert reporter_id != subject_id
+
+    assert score_risk(client, document_id, subject_id).status_code == 201
+
+    entry = next(
+        e
+        for e in rows(db_session, AuditLog, document_id=document_id)
+        if e.event_type == AuditEventType.RISK_SCORE_COMPUTED.value
+    )
+    # Attribution column: who acted.
+    assert str(entry.actor_id) == reporter_id
+    # Payload: reporter and subject recorded distinctly and self-describingly.
+    assert entry.payload["reported_by_user_id"] == reporter_id
+    assert entry.payload["reported_by_role"] == UserRole.SECURITY_ANALYST.value
+    assert entry.payload["actor_user_id"] == subject_id
+    assert entry.payload["reported_by_user_id"] != entry.payload["actor_user_id"]
+
+
 def test_the_persisted_risk_row_matches_the_response(
     client: TestClient, db_session: Session
 ) -> None:
@@ -488,7 +524,7 @@ def test_the_persisted_risk_row_matches_the_response(
         document_id,
         owner_user_id(db_session),
         device_is_new=True,
-        after_hours=True,
+        accessed_at="2026-09-09T16:00:00+00:00",
     ).json()
 
     row = rows(db_session, RiskScore, document_id=document_id)[0]

@@ -28,8 +28,31 @@ import {
   askRag,
   login,
   getDocumentAgents,
+  getMe,
+  uploadDocumentFile,
+  subscribeEvents,
+  listCheckpoints,
+  issueCheckpoint,
+  verifyCheckpoint,
+  getSigningKey,
+  getInclusionProof,
+  getConsistencyProof,
+  registerAndClassify,
+  registerUploadAndClassify,
+  runAssessment,
+  submitRiskScore,
+  submitTrustScore,
+  selectCryptoProfile,
+  evaluatePolicyDecision,
   ApiError,
 } from "./client";
+import type {
+  AssessmentRequest,
+  CreateCheckpointRequest,
+  PolicyAction,
+  RiskScoreRequest,
+  TrustScoreRequest,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Mock fetch
@@ -680,5 +703,383 @@ describe("getDocumentAgents", () => {
     expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
       "security_admin"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Streaming/download helpers
+// ---------------------------------------------------------------------------
+
+/** Flush the microtask + macrotask queues so a fire-and-forget async loop drains. */
+async function tick(times = 6): Promise<void> {
+  for (let i = 0; i < times; i += 1) {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+/** Fake SSE Response whose body reader yields the given raw chunks then ends. */
+function sseResponse(chunks: string[], ok = true, status = 200): Response {
+  const encoder = new TextEncoder();
+  let i = 0;
+  return {
+    ok,
+    status,
+    body: ok
+      ? {
+          getReader() {
+            return {
+              read: async () =>
+                i < chunks.length
+                  ? { done: false, value: encoder.encode(chunks[i++]) }
+                  : { done: true, value: undefined },
+            };
+          },
+        }
+      : null,
+  } as unknown as Response;
+}
+
+
+describe("getMe", () => {
+  it("sends GET to /api/v1/auth/me with the role header", async () => {
+    const body = {
+      id: "u1",
+      email: "auditor@dev.qaegis.local",
+      role: "auditor",
+      name: "Auditor",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(body));
+
+    const result = await getMe("auditor");
+
+    expect(result).toEqual(body);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/auth/me");
+    expect(options.method).toBe("GET");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe("auditor");
+    expect(options.body).toBeUndefined();
+  });
+});
+
+describe("uploadDocumentFile", () => {
+  it("posts multipart FormData without forcing a JSON Content-Type", async () => {
+    const body = {
+      document_id: "doc-1",
+      filename: "report.txt",
+      extracted_text: "hello world",
+      extracted_text_chars: 11,
+      stored: true,
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(body, 201));
+
+    const file = new File(["hello world"], "report.txt", { type: "text/plain" });
+    const result = await uploadDocumentFile("doc-1", file, "data_owner");
+
+    expect(result).toEqual(body);
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/documents/doc-1/upload");
+    expect(options.method).toBe("POST");
+    expect(options.body).toBeInstanceOf(FormData);
+    // The browser must set the multipart boundary — the client must NOT.
+    expect(headerValue(options.headers, "Content-Type")).toBeNull();
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe("data_owner");
+  });
+});
+
+
+describe("subscribeEvents", () => {
+  it("parses SSE frames and forwards named events, ignoring keepalives", async () => {
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        ":\n\n", // keepalive comment — no data line, must be skipped
+        'event: ready\ndata: {"ok":true}\n\n',
+        "data: not-json\n\n", // non-JSON payload falls back to the raw string
+      ])
+    );
+
+    const onEvent = vi.fn();
+    const unsubscribe = subscribeEvents(onEvent, "security_admin");
+    await tick();
+
+    expect(typeof unsubscribe).toBe("function");
+    expect(onEvent).toHaveBeenCalledWith("ready", { ok: true });
+    expect(onEvent).toHaveBeenCalledWith("message", "not-json");
+    // The keepalive frame produced no callback.
+    expect(onEvent).toHaveBeenCalledTimes(2);
+
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/events/stream");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
+      "security_admin"
+    );
+    unsubscribe();
+  });
+
+  it("reports an error event when the stream response is not ok", async () => {
+    mockFetch.mockResolvedValueOnce(sseResponse([], false, 401));
+
+    const onEvent = vi.fn();
+    subscribeEvents(onEvent, "security_admin");
+    await tick();
+
+    expect(onEvent).toHaveBeenCalledWith("error", { status: 401 });
+  });
+});
+
+
+describe("audit checkpoints and proofs", () => {
+  it("lists checkpoints for a specific document chain", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    await listCheckpoints("doc-1", "auditor");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/audit/checkpoints?document_id=doc-1"
+    );
+    expect(options.method).toBe("GET");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe("auditor");
+  });
+
+  it("lists system-chain checkpoints with no query when documentId is omitted", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    await listCheckpoints(null, "auditor");
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/audit/checkpoints");
+    expect(url).not.toContain("?");
+  });
+
+  it("issues a Signed Tree Head over a document chain", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: "ck-1" }, 201));
+    const body = { document_id: "doc-1" } as unknown as CreateCheckpointRequest;
+    await issueCheckpoint(body, "auditor");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/audit/checkpoint");
+    expect(options.method).toBe("POST");
+    expect(headerValue(options.headers, "Content-Type")).toBe("application/json");
+    expect(JSON.parse(options.body as string)).toEqual({ document_id: "doc-1" });
+  });
+
+  it("verifies a stored checkpoint by id", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ is_valid: true }));
+    await verifyCheckpoint("ck-1", "auditor");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/audit/checkpoint/ck-1/verify"
+    );
+    expect(options.method).toBe("GET");
+  });
+
+  it("reads the active signing key", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ public_key_hex: "ab" }));
+    await getSigningKey("auditor");
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/audit/signing-key");
+  });
+
+  it("builds an inclusion proof query with all optional params", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ audit_path: [] }));
+    await getInclusionProof(3, "doc-1", 10, "auditor");
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/audit/inclusion-proof?");
+    expect(url).toContain("leaf_index=3");
+    expect(url).toContain("document_id=doc-1");
+    expect(url).toContain("tree_size=10");
+  });
+
+  it("omits inclusion proof params that are not supplied", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ audit_path: [] }));
+    await getInclusionProof(0);
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/audit/inclusion-proof?leaf_index=0"
+    );
+  });
+
+  it("builds a consistency proof query with all optional params", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ proof: [] }));
+    await getConsistencyProof(2, "doc-1", 8, "auditor");
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/audit/consistency-proof?");
+    expect(url).toContain("old_size=2");
+    expect(url).toContain("document_id=doc-1");
+    expect(url).toContain("new_size=8");
+  });
+});
+
+
+describe("registerAndClassify", () => {
+  it("registers then classifies, threading the new id into the classify body", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "new-doc", filename: "notes.txt" }, 201)
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          document_id: "new-doc",
+          sensitivity_label: "INTERNAL",
+          confidence: 0.9,
+        })
+      );
+
+    const { document, classification } = await registerAndClassify(
+      "notes.txt",
+      "just some ordinary text",
+      "data_owner"
+    );
+
+    expect(document.id).toBe("new-doc");
+    expect(classification.document_id).toBe("new-doc");
+
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:8000/api/v1/documents"
+    );
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      "http://127.0.0.1:8000/api/v1/classify"
+    );
+    const classifyBody = JSON.parse(
+      (mockFetch.mock.calls[1][1] as RequestInit).body as string
+    );
+    expect(classifyBody).toEqual({
+      document_id: "new-doc",
+      content: "just some ordinary text",
+    });
+  });
+});
+
+
+describe("registerUploadAndClassify", () => {
+  it("classifies extracted text when the upload returns some", async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ id: "up-doc", filename: "a.txt" }, 201))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            document_id: "up-doc",
+            filename: "a.txt",
+            extracted_text: "extracted body text",
+            extracted_text_chars: 19,
+            stored: true,
+          },
+          201
+        )
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ document_id: "up-doc", sensitivity_label: "PUBLIC" })
+      );
+
+    const file = new File(["extracted body text"], "a.txt", {
+      type: "text/plain",
+    });
+    const { classification } = await registerUploadAndClassify(
+      file,
+      "fallback paste",
+      "data_owner"
+    );
+
+    expect(classification.document_id).toBe("up-doc");
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const classifyBody = JSON.parse(
+      (mockFetch.mock.calls[2][1] as RequestInit).body as string
+    );
+    // Extracted text won over the paste fallback.
+    expect(classifyBody.content).toBe("extracted body text");
+  });
+
+  it("falls back to the pasted text when extraction is empty", async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ id: "up-doc2", filename: "b.pdf" }, 201))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            document_id: "up-doc2",
+            filename: "b.pdf",
+            extracted_text: "",
+            extracted_text_chars: 0,
+            stored: true,
+          },
+          201
+        )
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ document_id: "up-doc2", sensitivity_label: "PUBLIC" })
+      );
+
+    const file = new File(["scanned image"], "b.pdf", {
+      type: "application/pdf",
+    });
+    await registerUploadAndClassify(file, "typed fallback", "data_owner");
+
+    const classifyBody = JSON.parse(
+      (mockFetch.mock.calls[2][1] as RequestInit).body as string
+    );
+    expect(classifyBody.content).toBe("typed fallback");
+  });
+});
+
+
+describe("pipeline stage clients", () => {
+  it("runs an assessment via POST /api/v1/assessments", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ risk_score_id: "rs-1" }, 201));
+    const body = { document_id: "doc-1" } as unknown as AssessmentRequest;
+    await runAssessment(body, "security_admin");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/assessments");
+    expect(options.method).toBe("POST");
+    expect(headerValue(options.headers, "X-Q-AEGIS-Actor-Role")).toBe(
+      "security_admin"
+    );
+  });
+
+  it("submits a risk score via POST /api/v1/risk-scores", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: "rs-1" }, 201));
+    const body = { document_id: "doc-1" } as unknown as RiskScoreRequest;
+    await submitRiskScore(body, "security_admin");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/risk-scores");
+    expect(options.method).toBe("POST");
+  });
+
+  it("submits a trust score via POST /api/v1/trust-scores", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: "ts-1" }, 201));
+    const body = { risk_score_id: "rs-1" } as unknown as TrustScoreRequest;
+    await submitTrustScore(body, "security_admin");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/trust-scores");
+    expect(options.method).toBe("POST");
+  });
+
+  it("selects a crypto profile by trust score id", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: "cp-1" }, 201));
+    await selectCryptoProfile("ts-1", "security_admin");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/crypto-profiles");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      trust_score_id: "ts-1",
+    });
+  });
+
+  it("evaluates a policy decision without an AI recommendation", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ final_decision: "allow" }, 201));
+    await evaluatePolicyDecision("ts-1", "security_admin");
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/policy-decisions");
+    expect(JSON.parse(options.body as string)).toEqual({
+      trust_score_id: "ts-1",
+    });
+  });
+
+  it("threads an explicit AI recommendation into the policy body", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ final_decision: "deny" }, 201));
+    await evaluatePolicyDecision(
+      "ts-1",
+      "security_admin",
+      "deny" as PolicyAction
+    );
+    const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      trust_score_id: "ts-1",
+      ai_recommendation: "deny",
+    });
   });
 });

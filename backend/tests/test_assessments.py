@@ -32,7 +32,6 @@ def test_full_assessment_pipeline_runs_without_encrypt(
             "device_id": "laptop-ci",
             "device_is_new": False,
             "accessed_at": datetime.now(timezone.utc).isoformat(),
-            "after_hours": False,
         },
         headers=ANALYST_HEADERS,
     )
@@ -68,7 +67,6 @@ def test_full_assessment_encrypts_when_profile_is_aes256(
                 "device_id": "laptop-ci",
                 "device_is_new": False,
                 "accessed_at": datetime.now(timezone.utc).isoformat(),
-                "after_hours": False,
                 "content": CONFIDENT_CONTENT,
             },
             headers=ANALYST_HEADERS,
@@ -100,7 +98,6 @@ def test_hybrid_encrypt_fails_closed_without_oqs(
                 "device_id": "laptop-ci",
                 "device_is_new": False,
                 "accessed_at": datetime.now(timezone.utc).isoformat(),
-                "after_hours": False,
                 "content": CONFIDENT_CONTENT,
             },
             headers=ANALYST_HEADERS,
@@ -120,7 +117,6 @@ def test_assessment_requires_classification(
             "device_id": "laptop-ci",
             "device_is_new": False,
             "accessed_at": datetime.now(timezone.utc).isoformat(),
-            "after_hours": False,
         },
         headers=ANALYST_HEADERS,
     )

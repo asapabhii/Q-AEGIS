@@ -18,13 +18,17 @@ import type {
   AssessmentResponse,
   AuditChainResponse,
   AuditVerifyResponse,
+  CheckpointVerificationResponse,
   ClassificationRequest,
   ClassificationResponse,
+  ConsistencyProofResponse,
+  CreateCheckpointRequest,
   DocumentInventoryResponse,
   DocumentRegistrationRequest,
   DocumentResponse,
   DocumentSnapshot,
   HealthResponse,
+  InclusionProofResponse,
   LoginRequest,
   LoginResponse,
   ManualOverrideRequest,
@@ -33,6 +37,8 @@ import type {
   PolicyRuleRequest,
   PolicyRuleResponse,
   PolicyRuleTestResponse,
+  SignedCheckpointResponse,
+  SigningKeyResponse,
   UploadResponse,
   UserRole,
   MigrationRankRequest,
@@ -123,9 +129,9 @@ function authHeaders(
       headers.set(ACTOR_ROLE_HEADER, effective);
     }
   }
-  if (!headers.has("Content-Type") && !(extra instanceof FormData)) {
-    // Leave Content-Type unset for FormData; browser sets boundary.
-  }
+  // Content-Type is deliberately left unset here: JSON callers add it via
+  // jsonHeaders, and FormData uploads must let the browser set the multipart
+  // boundary. No default is applied.
   return headers;
 }
 
@@ -300,6 +306,112 @@ export async function verifyAudit(
     method: "GET",
     headers: authHeaders(role),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Audit checkpoints — PQ-signed Signed Tree Heads and RFC 6962 proofs
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/audit/checkpoints — list issued Signed Tree Heads for a chain,
+ * oldest prefix first. Omit documentId for the system chain.
+ */
+export async function listCheckpoints(
+  documentId?: string | null,
+  role?: UserRole
+): Promise<SignedCheckpointResponse[]> {
+  const query = new URLSearchParams();
+  if (documentId) query.set("document_id", documentId);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<SignedCheckpointResponse[]>(`/api/v1/audit/checkpoints${suffix}`, {
+    method: "GET",
+    headers: authHeaders(role),
+  });
+}
+
+/**
+ * POST /api/v1/audit/checkpoint — anchor a chain's Merkle root by signing it
+ * with ML-DSA-87. Roles: auditor, security_admin. Fails closed (503) if liboqs
+ * or the master key is unavailable rather than leaving the root unsigned.
+ */
+export async function issueCheckpoint(
+  body: CreateCheckpointRequest,
+  role?: UserRole
+): Promise<SignedCheckpointResponse> {
+  return request<SignedCheckpointResponse>("/api/v1/audit/checkpoint", {
+    method: "POST",
+    headers: jsonHeaders(role),
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * GET /api/v1/audit/checkpoint/{id}/verify — independently re-check a stored
+ * checkpoint. A valid signature over a root that no longer matches is the
+ * tamper signal: the chain was rewritten after anchoring.
+ */
+export async function verifyCheckpoint(
+  checkpointId: string,
+  role?: UserRole
+): Promise<CheckpointVerificationResponse> {
+  return request<CheckpointVerificationResponse>(
+    `/api/v1/audit/checkpoint/${encodeURIComponent(checkpointId)}/verify`,
+    {
+      method: "GET",
+      headers: authHeaders(role),
+    }
+  );
+}
+
+/**
+ * GET /api/v1/audit/signing-key — the active checkpoint signing key's public
+ * half, for out-of-band pinning. 404 until the first checkpoint is issued.
+ */
+export async function getSigningKey(
+  role?: UserRole
+): Promise<SigningKeyResponse> {
+  return request<SigningKeyResponse>("/api/v1/audit/signing-key", {
+    method: "GET",
+    headers: authHeaders(role),
+  });
+}
+
+/** GET /api/v1/audit/inclusion-proof — RFC 6962 proof for one entry. */
+export async function getInclusionProof(
+  leafIndex: number,
+  documentId?: string | null,
+  treeSize?: number,
+  role?: UserRole
+): Promise<InclusionProofResponse> {
+  const query = new URLSearchParams({ leaf_index: String(leafIndex) });
+  if (documentId) query.set("document_id", documentId);
+  if (treeSize !== undefined) query.set("tree_size", String(treeSize));
+  return request<InclusionProofResponse>(
+    `/api/v1/audit/inclusion-proof?${query.toString()}`,
+    {
+      method: "GET",
+      headers: authHeaders(role),
+    }
+  );
+}
+
+/** GET /api/v1/audit/consistency-proof — RFC 6962 append-only proof. */
+export async function getConsistencyProof(
+  oldSize: number,
+  documentId?: string | null,
+  newSize?: number,
+  role?: UserRole
+): Promise<ConsistencyProofResponse> {
+  const query = new URLSearchParams({ old_size: String(oldSize) });
+  if (documentId) query.set("document_id", documentId);
+  if (newSize !== undefined) query.set("new_size", String(newSize));
+  return request<ConsistencyProofResponse>(
+    `/api/v1/audit/consistency-proof?${query.toString()}`,
+    {
+      method: "GET",
+      headers: authHeaders(role),
+    }
+  );
 }
 
 export async function classifyDocument(
