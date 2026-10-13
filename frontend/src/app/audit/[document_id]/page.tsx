@@ -32,7 +32,6 @@ export function AuditViewer({ documentId }: { documentId: string }) {
 
   const load = useCallback(() => {
     if (!permitted) {
-      setLoading(false);
       return () => {};
     }
     let cancelled = false;
@@ -56,6 +55,7 @@ export function AuditViewer({ documentId }: { documentId: string }) {
     };
   }, [documentId, role, permitted]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => load(), [load]);
 
   const handleVerify = useCallback(async () => {

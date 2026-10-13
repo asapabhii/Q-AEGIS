@@ -37,21 +37,78 @@ _P = SensitivityLabel.PUBLIC
 Document = tuple[str, SensitivityLabel, str]
 
 _FIRST_NAMES = (
-    "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael",
-    "Linda", "David", "Elizabeth", "William", "Barbara", "Richard", "Susan",
-    "Joseph", "Jessica", "Thomas", "Sarah", "Charles", "Karen", "Priya",
-    "Wei", "Fatima", "Diego", "Aisha", "Chen", "Omar", "Ingrid", "Kwame",
+    "James",
+    "Mary",
+    "Robert",
+    "Patricia",
+    "John",
+    "Jennifer",
+    "Michael",
+    "Linda",
+    "David",
+    "Elizabeth",
+    "William",
+    "Barbara",
+    "Richard",
+    "Susan",
+    "Joseph",
+    "Jessica",
+    "Thomas",
+    "Sarah",
+    "Charles",
+    "Karen",
+    "Priya",
+    "Wei",
+    "Fatima",
+    "Diego",
+    "Aisha",
+    "Chen",
+    "Omar",
+    "Ingrid",
+    "Kwame",
 )
 _LAST_NAMES = (
-    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
-    "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Wilson",
-    "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Nguyen", "Patel",
-    "Kim", "Okafor", "Rossi", "Haddad", "Novak", "Andersson", "Mensah",
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Hernandez",
+    "Lopez",
+    "Wilson",
+    "Anderson",
+    "Thomas",
+    "Taylor",
+    "Moore",
+    "Jackson",
+    "Nguyen",
+    "Patel",
+    "Kim",
+    "Okafor",
+    "Rossi",
+    "Haddad",
+    "Novak",
+    "Andersson",
+    "Mensah",
 )
 _COMPANIES = (
-    "Northwind Trading", "Acme Logistics", "Blue Harbor Health", "Vertex Labs",
-    "Meridian Bank", "Cascade Systems", "Ironwood Legal", "Solaris Energy",
-    "Redpine Software", "Harborview Clinic", "Atlas Freight", "Quill & Vane",
+    "Northwind Trading",
+    "Acme Logistics",
+    "Blue Harbor Health",
+    "Vertex Labs",
+    "Meridian Bank",
+    "Cascade Systems",
+    "Ironwood Legal",
+    "Solaris Energy",
+    "Redpine Software",
+    "Harborview Clinic",
+    "Atlas Freight",
+    "Quill & Vane",
 )
 
 
@@ -115,9 +172,7 @@ def _iban(rng: random.Random) -> str:
     bank = "".join(rng.choice(string.ascii_uppercase) for _ in range(4))
     account = "".join(str(rng.randint(0, 9)) for _ in range(14))
     body = bank + account + "GB00"
-    numeric = "".join(
-        str(ord(ch) - 55) if ch.isalpha() else ch for ch in body
-    )
+    numeric = "".join(str(ord(ch) - 55) if ch.isalpha() else ch for ch in body)
     check = 98 - (int(numeric) % 97)
     compact = f"GB{check:02d}{bank}{account}"
     return " ".join(compact[i : i + 4] for i in range(0, len(compact), 4))
@@ -271,9 +326,7 @@ _BUILDERS: tuple[tuple[SensitivityLabel, object], ...] = (
 )
 
 
-def iter_documents(
-    *, per_tier: int = 1500, seed: int = 1729
-) -> Iterator[Document]:
+def iter_documents(*, per_tier: int = 1500, seed: int = 1729) -> Iterator[Document]:
     """Yield ``per_tier`` synthetic documents for each genre-prior tier.
 
     Deterministic in ``seed``: the same arguments always yield the same corpus.

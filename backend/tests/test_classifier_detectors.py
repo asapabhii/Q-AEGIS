@@ -237,9 +237,7 @@ def test_apply_detectors_never_lowers_a_label():
 
 
 def test_apply_detectors_escalates_and_prefixes_signals():
-    label, signals = apply_detectors(
-        SensitivityLabel.PUBLIC, "SSN 123-45-6789"
-    )
+    label, signals = apply_detectors(SensitivityLabel.PUBLIC, "SSN 123-45-6789")
     assert label is _R
     assert signals == ("detector:ssn",)
 

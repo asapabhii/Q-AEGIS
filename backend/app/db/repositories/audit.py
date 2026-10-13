@@ -299,9 +299,7 @@ def _payload_already_on_chain(
     collision — only a repeat within a single chain breaks that chain's links.
     """
     found = session.scalar(
-        _chain_query(document_id)
-        .where(AuditLog.payload_hash == payload_hash)
-        .limit(1)
+        _chain_query(document_id).where(AuditLog.payload_hash == payload_hash).limit(1)
     )
     return found is not None
 

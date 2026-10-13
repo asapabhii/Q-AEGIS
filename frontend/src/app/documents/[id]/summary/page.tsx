@@ -100,7 +100,6 @@ export default function DocumentSummaryPage({
 
   useEffect(() => {
     if (!documentId || !permitted) {
-      if (!permitted) setLoading(false);
       return;
     }
     let cancelled = false;

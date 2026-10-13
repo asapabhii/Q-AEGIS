@@ -38,7 +38,6 @@ export default function EngineerPage() {
 
   const load = useCallback(() => {
     if (!permitted) {
-      setLoading(false);
       return () => {};
     }
     let cancelled = false;
@@ -62,6 +61,7 @@ export default function EngineerPage() {
     };
   }, [role, permitted]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => load(), [load]);
 
   if (!permitted) {

@@ -72,6 +72,7 @@ function AgentsInner() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDocumentId(queryId);
   }, [queryId]);
 
@@ -101,7 +102,10 @@ function AgentsInner() {
     [permitted, role]
   );
 
-  useEffect(() => load(queryId), [load, queryId]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    return load(queryId);
+  }, [load, queryId]);
 
   if (!permitted) {
     return (
