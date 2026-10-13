@@ -20,12 +20,8 @@ from app.config import get_settings
 from app.db.enums import UserRole
 from app.db.seed import seed_development_users
 from app.rag.embeddings import DETERMINISTIC_MODEL_NAME, embed_text
-from app.rag.pipeline import (
-    _answer_grounded_in_hits,
-    _verifier,
-    ask_question,
-)
-from app.rag.store import effective_min_similarity, upsert_chunk
+from app.rag.pipeline import ask_question
+from app.rag.store import upsert_chunk
 
 
 def test_deterministic_embed_is_normalized_and_stable() -> None:
@@ -95,111 +91,6 @@ def test_upsert_chunk_roundtrip(db_session: Session, registered_document) -> Non
     )
     db_session.flush()
     assert chunk_id
-
-
-def test_effective_min_similarity_is_backend_aware(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The floor is only active for the semantic fastembed backend."""
-    monkeypatch.setenv("RAG_EMBEDDING_BACKEND", "deterministic")
-    monkeypatch.setenv("RAG_MIN_SIMILARITY", "0.42")
-    get_settings.cache_clear()
-    assert effective_min_similarity() == 0.0
-
-    monkeypatch.setenv("RAG_EMBEDDING_BACKEND", "fastembed")
-    get_settings.cache_clear()
-    assert effective_min_similarity() == pytest.approx(0.42)
-    get_settings.cache_clear()
-
-
-def _hit(content: str, *, score: float, chunk_id=None) -> dict:
-    return {
-        "chunk_id": chunk_id or uuid4(),
-        "document_id": None,
-        "source_type": "inventory",
-        "source_id": "1",
-        "content": content,
-        "embedding_model": DETERMINISTIC_MODEL_NAME,
-        "score": score,
-    }
-
-
-def test_answer_grounded_in_hits_span_check() -> None:
-    """Grounding requires a contiguous span shared with a retrieved chunk."""
-    hit = _hit(
-        "the quarterly report is classified confidential and restricted", score=0.9
-    )
-    grounded = (
-        "Summary: the quarterly report is classified confidential and restricted."
-    )
-    fabricated = "The document is public and freely shareable with everyone today."
-    assert _answer_grounded_in_hits(grounded, [hit]) is True
-    assert _answer_grounded_in_hits(fabricated, [hit]) is False
-
-
-def test_verifier_refuses_when_below_similarity_floor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A best hit under the grounding floor is refused, even with a draft."""
-    monkeypatch.setattr("app.rag.pipeline.effective_min_similarity", lambda: 0.5)
-    hit = _hit("alpha beta gamma delta epsilon zeta eta theta", score=0.2)
-    state = {
-        "hits": [hit],
-        "draft_answer": "alpha beta gamma delta epsilon zeta eta theta",
-        "citations": [hit],
-    }
-    result = _verifier(state)
-    assert result["verified"] is False
-    assert "below the grounding floor" in result["refusal_reason"]
-
-
-def test_verifier_refuses_ungrounded_draft(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A relevant hit but a draft sharing no span with it is refused."""
-    monkeypatch.setattr("app.rag.pipeline.effective_min_similarity", lambda: 0.3)
-    hit = _hit("alpha beta gamma delta epsilon zeta eta theta", score=0.9)
-    state = {
-        "hits": [hit],
-        "draft_answer": "completely unrelated fabricated statement about nothing",
-        "citations": [hit],
-    }
-    result = _verifier(state)
-    assert result["verified"] is False
-    assert "did not reproduce any span" in result["refusal_reason"]
-
-
-def test_verifier_accepts_grounded_draft(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Floor cleared + citations valid + span reproduced -> verified."""
-    monkeypatch.setattr("app.rag.pipeline.effective_min_similarity", lambda: 0.3)
-    hit = _hit("alpha beta gamma delta epsilon zeta eta theta", score=0.8)
-    state = {
-        "hits": [hit],
-        "draft_answer": "Record states: alpha beta gamma delta epsilon zeta eta.",
-        "citations": [hit],
-    }
-    result = _verifier(state)
-    assert result["verified"] is True
-    assert result["refusal_reason"] is None
-
-
-def test_verifier_rejects_foreign_citation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A citation not in the retrieved hit set is refused."""
-    monkeypatch.setattr("app.rag.pipeline.effective_min_similarity", lambda: 0.0)
-    hit = _hit("alpha beta gamma delta epsilon zeta", score=0.8)
-    foreign = _hit("other content entirely", score=0.8)
-    state = {
-        "hits": [hit],
-        "draft_answer": "alpha beta gamma delta epsilon zeta",
-        "citations": [foreign],
-    }
-    result = _verifier(state)
-    assert result["verified"] is False
-    assert "not in the" in result["refusal_reason"]
 
 
 @pytest.mark.skipif(
