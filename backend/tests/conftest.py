@@ -26,6 +26,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
+import opa_wasmtime.benchmark as _opa_benchmark
+
 from app.api.deps import get_db_session
 from app.config import get_settings
 from app.db.enums import UserRole
@@ -38,6 +40,23 @@ from app.db.session import (
     require_database_url,
 )
 from app.main import create_app
+
+# opa_wasmtime decorates OPAPolicy methods with a pytest-only benchmark that
+# registers atexit handlers. One decorated method is never called here, so its
+# times list is empty and the handler crashes on min([]) at interpreter exit,
+# printing a spurious traceback after an otherwise-green run. Make the stats
+# computation empty-safe so the suite exits cleanly. No production effect.
+_original_benchmark_stats = _opa_benchmark.get_benchmark_stats
+
+
+def _safe_benchmark_stats(times: list[float]) -> dict[str, float]:
+    if not times:
+        keys = ("min", "25p", "50p", "75p", "90p", "95p", "max")
+        return {key: 0.0 for key in keys}
+    return _original_benchmark_stats(times)
+
+
+_opa_benchmark.get_benchmark_stats = _safe_benchmark_stats
 
 # Required by ``seed_development_users``; never a production secret.
 os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "SET_LOCALLY")
@@ -86,6 +105,16 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # and fast (no model download). The real fastembed model is exercised only by
     # the opt-in test gated on RUN_REAL_EMBED_TESTS.
     monkeypatch.setenv("RAG_EMBEDDING_BACKEND", "deterministic")
+    # Hermetic agents: deterministic (heuristic) scoring, no LLM calls. The real
+    # anthropic backend is exercised only by the opt-in RUN_REAL_LLM_TESTS test.
+    monkeypatch.setenv("AGENT_LLM_BACKEND", "deterministic")
+    # Hermetic classifier: force the keyword engine unless a test opts in by
+    # setting CLASSIFIER_MODEL_PATH itself. The host .env may point this at a
+    # baked artifact to activate the trained model in the running app; an empty
+    # value overrides that file value (os.environ beats the env_file) so the
+    # classifier tests stay independent of operator configuration. Empty is
+    # treated as unset by model_classifier._configured_path.
+    monkeypatch.setenv("CLASSIFIER_MODEL_PATH", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

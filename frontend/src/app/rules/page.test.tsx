@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/client";
 import type { PolicyRuleResponse, PolicyRuleTestResponse, UserRole } from "@/lib/api/types";
 import { RoleProvider, useRole } from "@/lib/context/RoleContext";
+import { setDevRole } from "@/lib/auth/session";
 
 function RoleWrapper({ children }: { children: React.ReactNode }) {
   const { role, setRole } = useRole();
@@ -95,6 +96,11 @@ async function fillReadyForm(user: ReturnType<typeof userEvent.setup>) {
 describe("RuleBuilderScreen", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // POST /policy-rules[/test] is compliance_officer-only server-side, so the
+    // page only renders the builder for that role. Seed the dev-role fallback
+    // to compliance_officer (RoleProvider resolves to it on mount) — the role
+    // every assertion below expects the page to forward.
+    setDevRole("compliance_officer");
   });
 
   afterEach(() => {
@@ -210,20 +216,32 @@ describe("RuleBuilderScreen", () => {
     expect(screen.queryByText("Policy Rule Deployed")).not.toBeInTheDocument();
   });
 
-  it("passes the selected role to test and save", async () => {
+  it("shows an honest not-permitted state for a non-authoring role and never calls the API", async () => {
+    // Rule authoring is compliance_officer-only (backend PolicyRuleCaller).
+    // Switching the active role to security_admin must drop the builder and
+    // render NotPermitted rather than silently remap the caller or call the API
+    // — the page threads the *real* role, it does not clamp anyone to an
+    // authoring role.
     const user = userEvent.setup();
-    mockTest.mockResolvedValueOnce(sampleTest);
-    mockCreate.mockResolvedValueOnce(sampleSaved);
     render(<RoleProvider><RoleWrapper><RuleBuilderScreen /></RoleWrapper></RoleProvider>);
+    // Builder is present for the seeded compliance_officer.
+    expect(
+      screen.getByPlaceholderText(/e.g. Deny RESTRICTED/i)
+    ).toBeInTheDocument();
+
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Role" }),
       "security_admin"
     );
-    await fillReadyForm(user);
-    await user.click(screen.getByRole("button", { name: /test rule/i }));
-    expect(mockTest).toHaveBeenCalledWith(expectedBody, "security_admin");
-    await user.click(screen.getByRole("button", { name: /deploy rule/i }));
-    expect(mockCreate).toHaveBeenCalledWith(expectedBody, "security_admin");
+
+    expect(
+      screen.queryByPlaceholderText(/e.g. Deny RESTRICTED/i)
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /test rule/i })
+    ).not.toBeInTheDocument();
+    expect(mockTest).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 });
 

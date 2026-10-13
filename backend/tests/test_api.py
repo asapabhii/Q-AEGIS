@@ -31,6 +31,7 @@ HEALTH_URL = f"{API_V1_PREFIX}/health"
 DOCUMENTS_URL = f"{API_V1_PREFIX}/documents"
 CLASSIFY_URL = f"{API_V1_PREFIX}/classify"
 RISK_URL = f"{API_V1_PREFIX}/risk-scores"
+RISK_TRIGGERS_URL = f"{API_V1_PREFIX}/risk-triggers"
 POLICY_RULES_URL = f"{API_V1_PREFIX}/policy-rules"
 POLICY_RULE_TEST_URL = f"{API_V1_PREFIX}/policy-rules/test"
 POLICY_DECISIONS_URL = f"{API_V1_PREFIX}/policy-decisions"
@@ -77,7 +78,6 @@ def risk_body(
         "device_id": "laptop-12",
         "device_is_new": False,
         "accessed_at": "2026-09-09T12:00:00+00:00",
-        "after_hours": False,
     }
     body.update(overrides)
     return body
@@ -475,14 +475,18 @@ def test_risk_score_returns_the_computed_value_not_a_client_value(
     document_id: UUID,
     seeded_users: dict[UserRole, User],
 ) -> None:
-    """The server owns ``risk_value``. Both signals fire: 0.20 + 0.35 + 0.25."""
+    """The server owns ``risk_value``. Both signals fire: 0.20 + 0.35 + 0.25.
+
+    ``after_hours`` is not client-supplied: the 16:00 UTC access is 21:30 in
+    Asia/Kolkata, which the server derives as after-hours.
+    """
     response = client.post(
         RISK_URL,
         json=risk_body(
             document_id,
             seeded_users[UserRole.DATA_OWNER].id,
             device_is_new=True,
-            after_hours=True,
+            accessed_at="2026-09-09T16:00:00+00:00",
         ),
         headers=ANALYST_HEADERS,
     )
@@ -516,7 +520,6 @@ def test_risk_score_returns_the_computed_value_not_a_client_value(
             "device_id": "laptop-12",
             "device_is_new": False,
             "accessed_at": "2026-09-09T12:00:00+00:00",
-            "after_hours": False,
         },
         {
             "document_id": str(uuid4()),
@@ -524,7 +527,6 @@ def test_risk_score_returns_the_computed_value_not_a_client_value(
             "device_id": "   ",
             "device_is_new": False,
             "accessed_at": "2026-09-09T12:00:00+00:00",
-            "after_hours": False,
         },
         {
             "document_id": str(uuid4()),
@@ -532,7 +534,6 @@ def test_risk_score_returns_the_computed_value_not_a_client_value(
             "device_id": "laptop-12",
             "device_is_new": False,
             "accessed_at": "2026-09-09T12:00:00",
-            "after_hours": False,
         },
     ],
     ids=[
@@ -551,14 +552,14 @@ def test_risk_score_rejects_incomplete_or_invalid_bodies(
     assert response.status_code == 422
 
 
-def test_risk_score_derives_after_hours_when_the_client_omits_it(
+def test_risk_score_derives_after_hours_server_side(
     client: TestClient,
     document_id: UUID,
     seeded_users: dict[UserRole, User],
 ) -> None:
-    """Omitted ``after_hours`` is not a 422; the server derives it."""
+    """``after_hours`` is never a request field; the server derives it and
+    returns it in the snapshot."""
     body = risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id)
-    del body["after_hours"]
     response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
     assert response.status_code == 201, response.text
     assert "after_hours" in response.json()["context_snapshot"]
@@ -589,6 +590,68 @@ def test_risk_score_rejects_unknown_snapshot_fields(
     )
     response = client.post(RISK_URL, json=body, headers=ANALYST_HEADERS)
     assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------
+# POST /risk-scores subject validation, PRD.md FR-2 (third-party reporting)
+# --------------------------------------------------------------------------
+
+
+def test_risk_score_rejects_an_unknown_subject(
+    client: TestClient,
+    document_id: UUID,
+) -> None:
+    """A report may only name a subject the system knows.
+
+    The document is real; the ``actor_user_id`` resolves to no registered user,
+    so the request is a 404 before any score is attributed to a phantom subject.
+    The document is checked first, so this exercises the subject guard, not the
+    document guard.
+    """
+    response = client.post(
+        RISK_URL,
+        json=risk_body(document_id, uuid4()),
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 404, response.text
+    assert "does not resolve to a registered user" in response.json()["detail"]
+
+
+def test_risk_trigger_rejects_an_unknown_subject_before_publishing(
+    client: TestClient,
+    document_id: UUID,
+) -> None:
+    """FR-2 immediate recompute validates the subject before emitting anything.
+
+    The 404 is raised in ``trigger_risk_recompute`` ahead of ``schedule_publish``,
+    so an unknown subject never produces a ``risk.trigger`` event.
+    """
+    response = client.post(
+        RISK_TRIGGERS_URL,
+        json=risk_body(document_id, uuid4()),
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 404, response.text
+    assert "does not resolve to a registered user" in response.json()["detail"]
+
+
+def test_risk_trigger_admits_a_valid_report(
+    client: TestClient,
+    document_id: UUID,
+    seeded_users: dict[UserRole, User],
+) -> None:
+    """A registered document and a resolvable subject recompute immediately.
+
+    The response is the freshly computed score, identical in shape to
+    ``POST /risk-scores``.
+    """
+    response = client.post(
+        RISK_TRIGGERS_URL,
+        json=risk_body(document_id, seeded_users[UserRole.DATA_OWNER].id),
+        headers=ANALYST_HEADERS,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["model_version"] == RISK_MODEL_VERSION
 
 
 # --------------------------------------------------------------------------

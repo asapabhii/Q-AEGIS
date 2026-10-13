@@ -1,5 +1,7 @@
 """Read and write ``users``."""
 
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,17 @@ def create_user(
     session.add(user)
     session.flush()
     return user
+
+
+def get_by_id(session: Session, user_id: UUID) -> User | None:
+    """Return the user with this id, or ``None`` if no such user exists.
+
+    Used to confirm that a client-asserted subject identity (for example the
+    ``actor_user_id`` of a contextual-risk report) resolves to a registered
+    principal before an assessment is attributed to it, so a report cannot name
+    a subject that does not exist.
+    """
+    return session.get(User, user_id)
 
 
 def find_by_email(session: Session, email: str) -> User | None:

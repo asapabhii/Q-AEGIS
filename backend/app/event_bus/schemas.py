@@ -11,6 +11,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.risk_engine.scorer import DEFAULT_ORG_TIMEZONE
+
 
 class EventType(str, Enum):
     """Stream event names the P0 bus knows how to publish and consume."""
@@ -53,7 +55,12 @@ class DocumentClassifiedPayload(BaseModel):
 
 
 class RiskTriggerPayload(BaseModel):
-    """Immediate recompute trigger: new device or after-hours access."""
+    """Immediate recompute trigger: new device or after-hours access.
+
+    ``after_hours`` and ``org_timezone`` are server-derived by the publisher;
+    ``org_timezone`` defaults so a pre-0.2.0 publisher still validates and the
+    consumer can re-derive against the default zone.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -63,6 +70,7 @@ class RiskTriggerPayload(BaseModel):
     device_is_new: bool
     after_hours: bool
     accessed_at: datetime
+    org_timezone: str = Field(default=DEFAULT_ORG_TIMEZONE, min_length=1, max_length=80)
 
 
 class TrustUpdatedPayload(BaseModel):

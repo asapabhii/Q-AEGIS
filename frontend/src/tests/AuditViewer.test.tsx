@@ -1,13 +1,14 @@
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AuditViewer } from "@/app/audit/[document_id]/page";
-import { listAuditEntries } from "@/lib/api/client";
+import { listAuditEntries, verifyAudit } from "@/lib/api/client";
 import { RoleProvider } from "@/lib/context/RoleContext";
 
 // Mock the API client
 vi.mock("@/lib/api/client", () => {
   return {
     listAuditEntries: vi.fn(),
+    verifyAudit: vi.fn(),
     ApiError: class ApiError extends Error {},
   };
 });
@@ -46,8 +47,10 @@ describe("AuditViewer", () => {
   it("shows loading state initially", async () => {
     const documentId = "test-doc-123";
     vi.mocked(listAuditEntries).mockReturnValue(new Promise(() => {}));
-    render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
-    expect(screen.getByText(/Loading audit trail/i)).toBeInTheDocument();
+    const { container } = render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
+    // While the entries request is in flight the page renders skeleton
+    // placeholders (Skeleton -> .skeleton-pulse) in place of the chain UI.
+    expect(container.querySelector(".skeleton-pulse")).toBeInTheDocument();
   });
 
   it("renders audit chain after loading", async () => {
@@ -122,10 +125,19 @@ describe("AuditViewer", () => {
       },
     ];
 
-    vi.mocked(listAuditEntries).mockResolvedValue({ 
+    vi.mocked(listAuditEntries).mockResolvedValue({
       document_id: documentId,
       count: mockChain.length,
-      entries: mockChain 
+      entries: mockChain
+    });
+
+    vi.mocked(verifyAudit).mockResolvedValue({
+      is_valid: true,
+      computed_root: "abcd1234",
+      stored_root: "abcd1234",
+      end_index: mockChain.length - 1,
+      entry_count: mockChain.length,
+      document_id: documentId,
     });
 
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
@@ -138,11 +150,13 @@ describe("AuditViewer", () => {
     const verifyButton = screen.getByRole("button", { name: /Verify Chain Integrity/i });
     expect(verifyButton).toBeInTheDocument();
 
-    // Click to verify
+    // Click to verify against the real backend endpoint (mocked here)
     fireEvent.click(verifyButton);
-    
-    // Wait for validation to finish (1 second timer)
+
     expect(await screen.findByText("Verified", {}, { timeout: 3000 })).toBeInTheDocument();
+    // The page threads the caller's real role (RoleProvider default is
+    // security_admin, which ACCESS.audit permits) rather than remapping it.
+    expect(vi.mocked(verifyAudit)).toHaveBeenCalledWith(documentId, "security_admin");
   });
 
   it("handles broken chain verification", async () => {
@@ -171,10 +185,19 @@ describe("AuditViewer", () => {
       },
     ];
 
-    vi.mocked(listAuditEntries).mockResolvedValue({ 
+    vi.mocked(listAuditEntries).mockResolvedValue({
       document_id: documentId,
       count: brokenChain.length,
-      entries: brokenChain 
+      entries: brokenChain
+    });
+
+    vi.mocked(verifyAudit).mockResolvedValue({
+      is_valid: false,
+      computed_root: "deadbeef",
+      stored_root: "abcd1234",
+      end_index: brokenChain.length - 1,
+      entry_count: brokenChain.length,
+      document_id: documentId,
     });
 
     render(<RoleProvider><AuditViewer documentId={documentId} /></RoleProvider>);
@@ -185,7 +208,7 @@ describe("AuditViewer", () => {
 
     const verifyButton = screen.getByRole("button", { name: /Verify Chain Integrity/i });
     fireEvent.click(verifyButton);
-    
+
     expect(await screen.findByText("Compromised", {}, { timeout: 3000 })).toBeInTheDocument();
   });
 });

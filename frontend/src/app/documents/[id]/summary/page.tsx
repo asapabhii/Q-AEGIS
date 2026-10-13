@@ -1,20 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText, Printer } from "lucide-react";
+import { FileText, Printer, Trash2 } from "lucide-react";
 
 import Badge from "@/components/ui/Badge";
 import HashDisplay from "@/components/ui/HashDisplay";
 import RiskGauge from "@/components/ui/RiskGauge";
+import NotPermitted from "@/components/ui/NotPermitted";
 import { useGsapReveal } from "@/lib/hooks/useGsapReveal";
 import { useRole } from "@/lib/context/RoleContext";
-import { getDocument, shredDocument, ApiError } from "@/lib/api/client";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
+import {
+  getDocument,
+  shredDocument,
+  downloadDocumentSummary,
+  ApiError,
+} from "@/lib/api/client";
 import type {
-  CryptoProfileType,
   DocumentSnapshot,
   SensitivityLabel,
-  UserRole,
 } from "@/lib/api/types";
+import { cryptoLabel, cryptoTone } from "@/lib/crypto-labels";
 
 const LABEL_TONES: Record<
   SensitivityLabel,
@@ -26,25 +32,10 @@ const LABEL_TONES: Record<
   RESTRICTED: "restricted",
 };
 
-const PROFILE_TONES: Record<CryptoProfileType, "aes" | "hybrid" | "pqc"> = {
-  aes256: "aes",
-  hybrid: "hybrid",
-  post_quantum: "pqc",
-};
-
-const PROFILE_LABELS: Record<CryptoProfileType, string> = {
-  aes256: "AES-256",
-  hybrid: "Hybrid X25519MLKEM768",
-  post_quantum: "Full PQC",
-};
-
-const SUMMARY_ALLOWED_ROLES: UserRole[] = [
-  "security_admin",
-  "security_analyst",
-  "auditor",
-  "ciso",
-  "compliance_officer",
-];
+// The report reads the document snapshot, which the backend gates behind the
+// inventory role set. Send the caller's REAL role and render an honest 403
+// rather than clamping anyone to security_admin.
+const VIEW_ALLOWED = ACCESS.inventory;
 
 export default function DocumentSummaryPage({
   params,
@@ -52,8 +43,10 @@ export default function DocumentSummaryPage({
   params: Promise<{ id: string }>;
 }) {
   const containerRef = useGsapReveal<HTMLDivElement>();
-  const { role: contextRole } = useRole();
-  const role = SUMMARY_ALLOWED_ROLES.includes(contextRole) ? contextRole : "security_admin";
+  const { role } = useRole();
+  const permitted = roleAllowed(VIEW_ALLOWED, role);
+  const canExport = roleAllowed(ACCESS.export, role);
+  const canShred = roleAllowed(ACCESS.shred, role);
   const [documentId, setDocumentId] = useState<string>("");
 
   useEffect(() => {
@@ -68,12 +61,28 @@ export default function DocumentSummaryPage({
   const [shredLoading, setShredLoading] = useState(false);
   const [shredError, setShredError] = useState<string | null>(null);
 
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const handleDownload = async () => {
+    if (!documentId) return;
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadDocumentSummary(documentId, "pdf", role);
+    } catch (err) {
+      setDownloadError(err instanceof ApiError ? err.message : "Network error");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const handleShred = async () => {
     if (!shredConfirming) {
       setShredConfirming(true);
       return;
     }
-    
+
     setShredLoading(true);
     setShredError(null);
     try {
@@ -90,7 +99,10 @@ export default function DocumentSummaryPage({
   };
 
   useEffect(() => {
-    if (!documentId) return;
+    if (!documentId || !permitted) {
+      if (!permitted) setLoading(false);
+      return;
+    }
     let cancelled = false;
     getDocument(documentId, role)
       .then((doc) => {
@@ -109,100 +121,167 @@ export default function DocumentSummaryPage({
     return () => {
       cancelled = true;
     };
-  }, [documentId, role]);
+  }, [documentId, role, permitted]);
 
-  const riskValue = snapshot?.risk_value !== null && snapshot?.risk_value !== undefined
-    ? Number(snapshot.risk_value)
-    : null;
-  const trustValue = snapshot?.trust_score !== null && snapshot?.trust_score !== undefined
-    ? Number(snapshot.trust_score)
-    : null;
+  const riskValue =
+    snapshot?.risk_value !== null && snapshot?.risk_value !== undefined
+      ? Number(snapshot.risk_value)
+      : null;
+  const trustValue =
+    snapshot?.trust_score !== null && snapshot?.trust_score !== undefined
+      ? Number(snapshot.trust_score)
+      : null;
+
+  if (!permitted) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-6 py-8">
+        <NotPermitted
+          role={role}
+          allowed={VIEW_ALLOWED}
+          resource="The document summary report"
+        />
+      </div>
+    );
+  }
 
   return (
-    <div ref={containerRef} className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8 bg-black text-white rounded-none print:py-0 print:px-0 print:space-y-4 print:bg-white print:text-black">
+    <div
+      ref={containerRef}
+      className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8 rounded-none print:py-0 print:px-0 print:space-y-4 print:bg-white print:text-black"
+      style={{ color: "var(--color-text-primary)" }}
+    >
       {/* Page Header */}
-      <div data-reveal className="flex flex-col sm:flex-row items-start justify-between gap-4 mb-6 border-b border-[#333] pb-4 print:mb-2 print:border-black">
+      <div
+        data-reveal
+        className="flex flex-col sm:flex-row items-start justify-between gap-4 mb-6 pb-4 print:mb-2 print:border-black"
+        style={{ borderBottom: "1px solid var(--color-border)" }}
+      >
         <div className="flex items-center gap-3">
           <div
-            className="flex h-12 w-12 items-center justify-center border border-[#FF00FF] print:hidden"
-            style={{ backgroundColor: "rgba(255, 0, 255, 0.1)" }}
+            className="flex h-12 w-12 items-center justify-center rounded-lg print:hidden"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              border: "1px solid var(--color-accent)",
+            }}
           >
-            <FileText className="h-6 w-6" style={{ color: "#FF00FF" }} />
+            <FileText
+              className="h-6 w-6"
+              style={{ color: "var(--color-accent)" }}
+            />
           </div>
           <div>
-            <h1 className="font-sans font-bold uppercase tracking-widest text-[#FF00FF] print:text-black print:text-xl">
+            <h1
+              className="font-semibold print:text-black print:text-xl"
+              style={{
+                fontSize: "var(--font-size-xl)",
+                color: "var(--color-text-primary)",
+              }}
+            >
               Document Summary Report
             </h1>
-            <p className="font-mono text-xs text-gray-400 mt-1 print:text-gray-700">
-              EXPORTABLE ASSESSMENT FOR DOC_ID:
-              <span className="ml-2 font-bold text-white print:text-black">{documentId}</span>
+            <p
+              className="mono-data text-xs mt-1 print:text-gray-700"
+              style={{ color: "var(--color-text-tertiary)" }}
+            >
+              {documentId}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {role === "data_owner" && snapshot && snapshot.current_status !== "archived" && (
+        <div className="flex items-center gap-3 print:hidden">
+          {canShred &&
+            snapshot &&
+            snapshot.current_status !== "archived" && (
+              <button
+                type="button"
+                onClick={handleShred}
+                disabled={shredLoading}
+                onMouseLeave={() => setShredConfirming(false)}
+                className="btn"
+                style={{
+                  borderColor: "var(--status-fail)",
+                  color: shredConfirming ? "#fff" : "var(--status-fail)",
+                  backgroundColor: shredConfirming
+                    ? "var(--status-fail)"
+                    : "transparent",
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                {shredLoading
+                  ? "Shredding…"
+                  : shredConfirming
+                    ? "Confirm irreversible shred"
+                    : "Shred encryption key"}
+              </button>
+            )}
+          {canExport && (
             <button
               type="button"
-              onClick={handleShred}
-              disabled={shredLoading}
-              className="inline-flex shrink-0 items-center gap-2 px-4 py-2 border font-mono text-xs font-bold uppercase tracking-widest transition-all print:hidden"
-              style={{
-                borderColor: "var(--status-fail)",
-                color: shredConfirming ? "#000" : "var(--status-fail)",
-                backgroundColor: shredConfirming ? "var(--status-fail)" : "transparent"
-              }}
-              onMouseEnter={(e) => { 
-                if (!shredConfirming) e.currentTarget.style.backgroundColor = "rgba(239, 68, 68, 0.1)"; 
-              }}
-              onMouseLeave={(e) => { 
-                if (!shredConfirming) e.currentTarget.style.backgroundColor = "transparent"; 
-                setShredConfirming(false);
-              }}
+              onClick={handleDownload}
+              disabled={downloading}
+              className="btn btn-secondary"
             >
-              {shredLoading ? "SHREDDING..." : shredConfirming ? "CONFIRM IRREVERSIBLE SHRED" : "SHRED ENCRYPTION KEY"}
+              <Printer className="h-4 w-4" />
+              {downloading ? "Downloading…" : "Download PDF"}
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="inline-flex shrink-0 items-center gap-2 px-4 py-2 border font-mono text-xs font-bold uppercase tracking-widest transition-all print:hidden"
-            style={{
-              borderColor: "#FF00FF",
-              color: "#FF00FF",
-              backgroundColor: "transparent"
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255, 0, 255, 0.1)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
-          >
-            <Printer className="h-4 w-4" />
-            PRINT PDF
-          </button>
         </div>
       </div>
 
       {loading && (
-        <p className="font-mono text-sm text-[#FF00FF] animate-pulse">
-          FETCHING DOCUMENT SNAPSHOT...
+        <p
+          className="text-sm animate-pulse"
+          style={{ color: "var(--color-accent)" }}
+        >
+          Fetching document snapshot…
         </p>
       )}
 
       {error && (
-        <p className="font-mono text-sm text-red-500">{error}</p>
+        <p className="text-sm" style={{ color: "var(--status-fail)" }}>
+          {error}
+        </p>
       )}
 
       {shredError && (
-        <p className="font-mono text-sm text-red-500 mb-4">{shredError}</p>
+        <p className="text-sm mb-4" style={{ color: "var(--status-fail)" }}>
+          {shredError}
+        </p>
+      )}
+
+      {downloadError && (
+        <p className="text-sm mb-4" style={{ color: "var(--status-fail)" }}>
+          {downloadError}
+        </p>
       )}
 
       {!loading && !error && snapshot && (
         <>
-          <div data-reveal className="grid gap-6 md:grid-cols-2 print:gap-4 print:grid-cols-1">
+          <div
+            data-reveal
+            className="grid gap-6 md:grid-cols-2 print:gap-4 print:grid-cols-1"
+          >
             {/* Classification Card */}
-            <div className="p-6 border border-[#333] bg-black print:border-black print:bg-white hover:border-[#8CFF00] transition-colors duration-300">
-              <h2 className="font-sans font-bold uppercase tracking-widest text-[#8CFF00] mb-4 print:text-black">CLASSIFICATION</h2>
-              <dl className="space-y-4 text-sm font-mono">
-                <div className="flex items-center justify-between pb-3 border-b border-[#333] print:border-gray-300">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">LABEL</dt>
+            <div className="card p-6 print:border-black print:bg-white">
+              <h2
+                className="font-semibold uppercase tracking-widest mb-4 print:text-black"
+                style={{
+                  fontSize: "var(--font-size-sm)",
+                  color: "var(--status-pass)",
+                }}
+              >
+                Classification
+              </h2>
+              <dl className="space-y-4 text-sm mono-data">
+                <div
+                  className="flex items-center justify-between pb-3"
+                  style={{ borderBottom: "1px solid var(--color-border)" }}
+                >
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Label
+                  </dt>
                   <dd>
                     {snapshot.sensitivity_label ? (
                       <Badge
@@ -210,23 +289,39 @@ export default function DocumentSummaryPage({
                         tone={LABEL_TONES[snapshot.sensitivity_label]}
                       />
                     ) : (
-                      <span className="text-gray-600">-</span>
+                      <span style={{ color: "var(--color-text-tertiary)" }}>—</span>
                     )}
                   </dd>
                 </div>
-                <div className="flex justify-between pb-3 border-b border-[#333] print:border-gray-300">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">SOURCE</dt>
-                  <dd className="font-bold text-[#8CFF00] print:text-black">
-                    {snapshot.label_source ?? "-"}
+                <div
+                  className="flex justify-between pb-3"
+                  style={{ borderBottom: "1px solid var(--color-border)" }}
+                >
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Source
+                  </dt>
+                  <dd
+                    className="font-semibold print:text-black"
+                    style={{ color: "var(--status-pass)" }}
+                  >
+                    {snapshot.label_source ?? "—"}
                   </dd>
                 </div>
                 <div className="flex justify-between pb-1">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">OVERRIDE ID</dt>
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Override ID
+                  </dt>
                   <dd>
                     {snapshot.override_id ? (
                       <HashDisplay hash={snapshot.override_id} />
                     ) : (
-                      <span className="text-gray-600">-</span>
+                      <span style={{ color: "var(--color-text-tertiary)" }}>—</span>
                     )}
                   </dd>
                 </div>
@@ -234,33 +329,60 @@ export default function DocumentSummaryPage({
             </div>
 
             {/* Protection Profile Card */}
-            <div className="p-6 border border-[#333] bg-black print:border-black print:bg-white hover:border-[#00FFFF] transition-colors duration-300">
-              <h2 className="font-sans font-bold uppercase tracking-widest text-[#00FFFF] mb-4 print:text-black">PROTECTION PROFILE</h2>
-              <dl className="space-y-4 text-sm font-mono">
-                <div className="flex items-center justify-between pb-3 border-b border-[#333] print:border-gray-300">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">PROFILE</dt>
+            <div className="card p-6 print:border-black print:bg-white">
+              <h2
+                className="font-semibold uppercase tracking-widest mb-4 print:text-black"
+                style={{
+                  fontSize: "var(--font-size-sm)",
+                  color: "var(--crypto-pqc)",
+                }}
+              >
+                Protection Profile
+              </h2>
+              <dl className="space-y-4 text-sm mono-data">
+                <div
+                  className="flex items-center justify-between pb-3"
+                  style={{ borderBottom: "1px solid var(--color-border)" }}
+                >
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Profile
+                  </dt>
                   <dd>
                     {snapshot.profile_type ? (
                       <Badge
-                        label={PROFILE_LABELS[snapshot.profile_type]}
-                        tone={PROFILE_TONES[snapshot.profile_type]}
+                        label={cryptoLabel(snapshot.profile_type, "full")}
+                        tone={cryptoTone(snapshot.profile_type)}
                       />
                     ) : (
-                      <span className="text-gray-600">-</span>
+                      <span style={{ color: "var(--color-text-tertiary)" }}>—</span>
                     )}
                   </dd>
                 </div>
                 <div className="flex justify-between pb-3">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">DECISION</dt>
-                  <dd className="font-bold text-[#00FFFF] print:text-black uppercase">
-                    {snapshot.final_decision ?? "-"}
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Decision
+                  </dt>
+                  <dd
+                    className="font-semibold uppercase print:text-black"
+                    style={{ color: "var(--crypto-pqc)" }}
+                  >
+                    {snapshot.final_decision ?? "—"}
                   </dd>
                 </div>
               </dl>
 
               {/* Risk gauge inline */}
               {trustValue !== null && Number.isFinite(trustValue) && (
-                <div className="mt-6 pt-6 border-t border-[#333] flex justify-center print:hidden">
+                <div
+                  className="mt-6 pt-6 flex justify-center print:hidden"
+                  style={{ borderTop: "1px solid var(--color-border)" }}
+                >
                   <RiskGauge
                     value={trustValue}
                     label="TRUST SCORE"
@@ -270,18 +392,41 @@ export default function DocumentSummaryPage({
                 </div>
               )}
 
-              {/* Print-only numeric values */}
-              <dl className="mt-6 space-y-3 text-sm pt-4 border-t border-[#333] font-mono">
+              {/* Numeric values */}
+              <dl
+                className="mt-6 space-y-3 text-sm pt-4 mono-data"
+                style={{ borderTop: "1px solid var(--color-border)" }}
+              >
                 <div className="flex justify-between">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">TRUST SCORE</dt>
-                  <dd className="text-white font-bold print:text-black">
-                    {trustValue !== null && Number.isFinite(trustValue) ? trustValue.toFixed(4) : "-"}
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Trust Score
+                  </dt>
+                  <dd
+                    className="font-semibold print:text-black"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {trustValue !== null && Number.isFinite(trustValue)
+                      ? trustValue.toFixed(4)
+                      : "—"}
                   </dd>
                 </div>
                 <div className="flex justify-between">
-                  <dt className="text-gray-500 uppercase tracking-widest text-xs">RISK VALUE</dt>
-                  <dd className="text-white font-bold print:text-black">
-                    {riskValue !== null && Number.isFinite(riskValue) ? riskValue.toFixed(4) : "-"}
+                  <dt
+                    className="uppercase tracking-widest text-xs"
+                    style={{ color: "var(--color-text-tertiary)" }}
+                  >
+                    Risk Value
+                  </dt>
+                  <dd
+                    className="font-semibold print:text-black"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {riskValue !== null && Number.isFinite(riskValue)
+                      ? riskValue.toFixed(4)
+                      : "—"}
                   </dd>
                 </div>
               </dl>
@@ -291,32 +436,80 @@ export default function DocumentSummaryPage({
           {/* Chain Reference */}
           {snapshot.trust_score_id && (
             <div data-reveal className="w-full">
-              <div className="p-6 border border-[#333] bg-black print:border-black print:bg-white hover:border-[#FF00FF] transition-colors duration-300">
-                <h2 className="font-sans font-bold uppercase tracking-widest text-[#FF00FF] mb-4 print:text-black">CHAIN REFERENCE HASHES</h2>
+              <div className="card p-6 print:border-black print:bg-white">
+                <h2
+                  className="font-semibold uppercase tracking-widest mb-4 print:text-black"
+                  style={{
+                    fontSize: "var(--font-size-sm)",
+                    color: "var(--color-accent)",
+                  }}
+                >
+                  Chain Reference Hashes
+                </h2>
                 <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
-                  <dl className="space-y-4 text-sm font-mono">
-                    <div className="flex justify-between pb-2 border-b border-[#333] print:border-gray-300">
-                      <dt className="text-gray-500 uppercase tracking-widest text-xs">TRUST SCORE ID</dt>
-                      <dd><HashDisplay hash={snapshot.trust_score_id} /></dd>
+                  <dl className="space-y-4 text-sm mono-data">
+                    <div
+                      className="flex justify-between pb-2"
+                      style={{ borderBottom: "1px solid var(--color-border)" }}
+                    >
+                      <dt
+                        className="uppercase tracking-widest text-xs"
+                        style={{ color: "var(--color-text-tertiary)" }}
+                      >
+                        Trust Score ID
+                      </dt>
+                      <dd>
+                        <HashDisplay hash={snapshot.trust_score_id} />
+                      </dd>
                     </div>
                     {snapshot.risk_score_id && (
-                      <div className="flex justify-between pb-2 border-b border-[#333] print:border-gray-300">
-                        <dt className="text-gray-500 uppercase tracking-widest text-xs">RISK SCORE ID</dt>
-                        <dd><HashDisplay hash={snapshot.risk_score_id} /></dd>
+                      <div
+                        className="flex justify-between pb-2"
+                        style={{ borderBottom: "1px solid var(--color-border)" }}
+                      >
+                        <dt
+                          className="uppercase tracking-widest text-xs"
+                          style={{ color: "var(--color-text-tertiary)" }}
+                        >
+                          Risk Score ID
+                        </dt>
+                        <dd>
+                          <HashDisplay hash={snapshot.risk_score_id} />
+                        </dd>
                       </div>
                     )}
                   </dl>
-                  <dl className="space-y-4 text-sm font-mono">
+                  <dl className="space-y-4 text-sm mono-data">
                     {snapshot.policy_decision_id && (
-                      <div className="flex justify-between pb-2 border-b border-[#333] print:border-gray-300">
-                        <dt className="text-gray-500 uppercase tracking-widest text-xs">POLICY DECISION ID</dt>
-                        <dd><HashDisplay hash={snapshot.policy_decision_id} /></dd>
+                      <div
+                        className="flex justify-between pb-2"
+                        style={{ borderBottom: "1px solid var(--color-border)" }}
+                      >
+                        <dt
+                          className="uppercase tracking-widest text-xs"
+                          style={{ color: "var(--color-text-tertiary)" }}
+                        >
+                          Policy Decision ID
+                        </dt>
+                        <dd>
+                          <HashDisplay hash={snapshot.policy_decision_id} />
+                        </dd>
                       </div>
                     )}
                     {snapshot.crypto_profile_id && (
-                      <div className="flex justify-between pb-2 border-b border-[#333] print:border-gray-300">
-                        <dt className="text-gray-500 uppercase tracking-widest text-xs">CRYPTO PROFILE ID</dt>
-                        <dd><HashDisplay hash={snapshot.crypto_profile_id} /></dd>
+                      <div
+                        className="flex justify-between pb-2"
+                        style={{ borderBottom: "1px solid var(--color-border)" }}
+                      >
+                        <dt
+                          className="uppercase tracking-widest text-xs"
+                          style={{ color: "var(--color-text-tertiary)" }}
+                        >
+                          Crypto Profile ID
+                        </dt>
+                        <dd>
+                          <HashDisplay hash={snapshot.crypto_profile_id} />
+                        </dd>
                       </div>
                     )}
                   </dl>

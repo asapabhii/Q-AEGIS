@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
@@ -76,6 +76,19 @@ def seed_graph(
         actor_id=actor.id,
         document_id=request.document_id,
         payload={
+            # A unique ``seed_run_id`` (mirroring migration_audit_payload's
+            # ranking_run_id, app/scheduler/rank.py) makes every seed event
+            # distinct on the audit chain. The demo graph is fixed, so its
+            # counts (nodes_upserted / relationships_upserted) are identical on
+            # every re-seed; without a per-run id two seeds of the same graph
+            # produce a byte-identical payload, hence an identical payload_hash,
+            # and the chain links entries by payload_hash. Two identical hashes
+            # make tail-finding ambiguous and corrupt the chain — most sharply on
+            # the system chain (document_id=None), where a re-seed with no bound
+            # document lands. append_entry now also refuses a duplicate payload
+            # loudly, but the event is genuinely distinct, so it carries its own
+            # identity here rather than relying on that backstop.
+            "seed_run_id": str(uuid4()),
             "action": "graph.seed",
             "nodes_upserted": counts["nodes_upserted"],
             "relationships_upserted": counts["relationships_upserted"],
@@ -147,7 +160,7 @@ def attack_paths(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     except GraphNotConfiguredError as exc:

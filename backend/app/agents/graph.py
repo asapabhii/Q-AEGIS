@@ -10,12 +10,14 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from app.agents.features import AccessFeatures
 from app.agents.scoring import SCORERS, failure_score
 from app.agents.state import (
     AgentFailureRecord,
     AssessmentInput,
     AssessmentState,
 )
+from app.config import get_settings
 from app.db.enums import AgentType
 from app.trust_engine.consensus import AgentScore
 
@@ -39,7 +41,31 @@ def _assessment_input_from_state(state: AssessmentState) -> AssessmentInput:
             accessed_at=snapshot_data["accessed_at"],
             after_hours=snapshot_data["after_hours"],
         ),
+        features=AccessFeatures.from_json(state.get("features", {})),
     )
+
+
+def _scorer_for(agent_type: AgentType) -> Callable[[AssessmentInput], AgentScore]:
+    """Return the scoring callable for the configured backend.
+
+    ``anthropic`` routes to the real Claude scorer; anything else uses the
+    reviewable deterministic heuristic. Selected per call so a config change
+    (e.g. credentials arriving) takes effect without a restart.
+    """
+    if get_settings().agent_llm_backend == "anthropic":
+        from app.agents import llm
+
+        return lambda assessment_input: llm.score_agent(agent_type, assessment_input)
+    return SCORERS[agent_type]
+
+
+def _agent_timeout_seconds() -> float:
+    """Per-agent wall-clock budget. LLM calls need more than the heuristic 5s."""
+    settings = get_settings()
+    if settings.agent_llm_backend == "anthropic":
+        # The LLM client enforces its own timeout; give the thread a small margin.
+        return settings.agent_llm_timeout_seconds + 5.0
+    return AGENT_TIMEOUT_SECONDS
 
 
 def _run_scorer_with_timeout(
@@ -53,14 +79,15 @@ def _run_scorer_with_timeout(
     ``cancel_futures=True`` so the fail-safe does not block for the slow
     scorer to finish.
     """
+    timeout = _agent_timeout_seconds()
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         future = executor.submit(scorer, assessment_input)
         try:
-            return future.result(timeout=AGENT_TIMEOUT_SECONDS), None
+            return future.result(timeout=timeout), None
         except FuturesTimeoutError:
             future.cancel()
-            message = f"timed out after {AGENT_TIMEOUT_SECONDS:g}s"
+            message = f"timed out after {timeout:g}s"
             return failure_score(agent_type, message), AgentFailureRecord(
                 agent_type=agent_type,
                 message=message,
@@ -74,7 +101,7 @@ def _make_agent_node(agent_type: AgentType) -> Callable[[AssessmentState], dict]
 
     def node(state: AssessmentState) -> dict:
         assessment_input = _assessment_input_from_state(state)
-        scorer = SCORERS[agent_type]
+        scorer = _scorer_for(agent_type)
         try:
             result, failure = _run_scorer_with_timeout(
                 scorer,
@@ -123,6 +150,7 @@ def _initial_state(input: AssessmentInput) -> AssessmentState:
             "accessed_at": snapshot.accessed_at,
             "after_hours": snapshot.after_hours,
         },
+        "features": input.features.as_json(),
         "outputs": [],
         "failures": [],
     }

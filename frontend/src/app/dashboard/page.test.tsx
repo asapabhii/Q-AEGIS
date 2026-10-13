@@ -3,6 +3,10 @@ import { render, screen, cleanup, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api/client", () => ({
   listDocuments: vi.fn(),
+  // The dashboard opens an SSE feed on mount; the mock returns a no-op
+  // unsubscribe so the effect's cleanup path matches the real signature
+  // (subscribeEvents(onEvent, role?) => () => void).
+  subscribeEvents: vi.fn(() => () => {}),
   ApiError: class MockApiError extends Error {
     status: number;
     constructor(status: number, message: string, body?: unknown) {

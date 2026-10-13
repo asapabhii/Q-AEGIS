@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AskPage from "./page";
+import { RoleProvider } from "@/lib/context/RoleContext";
 import { askRag, ingestRagDocument } from "@/lib/api/client";
 
 vi.mock("@/lib/api/client", async (importOriginal) => {
@@ -48,7 +49,11 @@ describe("AskPage", () => {
       refusal_reason: null,
     });
 
-    render(<AskPage />);
+    render(
+      <RoleProvider>
+        <AskPage />
+      </RoleProvider>
+    );
     await user.type(screen.getByLabelText(/document id/i), "doc-1");
     await user.click(
       screen.getByRole("button", { name: /ingest document records/i })

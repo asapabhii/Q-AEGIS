@@ -56,7 +56,7 @@ def login(request: LoginRequest, session: DbSession) -> TokenResponse:
     email = request.email.strip().lower()
     if "@" not in email or email.startswith("@") or email.endswith("@"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="email must look like an address.",
         )
     user = identity.find_by_email(session, email)

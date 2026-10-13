@@ -11,7 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.classifier.labels import SensitivityLabel
-from app.classifier.stub_classifier import ClassificationResult
+from app.classifier.result import ClassificationResult
 
 #: Upper bound on inline content accepted in one request. A cap is required so
 #: an oversized body is rejected before it reaches the regex scan rather than

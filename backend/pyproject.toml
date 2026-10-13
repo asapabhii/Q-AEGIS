@@ -28,6 +28,11 @@ filterwarnings = [
     "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
     # langgraph checkpoint serde pending default change; third-party import.
     "ignore:The default value of `allowed_objects` will change:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
+    # ddtrace 2.4.0 installs a ModuleWatchdog whose chained loader lacks
+    # exec_module; under pytest's assertion-rewrite import hook CPython emits
+    # this ImportWarning while importing langgraph. Raised inside ddtrace and
+    # importlib, not app code, and unfixable from here.
+    "ignore:_ImportHookChainedLoader.exec_module:ImportWarning",
 ]
 
 [tool.coverage.run]

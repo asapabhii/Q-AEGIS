@@ -1,38 +1,31 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { SiteNav } from "@/components/SiteNav";
+import { Download, FileText, Trash2 } from "lucide-react";
+
+import NotPermitted from "@/components/ui/NotPermitted";
+import { ErrorState } from "@/components/ui/states";
 import {
   ApiError,
   downloadDocumentSummary,
   shredDocument,
 } from "@/lib/api/client";
-import type { ShredResponse, UserRole } from "@/lib/api/types";
+import { useRole } from "@/lib/context/RoleContext";
+import { ACCESS, roleAllowed } from "@/lib/auth/roles";
+import type { ShredResponse } from "@/lib/api/types";
 
-const SUMMARY_ROLES: { value: UserRole; label: string }[] = [
-  { value: "data_owner", label: "Data Owner" },
-  { value: "security_admin", label: "Security Admin" },
-  { value: "compliance_officer", label: "Compliance Officer" },
-  { value: "security_analyst", label: "Security Analyst" },
-  { value: "auditor", label: "Auditor" },
-];
-
-const SHRED_ROLES = new Set<UserRole>([
-  "data_owner",
-  "compliance_officer",
-  "security_admin",
-]);
-
-const EXPORT_ROLES = new Set<UserRole>(["data_owner", "security_admin"]);
+const PAGE_ALLOWED = ACCESS.summaryPage;
 
 export function SummaryScreen({
   initialDocumentId = "",
 }: {
   initialDocumentId?: string;
 }) {
-  const [role, setRole] = useState<UserRole>("data_owner");
+  const { role } = useRole();
+  const permitted = roleAllowed(PAGE_ALLOWED, role);
+  const canExportRole = roleAllowed(ACCESS.export, role);
+  const canShredRole = roleAllowed(ACCESS.shred, role);
   const [documentId, setDocumentId] = useState(initialDocumentId);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,9 +33,8 @@ export function SummaryScreen({
   const [busy, setBusy] = useState(false);
 
   const trimmed = documentId.trim();
-  const canExport = Boolean(trimmed) && EXPORT_ROLES.has(role) && !busy;
-  const canShred =
-    Boolean(trimmed) && SHRED_ROLES.has(role) && confirmed && !busy;
+  const canExport = Boolean(trimmed) && canExportRole && !busy;
+  const canShred = Boolean(trimmed) && canShredRole && confirmed && !busy;
 
   async function handleExport(format: "csv" | "pdf") {
     if (!canExport) return;
@@ -73,130 +65,170 @@ export function SummaryScreen({
     }
   }
 
+  if (!permitted) {
+    return (
+      <div className="mx-auto w-full max-w-screen-xl px-6 py-8">
+        <NotPermitted
+          role={role}
+          allowed={PAGE_ALLOWED}
+          resource="Export and shred"
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 flex flex-col">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-sm font-bold"
-            >
-              Q
-            </Link>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                Document summary
-              </h1>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                FR-16 export and FR-8 crypto-shredding
-              </p>
-            </div>
-          </div>
-          <SiteNav active="/summary" />
-        </div>
+    <div className="mx-auto w-full max-w-3xl px-6 py-8 space-y-8">
+      <header>
+        <h1
+          className="font-semibold mb-1"
+          style={{
+            fontSize: "var(--font-size-2xl)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          Export &amp; Shred
+        </h1>
+        <p
+          style={{
+            fontSize: "var(--font-size-sm)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Export a document&apos;s full assessment, or crypto-shred its keys to
+          make ciphertext permanently unreadable
+        </p>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8 space-y-8">
-        <label className="block text-sm">
-          <span className="text-[var(--color-text-secondary)]">Caller role</span>
-          <select
-            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2"
-            value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
+      <div className="card p-5">
+        <label className="block">
+          <span
+            className="block text-xs uppercase tracking-wider mb-2"
+            style={{ color: "var(--color-text-tertiary)" }}
           >
-            {SUMMARY_ROLES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block text-sm">
-          <span className="text-[var(--color-text-secondary)]">Document id</span>
+            Document ID
+          </span>
           <input
-            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 font-mono text-sm"
+            className="input mono-data w-full"
             value={documentId}
             onChange={(e) => {
               setDocumentId(e.target.value);
               setShredResult(null);
               setConfirmed(false);
             }}
-            placeholder="uuid"
+            placeholder="Enter document UUID..."
           />
         </label>
+      </div>
 
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold">Export summary</h2>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            CSV or PDF of classification, risk, agents, trust, policy, and
-            crypto. Requires data_owner or security_admin.
-          </p>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              disabled={!canExport}
-              onClick={() => void handleExport("csv")}
-              className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              Download CSV
-            </button>
-            <button
-              type="button"
-              disabled={!canExport}
-              onClick={() => void handleExport("pdf")}
-              className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              Download PDF
-            </button>
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold">Crypto-shred</h2>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Destroys wrapped DEKs so ciphertext becomes permanently unreadable.
-            Audit trail is kept. Irreversible.
-          </p>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              I understand this permanently destroys decryption keys for this
-              document and cannot be undone.
-            </span>
-          </label>
+      <section className="card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4" style={{ color: "var(--color-text-secondary)" }} />
+          <h2
+            className="text-sm font-semibold"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Export summary
+          </h2>
+        </div>
+        <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+          CSV or PDF of classification, risk, agents, trust, policy, and crypto.
+          {canExportRole
+            ? ""
+            : " Requires Data Owner or Security Admin — you can shred but not export as this role."}
+        </p>
+        <div className="flex gap-3">
           <button
             type="button"
-            disabled={!canShred}
-            onClick={() => void handleShred()}
-            className="rounded-lg border border-red-500/50 px-4 py-2 text-sm font-semibold text-red-300 disabled:opacity-50"
+            disabled={!canExport}
+            onClick={() => void handleExport("csv")}
+            className="btn btn-secondary"
           >
-            Shred keys
+            <Download className="h-4 w-4" />
+            CSV
           </button>
-          {shredResult && (
-            <p className="text-xs text-[var(--color-text-secondary)]">
-              Shredded {shredResult.ciphertext_count} ciphertext row(s);
-              newly destroyed {shredResult.newly_destroyed}
-              {shredResult.already_shredded ? " (already shredded)" : ""}.
-            </p>
-          )}
-        </section>
+          <button
+            type="button"
+            disabled={!canExport}
+            onClick={() => void handleExport("pdf")}
+            className="btn btn-secondary"
+          >
+            <Download className="h-4 w-4" />
+            PDF
+          </button>
+        </div>
+      </section>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
-      </main>
+      <section
+        className="card p-5 space-y-3"
+        style={{ borderColor: "var(--status-fail)" }}
+      >
+        <div className="flex items-center gap-2">
+          <Trash2 className="h-4 w-4" style={{ color: "var(--status-fail)" }} />
+          <h2
+            className="text-sm font-semibold"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Crypto-shred
+          </h2>
+        </div>
+        <p className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+          Destroys wrapped DEKs so ciphertext becomes permanently unreadable. The
+          audit trail is kept. This is irreversible.
+          {canShredRole
+            ? ""
+            : " Requires Data Owner, Compliance Officer, or Security Admin."}
+        </p>
+        <label
+          className="flex items-start gap-2 text-sm"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(e) => setConfirmed(e.target.checked)}
+            disabled={!canShredRole}
+            className="mt-0.5"
+          />
+          <span>
+            I understand this permanently destroys decryption keys for this
+            document and cannot be undone.
+          </span>
+        </label>
+        <button
+          type="button"
+          disabled={!canShred}
+          onClick={() => void handleShred()}
+          className="btn"
+          style={{
+            borderColor: "var(--status-fail)",
+            color: "var(--status-fail)",
+          }}
+        >
+          <Trash2 className="h-4 w-4" />
+          Shred keys
+        </button>
+        {shredResult && (
+          <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+            Shredded {shredResult.ciphertext_count} ciphertext row(s); newly
+            destroyed {shredResult.newly_destroyed}
+            {shredResult.already_shredded ? " (already shredded)" : ""}.
+          </p>
+        )}
+      </section>
+
+      {error && <ErrorState message={error} />}
     </div>
   );
 }
 
 export default function SummaryPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-sm">Loading…</div>}>
+    <Suspense
+      fallback={
+        <div className="mx-auto w-full max-w-3xl px-6 py-8 text-sm">Loading…</div>
+      }
+    >
       <SummaryPageInner />
     </Suspense>
   );
@@ -204,7 +236,5 @@ export default function SummaryPage() {
 
 function SummaryPageInner() {
   const params = useSearchParams();
-  return (
-    <SummaryScreen initialDocumentId={params.get("document_id") ?? ""} />
-  );
+  return <SummaryScreen initialDocumentId={params.get("document_id") ?? ""} />;
 }

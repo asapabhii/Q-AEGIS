@@ -47,7 +47,6 @@ def _request_body(**overrides: object) -> dict[str, object]:
         "device_id": "laptop-12",
         "device_is_new": False,
         "accessed_at": "2026-09-09T12:00:00+00:00",
-        "after_hours": False,
     }
     body.update(overrides)
     return body
@@ -89,11 +88,13 @@ def test_clamp_holds_the_unit_interval() -> None:
     assert clamp_unit_interval(Decimal("0.5500")) == Decimal("0.5500")
 
 
-def test_incomplete_snapshot_never_reaches_score() -> None:
-    """Missing ``after_hours`` is derived server-side from org timezone."""
-    body = _request_body()
-    del body["after_hours"]
-    request = RiskScoreRequest.model_validate(body)
+def test_after_hours_is_derived_not_supplied() -> None:
+    """``after_hours`` is never a request field; the server derives it.
+
+    Noon UTC is 17:30 in Asia/Kolkata — inside business hours — so the derived
+    value is False.
+    """
+    request = RiskScoreRequest.model_validate(_request_body())
     assert request.snapshot().after_hours is False
 
 
@@ -135,20 +136,20 @@ def test_as_json_refuses_a_naive_timestamp() -> None:
         snapshot.as_json()
 
 
-def test_request_snapshot_is_the_five_closed_fields() -> None:
+def test_request_snapshot_carries_the_closed_fields() -> None:
     request = RiskScoreRequest.model_validate(_request_body())
     snap = request.snapshot()
     assert snap.actor_user_id == request.actor_user_id
     assert snap.device_id == request.device_id
     assert snap.device_is_new is False
     assert snap.after_hours is False
+    assert snap.org_timezone == request.org_timezone
 
 
 def test_after_hours_derives_weeknight_in_org_timezone() -> None:
     request = RiskScoreRequest.model_validate(
         _request_body(
             accessed_at="2026-09-09T16:00:00+00:00",
-            after_hours=None,
             org_timezone="Asia/Kolkata",
         )
     )
@@ -159,22 +160,22 @@ def test_after_hours_derives_weekend_in_org_timezone() -> None:
     request = RiskScoreRequest.model_validate(
         _request_body(
             accessed_at="2026-09-12T06:00:00+00:00",
-            after_hours=None,
             org_timezone="Asia/Kolkata",
         )
     )
     assert request.snapshot().after_hours is True
 
 
-def test_caller_asserted_after_hours_is_still_accepted_for_compatibility() -> None:
-    request = RiskScoreRequest.model_validate(
-        _request_body(
-            accessed_at="2026-09-09T16:00:00+00:00",
-            after_hours=False,
-            org_timezone="Asia/Kolkata",
+def test_caller_asserted_after_hours_is_rejected() -> None:
+    """The client cannot smuggle ``after_hours`` in to understate its risk."""
+    with pytest.raises(ValidationError):
+        RiskScoreRequest.model_validate(
+            _request_body(
+                accessed_at="2026-09-09T16:00:00+00:00",
+                after_hours=False,
+                org_timezone="Asia/Kolkata",
+            )
         )
-    )
-    assert request.snapshot().after_hours is False
 
 
 def test_invalid_org_timezone_is_rejected() -> None:

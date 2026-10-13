@@ -1,4 +1,4 @@
-"""Event bus envelope validation and after-commit outbox, ``SPEC.md`` 3.1."""
+"""Event bus envelope validation and the transactional outbox, ``SPEC.md`` 3.1."""
 
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -64,16 +64,11 @@ def test_parse_stream_fields_round_trip() -> None:
     assert envelope.payload["sensitivity_label"] == "CONFIDENTIAL"
 
 
-def test_schedule_publish_flushes_after_commit(
-    monkeypatch: pytest.MonkeyPatch, db_session: Session
-) -> None:
-    published: list[tuple[EventType, dict]] = []
+def test_schedule_publish_persists_pending_row(db_session: Session) -> None:
+    """schedule_publish writes a durable pending outbox row in the caller's tx."""
+    from app.db.models import EventOutbox
+    from app.db.models.outbox import OUTBOX_STATUS_PENDING
 
-    def capture(event_type: EventType, payload: dict, **_kwargs: object) -> str | None:
-        published.append((event_type, payload))
-        return None
-
-    monkeypatch.setattr("app.event_bus.outbox.publish_event", capture)
     schedule_publish(
         db_session,
         EventType.SCHEDULE_TICK,
@@ -82,21 +77,21 @@ def test_schedule_publish_flushes_after_commit(
             "tick_at": datetime(2026, 9, 14, tzinfo=timezone.utc).isoformat(),
         },
     )
-    assert published == []
-    db_session.commit()
-    assert len(published) == 1
-    assert published[0][0] is EventType.SCHEDULE_TICK
+    # Flushed within the transaction, so it is queryable immediately without a
+    # commit — and it is the row a relay would later drain.
+    rows = db_session.query(EventOutbox).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.event_type == EventType.SCHEDULE_TICK.value
+    assert row.status == OUTBOX_STATUS_PENDING
+    assert row.attempts == 0
+    assert row.payload["scheduled"] is True
 
 
-def test_schedule_publish_discards_on_rollback(
-    monkeypatch: pytest.MonkeyPatch, db_session: Session
-) -> None:
-    published: list[object] = []
+def test_schedule_publish_row_rolls_back(db_session: Session) -> None:
+    """A rolled-back transaction leaves no outbox row: no event is published."""
+    from app.db.models import EventOutbox
 
-    monkeypatch.setattr(
-        "app.event_bus.outbox.publish_event",
-        lambda *args, **kwargs: published.append(args) or None,
-    )
     schedule_publish(
         db_session,
         EventType.DOCUMENT_CLASSIFIED,
@@ -107,4 +102,73 @@ def test_schedule_publish_discards_on_rollback(
         },
     )
     db_session.rollback()
-    assert published == []
+    assert db_session.query(EventOutbox).count() == 0
+
+
+def _redis_settings_stub(**over):
+    base = {
+        "redis_url": "rediss://localhost:6379/0",
+        "redis_ssl_ca_certs": None,
+        "app_env": "local",
+    }
+    base.update(over)
+    return type("S", (), base)()
+
+
+def _capture_redis_from_url(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Intercept redis.Redis.from_url and record the kwargs it was called with."""
+    import redis
+
+    captured: dict = {}
+
+    def fake_from_url(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(redis.Redis, "from_url", staticmethod(fake_from_url))
+    return captured
+
+
+def test_redis_tls_local_allows_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """APP_ENV=local accepts the self-signed compose CA unverified."""
+    from app.event_bus import client
+
+    monkeypatch.setattr(client, "get_settings", lambda: _redis_settings_stub())
+    captured = _capture_redis_from_url(monkeypatch)
+    client.redis_from_settings()
+    assert captured["kwargs"]["ssl_cert_reqs"] == "none"
+    assert captured["kwargs"]["ssl_check_hostname"] is False
+
+
+def test_redis_tls_nonlocal_with_ca_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-local env with a CA configured verifies against it (no downgrade)."""
+    from app.event_bus import client
+
+    monkeypatch.setattr(
+        client,
+        "get_settings",
+        lambda: _redis_settings_stub(
+            app_env="production", redis_ssl_ca_certs="/ca.crt"
+        ),
+    )
+    captured = _capture_redis_from_url(monkeypatch)
+    client.redis_from_settings()
+    assert captured["kwargs"]["ssl_ca_certs"] == "/ca.crt"
+    assert "ssl_cert_reqs" not in captured["kwargs"]
+
+
+def test_redis_tls_nonlocal_without_ca_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-local rediss:// with no CA fails closed instead of disabling TLS."""
+    from app.event_bus import client
+
+    monkeypatch.setattr(
+        client,
+        "get_settings",
+        lambda: _redis_settings_stub(app_env="production", redis_ssl_ca_certs=None),
+    )
+    _capture_redis_from_url(monkeypatch)
+    with pytest.raises(RuntimeError, match="REDIS_SSL_CA_CERTS"):
+        client.redis_from_settings()

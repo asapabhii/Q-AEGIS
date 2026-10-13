@@ -1,0 +1,43 @@
+qaegis_ci already exists
+launching pytest against qaegis_ci ...
+
+=================================== ERRORS ====================================
+_______________ ERROR collecting tests/test_classifier_synth.py _______________
+ImportError while importing test module 'C:\Q-AEGIS\backend\tests\test_classifier_synth.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Users\abhin\AppData\Local\Programs\Python\Python310\lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+tests\test_classifier_synth.py:18: in <module>
+    from app.classifier.detectors import _iban_valid, _luhn_ok, detect
+E   ImportError: cannot import name '_luhn_ok' from 'app.classifier.detectors' (C:\Q-AEGIS\backend\app\classifier\detectors.py)
+=========================== short test summary info ===========================
+ERROR tests/test_classifier_synth.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+
+Benchmark stats for set_data
+========================================
+Metric         Value          
+----------------------------------------
+min            0.00 탎        
+25p            0.00 탎        
+50p            0.00 탎        
+75p            0.00 탎        
+90p            0.00 탎        
+95p            0.00 탎        
+max            0.00 탎        
+========================================
+
+Benchmark stats for evaluate
+========================================
+Metric         Value          
+----------------------------------------
+min            0.00 탎        
+25p            0.00 탎        
+50p            0.00 탎        
+75p            0.00 탎        
+90p            0.00 탎        
+95p            0.00 탎        
+max            0.00 탎        
+========================================
+PYTEST_EXIT=2

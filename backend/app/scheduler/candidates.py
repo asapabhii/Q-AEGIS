@@ -17,6 +17,12 @@ from app.classifier.labels import SensitivityLabel
 #: Version string stored in every constraint snapshot for this ranker.
 RANKER_VERSION = "migration-ranker-0.1.0"
 
+#: Provisional, UNCALIBRATED scoring weights (this label-weight map plus the
+#: 0.5/0.3/0.2 blend and the 0.50/0.20 defaults in ``_candidate_score``). Like
+#: the risk-engine weights, these are principled defaults with no fit against
+#: real migration outcomes; they are stamped by ``RANKER_VERSION`` so any stored
+#: ranking stays attributable. Changing any of them requires bumping
+#: ``RANKER_VERSION``.
 _LABEL_WEIGHT = {
     SensitivityLabel.PUBLIC: Decimal("0.10"),
     SensitivityLabel.INTERNAL: Decimal("0.35"),

@@ -156,9 +156,11 @@ A Data Owner or Security Admin can generate an exportable (PDF and CSV) summary 
 
 ## 11. Release phases
 
-Maps directly to `SPEC.md` Section 7's build order. Phase 1 (complete): repo scaffolding, FR-1's stub, FR-7's core log functions, initial CI. Phase 2 (current): the data model behind every requirement below (`SPEC.md` Section 5), the crypto-selector stub, and CI hardening with a coverage gate and branch protection, of which the CI hardening is already done. Phase 3: FR-2, FR-5, and real trust-score-driven FR-6 (replacing the stub). Phase 4: FR-8, FR-11, FR-10. Phase 5: full FR-3 orchestration, FR-9. Phase 6: full evaluation against Section 8's success metrics.
+Maps directly to `SPEC.md` Section 7's build order. Phase 1 (complete): repo scaffolding, FR-1's stub, FR-7's core log functions, initial CI. Phase 2 (complete): the data model behind every requirement below (`SPEC.md` Section 5), the initial crypto-selector, and CI hardening with a coverage gate and branch protection. Phase 3 (complete): FR-2, FR-5, and real trust-score-driven FR-6 — the crypto selector is shipped, calibrated (policy bands `trust-crypto-policy-bands-1.0.0`, 0.50/0.85), and fail-closed (non-finite or out-of-range trust raises rather than falling through to the weakest profile), not a stub. Phase 4 (complete): FR-8, FR-11, FR-10 — FR-11 now on real fastembed embeddings. Phase 5 (complete): FR-3 five-agent LangGraph orchestration (deterministic scorers as the documented offline fallback, real LLM path key-gated on `AGENT_LLM_API_KEY`), FR-9. Phase 6 (current): full evaluation against Section 8's success metrics, including FR-1's held-out accuracy once the gated-FOIArchive retrain lands (an interim public-domain-trained model already ships). See `ROADMAP.md` and `docs/decisions.md` for per-item status.
 
 ## 12. Requirements traceability
+
+Ownership is shared across three inventors — Abhinav, Udhav, and Sukhmani — per the equitable module allocation in `WORK_DIVISION.md` (see `AGENTS.md`). This project is filed with three named inventors, so the traceability column names the owner of each requirement's module rather than a single owner; the full contribution history is preserved in git and `docs/decisions.md`.
 
 | FR | Backlog ID | SPEC.md section | Primary owner |
 |---|---|---|---|

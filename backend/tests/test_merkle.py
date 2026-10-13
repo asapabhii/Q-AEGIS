@@ -12,6 +12,7 @@ case to cover all four.
 """
 
 import hashlib
+from dataclasses import replace
 
 import pytest
 
@@ -22,13 +23,17 @@ from app.audit.merkle import (
     NODE_PREFIX,
     build,
     canonicalize,
+    consistency_proof,
     extend_frontier,
     frontier_from_json,
     frontier_to_json,
     hash_internal,
     hash_leaf,
+    inclusion_proof,
     root_of,
     verify,
+    verify_consistency,
+    verify_inclusion,
 )
 
 
@@ -424,3 +429,205 @@ def test_a_malformed_stored_frontier_is_rejected(raw: object) -> None:
     """
     with pytest.raises(ValueError):
         frontier_from_json(raw)
+
+
+# --------------------------------------------------------------------------
+# Inclusion proofs (RFC 6962 audit path)
+#
+# The point of an inclusion proof is that an auditor holding one entry and a
+# trusted root can confirm membership without the rest of the log. So these
+# tests verify against build().root but pass verify_inclusion only the leaf hash
+# and the O(log n) path, never the other entries.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("count", range(1, 34))
+def test_inclusion_proof_verifies_for_every_leaf(count: int) -> None:
+    """Every entry, at every tree size, proves inclusion under the real root.
+
+    Swept across all sizes in the range because promotion of an odd node sends
+    the last leaf up a different path than a paired one, and a bug there would
+    hide only at specific counts.
+    """
+    payloads = entries(count)
+    root = build(payloads).root
+    for index in range(count):
+        proof = inclusion_proof(payloads, index)
+        assert proof.tree_size == count
+        assert proof.leaf_index == index
+        assert verify_inclusion(proof, hash_leaf(payloads[index]), root) is True
+
+
+def test_inclusion_path_is_logarithmic() -> None:
+    """The proof carries O(log n) hashes, not the whole log."""
+    payloads = entries(1000)
+    proof = inclusion_proof(payloads, 500)
+    assert len(proof.audit_path) <= 10  # ceil(log2(1000)) == 10
+
+
+def test_single_entry_inclusion_proof_is_empty() -> None:
+    """A one-entry tree's root is the leaf itself, so the path is empty."""
+    payloads = entries(1)
+    proof = inclusion_proof(payloads, 0)
+    assert proof.audit_path == ()
+    assert verify_inclusion(proof, hash_leaf(payloads[0]), build(payloads).root)
+
+
+def test_inclusion_proof_rejects_wrong_leaf() -> None:
+    """A valid path for position i does not verify a different entry's hash."""
+    payloads = entries(8)
+    root = build(payloads).root
+    proof = inclusion_proof(payloads, 3)
+    forged = hash_leaf(b"not-the-entry-at-3")
+    assert verify_inclusion(proof, forged, root) is False
+
+
+def test_inclusion_proof_rejects_wrong_root() -> None:
+    """A correct entry and path do not verify against an unrelated root."""
+    payloads = entries(8)
+    proof = inclusion_proof(payloads, 3)
+    wrong_root = hashlib.sha256(b"not-the-root").hexdigest()
+    assert verify_inclusion(proof, hash_leaf(payloads[3]), wrong_root) is False
+
+
+def test_inclusion_proof_rejects_wrong_position_claim() -> None:
+    """The path for leaf i must not verify that leaf as if it sat at leaf j.
+
+    leaf_index is not decorative: verification derives each sibling's left/right
+    orientation from it, so a proof replayed under a different claimed index
+    reconstructs a different, non-matching root.
+    """
+    payloads = entries(8)
+    root = build(payloads).root
+    genuine = inclusion_proof(payloads, 2)
+    moved = replace(genuine, leaf_index=5)
+    assert verify_inclusion(moved, hash_leaf(payloads[2]), root) is False
+
+
+def test_inclusion_proof_rejects_tampered_sibling() -> None:
+    """Corrupting any hash in the path breaks verification."""
+    payloads = entries(9)
+    root = build(payloads).root
+    proof = inclusion_proof(payloads, 4)
+    corrupted = list(proof.audit_path)
+    corrupted[0] = hashlib.sha256(b"tampered-sibling").hexdigest()
+    broken = replace(proof, audit_path=tuple(corrupted))
+    assert verify_inclusion(broken, hash_leaf(payloads[4]), root) is False
+
+
+def test_inclusion_proof_index_out_of_range_raises() -> None:
+    """A position that does not exist cannot be proved."""
+    payloads = entries(4)
+    with pytest.raises(ValueError):
+        inclusion_proof(payloads, 4)
+    with pytest.raises(ValueError):
+        inclusion_proof(payloads, -1)
+    with pytest.raises(ValueError):
+        inclusion_proof([], 0)
+
+
+# --------------------------------------------------------------------------
+# Consistency proofs (RFC 6962)
+#
+# A consistency proof is the append-only guarantee made checkable: it proves the
+# new root contains the old one as an unaltered prefix. These verify against the
+# two real roots but hand verify_consistency only the proof nodes, never the log.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("new_size", range(1, 25))
+def test_consistency_proof_verifies_for_every_prefix(new_size: int) -> None:
+    """Every prefix of every tree proves consistent with the whole.
+
+    The doubly-swept (old_size, new_size) space exercises the boundary logic
+    that decides when the old subtree's own root is implied versus carried.
+    """
+    payloads = entries(new_size)
+    new_root = build(payloads).root
+    for old_size in range(new_size + 1):
+        old_root = build(payloads[:old_size]).root
+        proof = consistency_proof(payloads, old_size)
+        assert verify_consistency(proof, old_root, new_root) is True
+
+
+def test_consistency_proof_of_equal_sizes_is_trivial() -> None:
+    """Old and new of the same size carry no nodes and must share a root."""
+    payloads = entries(6)
+    root = build(payloads).root
+    proof = consistency_proof(payloads, 6)
+    assert proof.nodes == ()
+    assert verify_consistency(proof, root, root) is True
+
+
+def test_consistency_proof_from_empty_old_tree() -> None:
+    """The empty tree is a prefix of every tree."""
+    payloads = entries(5)
+    proof = consistency_proof(payloads, 0)
+    assert verify_consistency(proof, EMPTY_ROOT, build(payloads).root) is True
+
+
+def test_consistency_proof_rejects_a_rewritten_prefix() -> None:
+    """If a past entry was altered, no consistency proof to the new root holds.
+
+    This is the tamper case that matters: the operator keeps the entry count but
+    edits history. The old (anchored) root no longer reconstructs from the new
+    tree's proof nodes, so verification fails.
+    """
+    original = entries(8)
+    old_root = build(original[:5]).root
+
+    rewritten = list(original)
+    rewritten[2] = b"audit-entry-2-REWRITTEN"
+    new_root = build(rewritten).root
+    proof = consistency_proof(rewritten, 5)
+
+    assert verify_consistency(proof, old_root, new_root) is False
+
+
+def test_consistency_proof_rejects_reordered_history() -> None:
+    """Reordering past entries breaks consistency even at the same size."""
+    original = entries(7)
+    old_root = build(original[:4]).root
+
+    reordered = [original[1], original[0], *original[2:]]
+    proof = consistency_proof(reordered, 4)
+    assert verify_consistency(proof, old_root, build(reordered).root) is False
+
+
+def test_consistency_proof_rejects_wrong_new_root() -> None:
+    """A genuine proof does not verify against an unrelated later root."""
+    payloads = entries(10)
+    old_root = build(payloads[:6]).root
+    proof = consistency_proof(payloads, 6)
+    wrong_new = hashlib.sha256(b"not-the-new-root").hexdigest()
+    assert verify_consistency(proof, old_root, wrong_new) is False
+
+
+def test_consistency_proof_rejects_wrong_old_root() -> None:
+    """A genuine proof does not verify against an unrelated earlier root."""
+    payloads = entries(10)
+    new_root = build(payloads).root
+    proof = consistency_proof(payloads, 6)
+    wrong_old = hashlib.sha256(b"not-the-old-root").hexdigest()
+    assert verify_consistency(proof, wrong_old, new_root) is False
+
+
+def test_consistency_proof_rejects_tampered_node() -> None:
+    """Corrupting a proof node breaks reconstruction of the new root."""
+    payloads = entries(13)
+    old_root = build(payloads[:5]).root
+    new_root = build(payloads).root
+    proof = consistency_proof(payloads, 5)
+    corrupted = list(proof.nodes)
+    corrupted[0] = hashlib.sha256(b"tampered-node").hexdigest()
+    broken = replace(proof, nodes=tuple(corrupted))
+    assert verify_consistency(broken, old_root, new_root) is False
+
+
+def test_consistency_proof_out_of_range_raises() -> None:
+    """An old size larger than the tree, or negative, cannot be proved."""
+    payloads = entries(4)
+    with pytest.raises(ValueError):
+        consistency_proof(payloads, 5)
+    with pytest.raises(ValueError):
+        consistency_proof(payloads, -1)

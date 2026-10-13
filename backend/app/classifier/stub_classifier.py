@@ -16,14 +16,15 @@ silently removed in a future refactor).
 """
 
 import re
-from dataclasses import dataclass
 
+from app.classifier.detectors import apply_detectors
 from app.classifier.labels import (
     LEAST_SENSITIVE,
     SensitivityLabel,
     escalate,
     rank,
 )
+from app.classifier.result import ClassificationResult
 from app.classifier.rules import KEYWORD_RULES, KeywordRule
 from app.config import get_settings
 
@@ -44,46 +45,6 @@ _COMPILED_RULES: tuple[tuple[KeywordRule, re.Pattern[str]], ...] = tuple(
     (rule, re.compile(rf"\b{re.escape(rule.keyword)}\b", re.IGNORECASE))
     for rule in KEYWORD_RULES
 )
-
-
-@dataclass(frozen=True)
-class ClassificationResult:
-    """Outcome of one classification.
-
-    Frozen because a classification is a historical fact.
-    ``classification_metadata`` is an append-only history table
-    (``SPEC.md`` Section 5), so a result is superseded by a new record, never
-    mutated in place.
-
-    Attributes:
-        sensitivity_label: The label the system will act on, after fail-safe
-            escalation has been applied.
-        confidence: Heuristic confidence in ``base_label``, in ``[0.0, 1.0]``.
-            Note this is confidence in the *pre-escalation* judgement; it is not
-            restated as high confidence just because escalation occurred.
-        model_version: Identifier of the logic that produced this result.
-        is_defaulted: True when confidence fell below the threshold and the
-            fail-safe fired. Escalation moves one step and saturates at the most
-            sensitive label, so when ``base_label`` is already the most
-            sensitive this is True while ``sensitivity_label`` equals
-            ``base_label``. Read it as "this result was not trusted on its own
-            evidence", not strictly as "the label changed".
-        base_label: What the rules alone suggested, before escalation. Retained
-            so an analyst reviewing a flagged classification can see what the
-            heuristic actually thought.
-        confidence_threshold: The threshold in force for this classification.
-        matched_keywords: The keywords that fired, for explainability.
-        rationale: Human-readable explanation of the decision.
-    """
-
-    sensitivity_label: SensitivityLabel
-    confidence: float
-    model_version: str
-    is_defaulted: bool
-    base_label: SensitivityLabel
-    confidence_threshold: float
-    matched_keywords: tuple[str, ...]
-    rationale: str
 
 
 def _score(content: str) -> tuple[dict[SensitivityLabel, float], tuple[str, ...]]:
@@ -177,6 +138,14 @@ def classify(content: str, *, threshold: float | None = None) -> ClassificationR
         base_label = _select_base_label(scores)
         confidence = _confidence(scores, len(matched_keywords))
 
+    # High-precision content detectors (validated SSNs/cards/IBANs, key material,
+    # classification banners, PHI) escalate the base label the same escalate-only
+    # way the keyword rules do. Confidence stays keyword-derived, so a document
+    # whose only signal is a detector still carries the low-confidence fail-safe.
+    base_label, detector_signals = apply_detectors(base_label, content)
+    if detector_signals:
+        matched_keywords = matched_keywords + detector_signals
+
     is_defaulted = confidence < effective_threshold
     final_label = escalate(base_label) if is_defaulted else base_label
 
@@ -201,6 +170,7 @@ def classify(content: str, *, threshold: float | None = None) -> ClassificationR
             confidence=confidence,
             threshold=effective_threshold,
             matched_keywords=matched_keywords,
+            detector_signals=detector_signals,
             is_defaulted=is_defaulted,
         ),
     )
@@ -213,16 +183,23 @@ def _rationale(
     confidence: float,
     threshold: float,
     matched_keywords: tuple[str, ...],
+    detector_signals: tuple[str, ...],
     is_defaulted: bool,
 ) -> str:
     """Build the human-readable explanation attached to a result."""
-    if matched_keywords:
+    keyword_hits = tuple(
+        k for k in matched_keywords if not k.startswith("detector:")
+    )
+    if keyword_hits:
         evidence = (
-            f"matched {len(matched_keywords)} keyword rule(s): "
-            f"{', '.join(matched_keywords)}"
+            f"matched {len(keyword_hits)} keyword rule(s): "
+            f"{', '.join(keyword_hits)}"
         )
     else:
         evidence = "matched no keyword rules, treated as zero evidence"
+    if detector_signals:
+        readable = ", ".join(s.removeprefix("detector:") for s in detector_signals)
+        evidence += f"; content detectors fired ({readable}) and escalated"
 
     if is_defaulted:
         return (
