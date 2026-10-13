@@ -133,40 +133,9 @@ class Settings(BaseSettings):
     # Its native dimension MUST equal rag_embedding_dims and the rag_chunks
     # pgvector column width.
     rag_embedding_model: str = "BAAI/bge-large-en-v1.5"
-    # Directory fastembed loads model weights from. When set (the Docker image
-    # bakes the model and points here via RAG_EMBEDDING_CACHE_DIR), fastembed
-    # uses the pre-downloaded weights and never reaches the network. Unset on a
-    # dev host means fastembed's default cache (downloads once, then offline).
-    rag_embedding_cache_dir: str | None = None
     # Embedding width. Must match the model (bge-large-en-v1.5 = 1024) and the
     # rag_chunks.embedding vector(N) column.
     rag_embedding_dims: int = Field(default=1024, ge=8, le=2000)
-    # Minimum cosine similarity a retrieved chunk must clear to count as
-    # grounding evidence. This is the "refuse if ungrounded" gate (SPEC.md 3.12
-    # / FR-11): when no stored chunk clears it, the pipeline retrieves nothing
-    # and the Verifier refuses rather than answering from irrelevant records.
-    # Only meaningful for the semantic ``fastembed`` backend; the deterministic
-    # hash backend is non-semantic (tests / air-gapped smoke) and the floor is
-    # disabled for it, see app/rag/store.py::effective_min_similarity.
-    #
-    # 0.57 is calibrated to the *actual* RAG grounding corpus, not guessed. This
-    # pipeline grounds answers on a document's governance records — its inventory
-    # snapshot and append-only audit-trail entries (see app/rag/ingest.py), NOT
-    # the document body — so the floor must separate governance questions from
-    # off-topic ones against THAT text. Probing the deployed bge-large-en-v1.5
-    # over a fully-processed document's ingested chunks:
-    #   - governance questions ("what policy decision / crypto profile / risk
-    #     score / sensitivity label / audit history?") scored 0.635-0.725;
-    #   - off-topic questions ("boiling point of liquid helium?", "capital of
-    #     Australia?", "reverse a linked list in Python?") scored 0.343-0.509.
-    # 0.57 sits in the separating band (off-topic ceiling 0.509, grounded floor
-    # 0.635), ~0.06 margin each side. The earlier 0.30 default — and a first
-    # mis-calibrated 0.46 probed against document *body* text the RAG never
-    # ingests — sat below the off-topic cluster, so the gate never fired and was
-    # cosmetic. Raise toward 0.60 to refuse more aggressively; absolute cosine
-    # scale is somewhat document/length-dependent, so tune per corpus via
-    # RAG_MIN_SIMILARITY. See docs/decisions.md 2026-09-24.
-    rag_min_similarity: float = Field(default=0.57, ge=0.0, le=1.0)
 
     # Sensitivity classifier, SPEC.md 3.2.
     # A classification scoring below this threshold is escalated to the more

@@ -105,16 +105,6 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # and fast (no model download). The real fastembed model is exercised only by
     # the opt-in test gated on RUN_REAL_EMBED_TESTS.
     monkeypatch.setenv("RAG_EMBEDDING_BACKEND", "deterministic")
-    # Hermetic agents: deterministic (heuristic) scoring, no LLM calls. The real
-    # anthropic backend is exercised only by the opt-in RUN_REAL_LLM_TESTS test.
-    monkeypatch.setenv("AGENT_LLM_BACKEND", "deterministic")
-    # Hermetic classifier: force the keyword engine unless a test opts in by
-    # setting CLASSIFIER_MODEL_PATH itself. The host .env may point this at a
-    # baked artifact to activate the trained model in the running app; an empty
-    # value overrides that file value (os.environ beats the env_file) so the
-    # classifier tests stay independent of operator configuration. Empty is
-    # treated as unset by model_classifier._configured_path.
-    monkeypatch.setenv("CLASSIFIER_MODEL_PATH", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
