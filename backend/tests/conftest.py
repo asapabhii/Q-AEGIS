@@ -101,6 +101,9 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Host .env often points at a live Redis (possibly TLS). Tests must not
     # start the risk-consumer thread against that instance.
     monkeypatch.setenv("REDIS_URL", "")
+    # Host .env may point at a real classifier artifact. Model tests opt in
+    # explicitly so the keyword fallback path stays deterministic.
+    monkeypatch.setenv("CLASSIFIER_MODEL_PATH", "")
     # Hermetic RAG: the deterministic embedding backend keeps the suite offline
     # and fast (no model download). The real fastembed model is exercised only by
     # the opt-in test gated on RUN_REAL_EMBED_TESTS.
