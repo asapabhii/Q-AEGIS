@@ -45,9 +45,24 @@ Candidate = tuple[str, SensitivityLabel, str]
 #: Skip these when harvesting local source: secrets, vendored code, build junk,
 #: and the corpus data dir itself must never be pulled into a training file.
 _SKIP_DIRS = {
-    ".git", ".claude", ".codex", "venv", ".venv", "node_modules", "__pycache__",
-    ".next", "dist", "build", "artifacts", "data", "config", "infra",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage",
+    ".git",
+    ".claude",
+    ".codex",
+    "venv",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".next",
+    "dist",
+    "build",
+    "artifacts",
+    "data",
+    "config",
+    "infra",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "coverage",
 }
 _CODE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".md", ".rego", ".sql"}
 _MIN_CHARS = 40

@@ -492,10 +492,7 @@ def test_risk_audit_records_the_reporter_distinct_from_the_subject(
     document_id = register(client)["id"]
     subject_id = owner_user_id(db_session)
     reporter_id = str(
-        db_session.query(User)
-        .filter(User.role == UserRole.SECURITY_ANALYST)
-        .one()
-        .id
+        db_session.query(User).filter(User.role == UserRole.SECURITY_ANALYST).one().id
     )
     assert reporter_id != subject_id
 

@@ -69,7 +69,6 @@ export default function RiskDashboardPage() {
   const load = useCallback(
     async (silent: boolean) => {
       if (!permitted) {
-        setLoading(false);
         return;
       }
       const seq = ++reqSeqRef.current;
@@ -99,6 +98,7 @@ export default function RiskDashboardPage() {
 
   // Initial load, and reload whenever the caller's role/permission changes.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(false);
   }, [load]);
 

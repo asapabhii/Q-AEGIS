@@ -187,9 +187,7 @@ def _rationale(
     is_defaulted: bool,
 ) -> str:
     """Build the human-readable explanation attached to a result."""
-    keyword_hits = tuple(
-        k for k in matched_keywords if not k.startswith("detector:")
-    )
+    keyword_hits = tuple(k for k in matched_keywords if not k.startswith("detector:"))
     if keyword_hits:
         evidence = (
             f"matched {len(keyword_hits)} keyword rule(s): "

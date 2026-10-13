@@ -29,10 +29,10 @@ function AuditIndexResolver() {
 
   useEffect(() => {
     if (!permitted) {
-      setLoading(false);
       return;
     }
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
     setEmpty(false);
