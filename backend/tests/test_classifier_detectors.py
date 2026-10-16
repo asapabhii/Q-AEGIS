@@ -103,14 +103,20 @@ def test_iban_with_bad_checksum_does_not_fire():
 # --- Keys and secrets --------------------------------------------------------
 
 
+_FAKE_RSA_MARKER = "-----BEGIN " + "RSA " + "PRIVATE KEY-----"
+_FAKE_OPENSSH_MARKER = "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----"
+_FAKE_AWS_KEY = "AK" + "IA" + ("0" * 16)
+_FAKE_SLACK_TOKEN = "xox" + "b-" + "1234567890-abcdefghij"
+
+
 @pytest.mark.parametrize(
     "text,signal",
     [
-        ("-----BEGIN TEST PRIVATE KEY-----\nMIIEpAIB", "private_key_pem"),
-        ("-----BEGIN TEST PRIVATE KEY-----\nb3Blb", "private_key_pem"),
-        ("AWS_ACCESS_KEY_ID=AKIA_REMOVED_TEST_VALUE", "aws_access_key"),
+        (f"{_FAKE_RSA_MARKER}\nMIIEpAIB", "private_key_pem"),
+        (f"{_FAKE_OPENSSH_MARKER}\nb3Blb", "private_key_pem"),
+        (f"AWS_ACCESS_KEY_ID={_FAKE_AWS_KEY}", "aws_access_key"),
         ("token ghp_" + "a" * 36, "github_token"),
-        ("slack SLACK_REMOVED_TEST_VALUE", "slack_token"),
+        (f"slack {_FAKE_SLACK_TOKEN}", "slack_token"),
         ("google AIza" + "A" * 35, "google_api_key"),
         ("stripe sk_live_" + "a" * 24, "stripe_key"),
     ],
@@ -121,7 +127,8 @@ def test_key_material_is_restricted(text, signal):
 
 
 def test_secret_assignment_with_real_value_fires():
-    assert _label('password = "TEST_PASSWORD_VALUE"') is _R
+    password_value = "S3cur3" + "P@ssw0rd!42x"
+    assert _label(f'password = "{password_value}"') is _R
     assert "secret_assignment" in _signals('api_key: "aB3xZ9kLmNpQ7rTv"')
 
 
