@@ -52,7 +52,7 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-Then open `.env` and replace every `SET_LOCALLY`. Local throwaway
+Then open `.env` and fill the blank local-only secret values. Local throwaway
 values are fine, they only ever reach containers on your own machine, but three
 things have to stay internally consistent or a service will not start:
 

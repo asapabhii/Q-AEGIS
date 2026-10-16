@@ -12,6 +12,7 @@ A rollback discards the savepoint without ever issuing a statement the triggers
 would refuse.
 """
 
+import base64
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -59,7 +60,7 @@ def _safe_benchmark_stats(times: list[float]) -> dict[str, float]:
 _opa_benchmark.get_benchmark_stats = _safe_benchmark_stats
 
 # Required by ``seed_development_users``; never a production secret.
-os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "SET_LOCALLY")
+os.environ.setdefault("QAEGIS_DEV_SEED_PASSWORD", "test-seed-value")
 
 #: Repository-relative path to the Alembic configuration.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -90,14 +91,16 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Dummy master key so assessment encrypt paths work in API tests.
     monkeypatch.setenv(
         "CRYPTO_MASTER_KEY",
-        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        base64.urlsafe_b64encode(b"test-master-key-" + (b"0" * 16))
+        .decode()
+        .rstrip("="),
     )
     monkeypatch.setenv("RISK_RECOMPUTE_INTERVAL_SECONDS", "0")
     # Tests keep the forgeable role header as a DEV bypass; JWT still works
     # when a test issues a token against this secret.
-    monkeypatch.setenv("JWT_SECRET", "SET_LOCALLY")
+    monkeypatch.setenv("JWT_SECRET", "test-jwt-value")
     monkeypatch.setenv("AUTH_DEV_HEADER_BYPASS", "true")
-    monkeypatch.setenv("QAEGIS_DEV_SEED_PASSWORD", "SET_LOCALLY")
+    monkeypatch.setenv("QAEGIS_DEV_SEED_PASSWORD", "test-seed-value")
     # Host .env often points at a live Redis (possibly TLS). Tests must not
     # start the risk-consumer thread against that instance.
     monkeypatch.setenv("REDIS_URL", "")

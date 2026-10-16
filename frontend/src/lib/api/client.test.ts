@@ -675,7 +675,7 @@ describe("login", () => {
     );
     const result = await login({
       email: "security_admin@dev.qaegis.local",
-      password: "SET_LOCALLY",
+      password: "fixture-passphrase",
     });
     expect(result.access_token).toBe("jwt-token");
     expect(window.localStorage.getItem("qaegis.access_token")).toBe("jwt-token");

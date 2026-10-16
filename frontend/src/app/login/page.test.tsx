@@ -50,7 +50,7 @@ async function signInAs(role: UserRole): Promise<void> {
   await user.clear(screen.getByLabelText(/^email$/i));
   await user.type(screen.getByLabelText(/^email$/i), `${role}@dev.qaegis.local`);
   await user.clear(screen.getByLabelText(/^password$/i));
-  await user.type(screen.getByLabelText(/^password$/i), "SET_LOCALLY");
+  await user.type(screen.getByLabelText(/^password$/i), "fixture-passphrase");
   await user.click(screen.getByRole("button", { name: /sign in/i }));
 }
 
@@ -68,7 +68,7 @@ describe("LoginPage", () => {
     await signInAs("security_admin");
     expect(mockLogin).toHaveBeenCalledWith({
       email: "security_admin@dev.qaegis.local",
-      password: "SET_LOCALLY",
+      password: "fixture-passphrase",
     });
   });
 

@@ -137,8 +137,8 @@ def test_upload_rejects_oversize_without_full_buffer(
 
 
 def test_password_hash_roundtrip() -> None:
-    hashed = hash_password("SET_LOCALLY")
-    assert verify_password("SET_LOCALLY", hashed)
+    hashed = hash_password("fixture-passphrase")
+    assert verify_password("fixture-passphrase", hashed)
     assert not verify_password("nope", hashed)
 
 
